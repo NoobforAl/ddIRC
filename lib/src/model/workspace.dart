@@ -1,0 +1,143 @@
+import 'package:flutter/widgets.dart';
+
+import '../rust/api/client.dart' as core;
+import 'profile.dart';
+import 'session.dart';
+import 'settings.dart';
+
+/// Every network the user is connected to at once.
+///
+/// The Rust core already keys connections by id and runs each in its own actor,
+/// so several at a time costs nothing structurally — this class is only the
+/// bookkeeping the UI needs: which profiles are live, which one is in front,
+/// and how much unread each is holding.
+class Workspace extends ChangeNotifier {
+  Workspace({required this.profiles, required this.settings});
+
+  final ProfileStore profiles;
+  final AppSettings settings;
+
+  final Map<String, SessionModel> _sessions = {};
+  final Map<String, String> _failures = {};
+  final Set<String> _connecting = {};
+  String? _active;
+
+  /// Live sessions, in the order their profiles are saved, so the rail does
+  /// not reshuffle as connections come and go.
+  List<SessionModel> get sessions => [
+    for (final profile in profiles.profiles)
+      if (_sessions[profile.id] != null) _sessions[profile.id]!,
+  ];
+
+  SessionModel? get active => _active == null ? null : _sessions[_active];
+  String? get activeProfileId => _active;
+
+  SessionModel? sessionFor(String profileId) => _sessions[profileId];
+  bool isConnecting(String profileId) => _connecting.contains(profileId);
+  bool isConnected(String profileId) => _sessions.containsKey(profileId);
+
+  /// Why the last connection attempt for this profile failed, if it did.
+  String? failureFor(String profileId) => _failures[profileId];
+
+  int unreadFor(String profileId) => _sessions[profileId]?.totalUnread ?? 0;
+
+  int mentionsFor(String profileId) => _sessions[profileId]?.totalMentions ?? 0;
+
+  void select(String profileId) {
+    if (!_sessions.containsKey(profileId)) return;
+    _active = profileId;
+    notifyListeners();
+  }
+
+  /// Connect a saved profile, or bring it to the front if it is already up.
+  ///
+  /// Returns an error to show inline, or null on success.
+  Future<String?> connect(Profile profile) async {
+    if (_sessions.containsKey(profile.id)) {
+      select(profile.id);
+      return null;
+    }
+    if (_connecting.contains(profile.id)) return null;
+
+    _connecting.add(profile.id);
+    _failures.remove(profile.id);
+    notifyListeners();
+
+    try {
+      // Read the password here and hand it straight to the core, which
+      // zeroizes it after SASL. It is never held on the profile.
+      final password = profile.usesSasl
+          ? await profiles.passwordFor(profile.id)
+          : null;
+      final config = profile.toConfig(saslPassword: password);
+      final id = await core.connect(config: config);
+
+      final session = SessionModel(
+        connectionId: id,
+        profileId: profile.id,
+        config: config,
+        settings: settings,
+      )..start();
+      // One listener per session, forwarded so the whole workspace repaints
+      // when any network has news — that is what the rail badges read.
+      session.addListener(notifyListeners);
+
+      _sessions[profile.id] = session;
+      _active = profile.id;
+      return null;
+    } catch (e) {
+      final message = '$e'.replaceFirst(RegExp(r'^[A-Za-z]*Exception:\s*'), '');
+      _failures[profile.id] = message;
+      return message;
+    } finally {
+      _connecting.remove(profile.id);
+      notifyListeners();
+    }
+  }
+
+  /// Disconnect one network and close its conversations.
+  void disconnect(String profileId) {
+    final session = _sessions.remove(profileId);
+    if (session == null) return;
+    session.removeListener(notifyListeners);
+    session.dispose();
+
+    if (_active == profileId) {
+      // Fall back to whatever else is still connected, so disconnecting one
+      // network never leaves the user staring at nothing while others are up.
+      _active = _sessions.keys.isEmpty ? null : _sessions.keys.last;
+    }
+    notifyListeners();
+  }
+
+  /// Called when a profile is deleted: its connection must not outlive it.
+  void forget(String profileId) {
+    disconnect(profileId);
+    _failures.remove(profileId);
+  }
+
+  @override
+  void dispose() {
+    for (final session in _sessions.values) {
+      session.removeListener(notifyListeners);
+      session.dispose();
+    }
+    _sessions.clear();
+    super.dispose();
+  }
+}
+
+/// Makes the [Workspace] available to the widget tree.
+class WorkspaceScope extends InheritedNotifier<Workspace> {
+  const WorkspaceScope({
+    super.key,
+    required Workspace workspace,
+    required super.child,
+  }) : super(notifier: workspace);
+
+  static Workspace of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<WorkspaceScope>();
+    assert(scope?.notifier != null, 'No WorkspaceScope above this widget');
+    return scope!.notifier!;
+  }
+}

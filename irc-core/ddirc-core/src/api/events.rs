@@ -1,0 +1,195 @@
+//! Events emitted by the core, consumed by the UI.
+//!
+//! One flat enum rather than a callback per event type: it maps directly onto a
+//! Dart `Stream`, keeps ordering guarantees obvious, and means adding an event
+//! later does not change the API surface.
+
+use crate::api::types::{AuthOutcome, ChatMessage, ConnectionStatus, MemberView};
+
+/// Something that happened on a connection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IrcEvent {
+    /// The connection lifecycle moved on. Drives the status dot, and carries
+    /// reconnect countdowns so the UI can show them inline rather than in a
+    /// blocking dialog.
+    Status {
+        status: ConnectionStatus,
+        detail: Option<String>,
+    },
+
+    /// Registration completed. `nick` is what the server actually gave us,
+    /// which may differ from what we asked for.
+    Registered {
+        nick: String,
+        network: Option<String>,
+        auth: AuthOutcome,
+    },
+
+    /// The server named its network in `ISUPPORT`.
+    ///
+    /// Separate from [`IrcEvent::Registered`] because `RPL_ISUPPORT` arrives
+    /// *after* the welcome numeric — reporting the name at registration would
+    /// always report nothing.
+    NetworkNamed { network: String },
+
+    /// A chat message, already sanitised.
+    Message(Box<ChatMessage>),
+
+    /// Someone joined a channel.
+    Joined {
+        channel: String,
+        nick: String,
+        is_self: bool,
+    },
+
+    /// Someone left a channel.
+    Parted {
+        channel: String,
+        nick: String,
+        is_self: bool,
+        reason: Option<String>,
+    },
+
+    /// Someone quit the network. Emitted once per shared channel so each
+    /// conversation can show it in place.
+    Quit {
+        channel: String,
+        nick: String,
+        reason: Option<String>,
+    },
+
+    /// Someone changed nick. Emitted once per shared channel.
+    NickChanged {
+        channel: String,
+        old: String,
+        new: String,
+        is_self: bool,
+    },
+
+    /// A channel topic was set or changed. `set_by` is absent for the topic
+    /// delivered on join.
+    TopicChanged {
+        channel: String,
+        topic: String,
+        set_by: Option<String>,
+    },
+
+    /// The member list changed. Sent as a whole roster rather than deltas so
+    /// the UI cannot drift out of sync with the core.
+    MemberList {
+        channel: String,
+        members: Vec<MemberView>,
+    },
+
+    /// Someone's channel privileges changed.
+    ModeChanged {
+        channel: String,
+        by: Option<String>,
+        affected: Vec<String>,
+    },
+
+    /// Incoming messages were dropped by flood protection. Surfaced honestly so
+    /// a quiet gap in a conversation is never mistaken for silence.
+    MessagesDropped { channel: Option<String>, count: u64 },
+
+    /// A server error or a protocol-level problem worth showing the user.
+    Error { message: String, fatal: bool },
+}
+
+impl IrcEvent {
+    /// The channel this event belongs to, if any, for routing to a conversation.
+    pub fn channel(&self) -> Option<&str> {
+        match self {
+            Self::Joined { channel, .. }
+            | Self::Parted { channel, .. }
+            | Self::Quit { channel, .. }
+            | Self::NickChanged { channel, .. }
+            | Self::TopicChanged { channel, .. }
+            | Self::MemberList { channel, .. }
+            | Self::ModeChanged { channel, .. } => Some(channel),
+            Self::Message(message) => Some(message.target.name()),
+            Self::MessagesDropped { channel, .. } => channel.as_deref(),
+            Self::Status { .. }
+            | Self::Registered { .. }
+            | Self::NetworkNamed { .. }
+            | Self::Error { .. } => None,
+        }
+    }
+
+    /// True for events the UI renders as small, muted, centred system lines
+    /// rather than as messages.
+    pub fn is_system(&self) -> bool {
+        matches!(
+            self,
+            Self::Joined { .. }
+                | Self::Parted { .. }
+                | Self::Quit { .. }
+                | Self::NickChanged { .. }
+                | Self::TopicChanged { .. }
+                | Self::ModeChanged { .. }
+                | Self::MessagesDropped { .. }
+                | Self::Status { .. }
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::types::Target;
+
+    fn message() -> IrcEvent {
+        IrcEvent::Message(Box::new(ChatMessage {
+            target: Target::Channel("#test".to_owned()),
+            sender: "alice".to_owned(),
+            sender_prefix: Some("@".to_owned()),
+            spans: Vec::new(),
+            is_self: false,
+            is_mention: false,
+            is_action: false,
+            is_notice: false,
+        }))
+    }
+
+    #[test]
+    fn channel_routing_covers_message_and_system_events() {
+        assert_eq!(message().channel(), Some("#test"));
+        assert_eq!(
+            IrcEvent::Joined {
+                channel: "#test".to_owned(),
+                nick: "bob".to_owned(),
+                is_self: false
+            }
+            .channel(),
+            Some("#test")
+        );
+    }
+
+    #[test]
+    fn connection_events_are_not_channel_scoped() {
+        let status = IrcEvent::Status {
+            status: ConnectionStatus::Connecting,
+            detail: None,
+        };
+        assert_eq!(status.channel(), None);
+        assert_eq!(
+            IrcEvent::Error {
+                message: "x".to_owned(),
+                fatal: false
+            }
+            .channel(),
+            None
+        );
+    }
+
+    #[test]
+    fn messages_are_not_system_lines() {
+        assert!(!message().is_system(), "real messages are not subordinate");
+        assert!(IrcEvent::Joined {
+            channel: "#t".to_owned(),
+            nick: "b".to_owned(),
+            is_self: false
+        }
+        .is_system());
+    }
+}

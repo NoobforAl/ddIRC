@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["ddirc-core", "ddirc-cli", "ddirc-bridge"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MPL-2.0"
+
+[workspace.dependencies]
+irc = { version = "1.1.0", default-features = false, features = ["tls-rust", "ctcp", "channel-lists"] }
+tokio = { version = "1", default-features = false }
+futures-util = "0.3"
+thiserror = "2"
+tracing = "0.1"
+flutter_rust_bridge = "=2.13.0"
+zeroize = { version = "1", features = ["derive"] }

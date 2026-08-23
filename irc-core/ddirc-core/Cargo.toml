@@ -1,0 +1,23 @@
+[package]
+name = "ddirc-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Reusable IRC client core for ddIRC (connection, TLS, protocol, state)."
+
+[lib]
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[dependencies]
+irc.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
+futures-util.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+rand = "0.8"
+zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
