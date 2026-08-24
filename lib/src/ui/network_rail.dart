@@ -4,6 +4,7 @@ import '../model/profile.dart';
 import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
+import 'motion.dart';
 
 /// Width of the rail. Just wide enough for a 34px mark and its gutters.
 const double networkRailWidth = 56;
@@ -107,6 +108,7 @@ class _RailEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final m = context.motion;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: InkWell(
@@ -119,7 +121,9 @@ class _RailEntry extends StatelessWidget {
             children: [
               // The same 2px leading rule the channel list uses for its
               // selection, so "where am I" reads identically in both columns.
-              Container(
+              AnimatedContainer(
+                duration: m.normal,
+                curve: Motion.curve,
                 width: 2,
                 height: 26,
                 color: selected ? t.accent : Colors.transparent,
@@ -167,49 +171,75 @@ class _Mark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final m = context.motion;
     final live = connected || connecting;
 
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Container(
+        AnimatedContainer(
+          duration: m.normal,
+          curve: Motion.curve,
           width: 34,
           height: 34,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? t.surfaceHover : null,
+            // Transparent rather than null, so selecting the network fades the
+            // fill up from nothing instead of stamping it on.
+            color: selected ? t.surfaceHover : Colors.transparent,
             borderRadius: BorderRadius.circular(9),
             border: Border.all(
               color: selected ? t.accent : t.rule,
               width: selected ? 1 : Tokens.hairline,
             ),
           ),
-          child: Text(
-            profile.initials,
-            style: TextStyle(
-              // A disconnected network is legible but clearly dormant.
+          child: AnimatedDefaultTextStyle(
+            duration: m.normal,
+            curve: Motion.curve,
+            // Merged onto the ambient style rather than replacing it, so the
+            // mark keeps whatever font the theme is handing down.
+            style: DefaultTextStyle.of(context).style.copyWith(
+              // A disconnected network is legible but clearly dormant; coming
+              // up is the fade between the two.
               color: live ? t.text : t.faint,
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.2,
             ),
+            child: Text(profile.initials),
           ),
         ),
-        if (unread > 0)
-          Positioned(
-            top: -3,
-            right: -5,
-            child: _Count(count: unread, highlighted: mentions > 0),
-          )
-        else if (live || failed)
-          Positioned(
-            bottom: -1,
-            right: -1,
-            child: _StatusPip(
-              connecting: connecting,
-              failed: failed && !connected,
-            ),
+        // Two fixed corners rather than one switcher between them: the count
+        // sits above the mark and the pip below it, so they have nowhere to
+        // cross-fade to. Each arrives and leaves on its own.
+        Positioned(
+          top: -3,
+          right: -5,
+          child: Appear(
+            child: unread > 0
+                // Keyed on presence, not on the number: an active channel
+                // would otherwise re-scale the badge on every message.
+                ? _Count(
+                    key: const ValueKey('count'),
+                    count: unread,
+                    highlighted: mentions > 0,
+                  )
+                : null,
           ),
+        ),
+        Positioned(
+          bottom: -1,
+          right: -1,
+          child: Appear(
+            child: unread == 0 && (live || failed)
+                ? _StatusPip(
+                    key: const ValueKey('pip'),
+                    connecting: connecting,
+                    failed: failed && !connected,
+                  )
+                : null,
+          ),
+        ),
       ],
     );
   }
@@ -217,7 +247,7 @@ class _Mark extends StatelessWidget {
 
 /// A dot in the corner of the mark: connected, trying, or failed.
 class _StatusPip extends StatelessWidget {
-  const _StatusPip({required this.connecting, required this.failed});
+  const _StatusPip({super.key, required this.connecting, required this.failed});
 
   final bool connecting;
   final bool failed;
@@ -231,22 +261,27 @@ class _StatusPip extends StatelessWidget {
         ? t.warn
         : t.ok;
 
-    return Container(
-      width: 8,
-      height: 8,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-        // Ringed in the panel colour so it reads as sitting on top of the
-        // mark rather than being part of its border.
-        border: Border.all(color: t.surface, width: 1.5),
+    return Pulse(
+      running: connecting,
+      child: AnimatedContainer(
+        duration: context.motion.fast,
+        curve: Motion.curve,
+        width: 8,
+        height: 8,
+        decoration: BoxDecoration(
+          color: color,
+          shape: BoxShape.circle,
+          // Ringed in the panel colour so it reads as sitting on top of the
+          // mark rather than being part of its border.
+          border: Border.all(color: t.surface, width: 1.5),
+        ),
       ),
     );
   }
 }
 
 class _Count extends StatelessWidget {
-  const _Count({required this.count, required this.highlighted});
+  const _Count({super.key, required this.count, required this.highlighted});
 
   final int count;
   final bool highlighted;

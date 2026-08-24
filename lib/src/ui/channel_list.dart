@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../model/session.dart';
 import '../model/settings.dart';
 import '../theme.dart';
+import 'motion.dart';
 
 /// Joined channels and open conversations, with unread counts.
 class ChannelList extends StatelessWidget {
@@ -159,6 +160,7 @@ class _ChannelRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final m = context.motion;
     final unread = conversation.unread;
     final mentions = conversation.unreadMentions;
 
@@ -168,11 +170,15 @@ class _ChannelRow extends StatelessWidget {
       // settings, without a per-row button cluttering the list.
       onSecondaryTap: onSettings,
       onLongPress: onSettings,
-      child: Container(
+      child: AnimatedContainer(
+        duration: m.normal,
+        curve: Motion.curve,
         // The active channel is marked by a leading rule and a lifted
         // background — no pill, no fill, consistent with the hairline language.
+        // Both slide across as selection moves, so the eye can follow it down
+        // the list rather than re-finding it.
         decoration: BoxDecoration(
-          color: selected ? t.surfaceHover : null,
+          color: selected ? t.surfaceHover : Colors.transparent,
           border: Border(
             left: BorderSide(
               color: selected ? t.accent : Colors.transparent,
@@ -184,24 +190,47 @@ class _ChannelRow extends StatelessWidget {
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                conversation.name,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
+              child: AnimatedDefaultTextStyle(
+                duration: m.normal,
+                curve: Motion.curve,
+                // Merged onto the ambient style rather than replacing it, so
+                // the row keeps whatever font the theme is handing down.
+                style: DefaultTextStyle.of(context).style.copyWith(
                   color: selected ? t.text : (unread > 0 ? t.text : t.muted),
                   fontSize: 13,
+                  // Weight is what says "someone spoke here", so it is worth
+                  // interpolating instead of snapping between two rows.
                   fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400,
                 ),
+                child: Text(conversation.name, overflow: TextOverflow.ellipsis),
               ),
             ),
-            if (muted) ...[
-              const SizedBox(width: 6),
-              Icon(Icons.notifications_off_outlined, size: 13, color: t.faint),
-            ],
-            if (unread > 0) ...[
-              const SizedBox(width: 8),
-              _Badge(count: unread, highlighted: mentions > 0),
-            ],
+            // The gaps live inside the switchers, so a row carrying neither
+            // ornament closes up rather than holding an empty slot open.
+            Appear(
+              child: muted
+                  ? Padding(
+                      key: const ValueKey('muted'),
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Icon(
+                        Icons.notifications_off_outlined,
+                        size: 13,
+                        color: t.faint,
+                      ),
+                    )
+                  : null,
+            ),
+            Appear(
+              child: unread > 0
+                  ? Padding(
+                      // Keyed on presence, not on the count: an active channel
+                      // would otherwise re-scale the badge on every message.
+                      key: const ValueKey('badge'),
+                      padding: const EdgeInsets.only(left: 8),
+                      child: _Badge(count: unread, highlighted: mentions > 0),
+                    )
+                  : null,
+            ),
           ],
         ),
       ),

@@ -25,7 +25,7 @@ DART_SRC := lib
 COMPOSE ?= docker compose -f dev/compose.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test build codegen clean \
+.PHONY: help fix fmt lint test test-integration build codegen clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs
 
 help:
@@ -34,7 +34,7 @@ help:
 	@echo "  make fix      format + auto-fix Dart and Rust, then lint"
 	@echo "  make fmt      format only"
 	@echo "  make lint     analyze Dart, clippy Rust (warnings are errors)"
-	@echo "  make test     run the Rust test suite (hermetic)"
+	@echo "  make test     run the Dart and Rust test suites (hermetic)"
 	@echo "  make test-integration  end-to-end, needs make dev-server"
 	@echo "  make build    debug build for Windows"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
@@ -65,7 +65,9 @@ lint:
 	$(CARGO) fmt $(MANIFEST) --all -- --check
 	$(CARGO) clippy $(MANIFEST) --workspace --all-targets -- -D warnings
 
+## Everything that needs no network and no Docker.
 test:
+	$(FLUTTER) test
 	$(CARGO) test $(MANIFEST) --workspace
 
 ## End-to-end against the local server; `make dev-server` must be up.

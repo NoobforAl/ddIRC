@@ -8,6 +8,7 @@ import '../theme.dart';
 import 'channel_list.dart';
 import 'member_list.dart';
 import 'message_view.dart';
+import 'motion.dart';
 import 'settings/app_settings_dialog.dart';
 import 'settings/channel_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
@@ -159,6 +160,7 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Widget _conversationPane(Tokens t, bool wide, Conversation? active) {
+    final topic = active?.topic;
     return Column(
       children: [
         _Header(
@@ -172,23 +174,37 @@ class _SessionScreenState extends State<SessionScreen> {
           onNetworkEditor: _openNetworkEditor,
           onAppSettings: _openAppSettings,
         ),
-        if (active?.topic != null) _TopicBar(topic: active!.topic!),
+        // A topic arriving, or switching to a channel that has none, moves
+        // the whole scrollback. Unrolling it says which way everything went.
+        Reveal(child: topic == null ? null : _TopicBar(topic: topic)),
         Expanded(
-          child: active == null
-              ? Center(
-                  child: Text(
-                    'Not in a channel yet.\nUse /join #channel below.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: t.faint, fontSize: 13, height: 1.6),
+          child: AnimatedSwitcher(
+            // Fast, and a fade with nothing sliding: a wall of text in motion
+            // is unreadable for as long as the transition lasts.
+            duration: context.motion.fast,
+            child: active == null
+                ? Center(
+                    key: const ValueKey('no-channel'),
+                    child: Text(
+                      'Not in a channel yet.\nUse /join #channel below.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: t.faint,
+                        fontSize: 13,
+                        height: 1.6,
+                      ),
+                    ),
+                  )
+                : MessageView(
+                    // Rebuild the scroll state when switching conversations.
+                    key: ValueKey(active.name),
+                    conversation: active,
                   ),
-                )
-              : MessageView(
-                  // Rebuild the scroll state when switching conversations.
-                  key: ValueKey(active.name),
-                  conversation: active,
-                ),
+          ),
         ),
-        if (_error != null) _ErrorBar(text: _error!),
+        // Growing rather than appearing, so a rejected command never shoves
+        // the composer out from under a caret already being typed into.
+        Reveal(child: _error == null ? null : _ErrorBar(text: _error!)),
         _composerBar(t, active),
       ],
     );
@@ -463,19 +479,26 @@ class _StatusDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final (color, label) = switch (status) {
-      ConnectionStatus_Connected() => (t.ok, 'Connected'),
-      ConnectionStatus_Connecting() => (t.warn, 'Connecting'),
-      ConnectionStatus_Registering() => (t.warn, 'Registering'),
+    // The third field is whether the client is still waiting on the server.
+    // Amber alone cannot say that — connecting and reconnecting look exactly
+    // like a settled state until the dot moves.
+    final (color, label, waiting) = switch (status) {
+      ConnectionStatus_Connected() => (t.ok, 'Connected', false),
+      ConnectionStatus_Connecting() => (t.warn, 'Connecting', true),
+      ConnectionStatus_Registering() => (t.warn, 'Registering', true),
       ConnectionStatus_Reconnecting(:final retryInSecs) => (
         t.warn,
         'Reconnecting in ${retryInSecs}s',
+        true,
       ),
-      ConnectionStatus_Disconnected() => (t.bad, 'Disconnected'),
+      ConnectionStatus_Disconnected() => (t.bad, 'Disconnected', false),
     };
     return Tooltip(
       message: label,
-      child: _Dot(color: color, size: 8),
+      child: Pulse(
+        running: waiting,
+        child: _Dot(color: color, size: 8),
+      ),
     );
   }
 }
@@ -488,7 +511,9 @@ class _Dot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AnimatedContainer(
+      duration: context.motion.fast,
+      curve: Motion.curve,
       width: size,
       height: size,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),

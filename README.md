@@ -244,6 +244,15 @@ them against the server's advertised `CHANMODES`.
 would treat `Foo[bar]` and `foo{bar}` as two different users on a network that
 considers them one.
 
+**Motion is a token, not a per-widget decision.** `lib/src/ui/motion.dart` holds
+three durations and two curves, read as `context.motion` — the same shape as the
+colour tokens, for the same reason. The getter returns zero durations when the
+platform's *reduce motion* setting is on, so honouring that is automatic instead
+of something every call site has to remember. Nothing animates for decoration:
+each transition answers *what just changed, and where did it go*. The one
+looping animation is the status dot while a connection is pending, because amber
+alone cannot tell "still trying" from "settled".
+
 ## Dependency posture
 
 The `irc` crate (577★, 407k downloads) is the de-facto standard for Rust, but
@@ -265,6 +274,11 @@ behaviour — the fork goes in `irc-core/vendor/irc` and nothing else changes.
 failure path a hostile server can force), rate limiters, backoff bounds,
 `ISUPPORT` parsing, channel/member state, and a set of **transcript tests** that
 drive the real dispatch path with scripted server output.
+
+`flutter test` covers the motion primitives: that they animate rather than snap,
+that they stop when they are told to, and that they step aside entirely under
+reduced motion. `make test` runs both suites, and neither needs a network or
+Docker.
 
 Live-network testing proved the TLS handshake, registration, `ISUPPORT` parsing,
 error surfacing, and reconnect path against Libera.Chat. It is deliberately not
