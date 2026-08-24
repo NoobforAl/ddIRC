@@ -1,0 +1,81 @@
+# The test suites. Lint is a separate workflow, so a formatting slip and a
+# broken test report as two different failures rather than one red tick.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Everything that needs no network and no Docker: the Dart widget tests and
+  # the Rust unit and transcript tests. Fast, and it is the one that must never
+  # be flaky, so it stands alone.
+  hermetic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: stable
+          cache: true
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: irc-core
+
+      - run: flutter pub get
+
+      # The Makefile target, not the two commands it runs. Same reason `make
+      # lint` is called rather than restated: a local check and CI cannot drift
+      # apart if there is only one definition of what they do.
+      - run: make test
+
+  # The end-to-end suite, against a real ergo over real TLS.
+  #
+  # `make dev-server` rather than a `services:` block: the compose file already
+  # describes the server, its healthcheck and its loopback binding, and a
+  # service container would be a second description to keep in step. It also
+  # puts the generated certificate in dev/ergo/ inside the workspace, which is
+  # exactly where the tests look for it by default.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: irc-core
+
+      # `--wait` blocks on the healthcheck, so the suite can start the instant
+      # this returns.
+      - run: make dev-server
+
+      # Ergo generates its config and certificate as root inside the container.
+      # The tests run as the runner user and only need to read the certificate.
+      - run: sudo chmod -R a+rX dev/ergo
+
+      - run: make test-integration
+
+      # A timeout in these tests means the server did not say something the
+      # client expected, and the server's own log is the only place that
+      # reason exists.
+      - if: failure()
+        run: docker compose -f dev/compose.yaml logs --tail=200

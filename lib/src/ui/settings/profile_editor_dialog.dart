@@ -87,7 +87,35 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
   String _text(_Input field) => _fields[field]!.text.trim();
 
+  /// Move a port typed into the address box into the port box.
+  ///
+  /// `irc.example.org:6697` is how every other client, every wiki page and
+  /// every `/server` line writes an address, so it is what people paste — and
+  /// the form beside it already holds 6697, which quietly produced a host of
+  /// `irc.example.org:6697:6697` and a DNS failure that named nothing useful.
+  ///
+  /// Split rather than rejected: the user said what they meant, and the form
+  /// can put it where it goes. Done in the fields themselves so the correction
+  /// is on screen rather than applied behind the user's back.
+  ///
+  /// One colon only. `::1` and every other bare IPv6 literal has more, and
+  /// splitting one would turn a valid address into nonsense; those are written
+  /// `[::1]` when a port is involved, which has no bare colon at all.
+  void _liftPortOutOfAddress() {
+    final host = _text(_Input.host);
+    final colon = host.indexOf(':');
+    if (colon <= 0 || colon != host.lastIndexOf(':')) return;
+
+    final tail = host.substring(colon + 1);
+    if (tail.isEmpty || tail.length > 5) return;
+    if (!tail.split('').every((c) => '0123456789'.contains(c))) return;
+
+    _fields[_Input.host]!.text = host.substring(0, colon);
+    _fields[_Input.port]!.text = tail;
+  }
+
   Map<_Input, String> _validate() {
+    _liftPortOutOfAddress();
     final errors = <_Input, String>{};
 
     if (_text(_Input.host).isEmpty) {

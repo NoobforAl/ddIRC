@@ -1,6 +1,7 @@
 # ddIRC
 
 [![Lint](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml)
+[![Test](https://github.com/NoobforAl/ddIRC/actions/workflows/test.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/test.yml)
 
 A minimal, modern IRC client. Android-first, built on a reusable native core.
 
@@ -341,5 +342,16 @@ so a local check and CI cannot drift apart.
 Both toolchains are pinned. Clippy runs with `-D warnings`, and an unpinned
 toolchain would fail CI on unchanged code the day a new lint ships.
 
-It does **not** run `make test` yet. That waits on the integration tests, which
-need the dev server above and a way to trust its certificate.
+`.github/workflows/test.yml` runs the suites, in two jobs. **hermetic** is
+`make test` — the Dart widget tests and the Rust unit and transcript tests,
+needing no network and no Docker. **integration** starts the dev server with
+`make dev-server` and runs the end-to-end suite against it.
+
+The integration job starts the server through the Compose file rather than a
+`services:` block. The Compose file already describes the server, its
+healthcheck and its loopback binding, and a service container would be a second
+description to keep in step; it also puts the generated certificate in
+`dev/ergo/` inside the workspace, which is where the tests look by default.
+
+Lint and test are separate workflows so a formatting slip and a broken test
+report as two different failures.

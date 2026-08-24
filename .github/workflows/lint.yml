@@ -1,5 +1,5 @@
-# Lint only — no tests yet. `make test` is deliberately not run here until the
-# integration tests have a server to talk to; see TODO.md.
+# Lint only. The suites run in test.yml, so a formatting slip and a broken
+# test report as two different failures rather than one red tick.
 name: Lint
 
 on:

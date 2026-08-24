@@ -108,7 +108,7 @@ ever reaches it. A self-signed server is refused, which is the whole point —
 a "just skip verification for testing" switch would be a
 verification-skipping path sitting in the shipped client.
 
-Two ways round it.
+Three ways round it, cheapest first.
 
 **1. Test the UI against a real network.** For looking at the interface —
 unread badges, the connecting pulse, the channel list, mIRC colours — any
@@ -118,9 +118,34 @@ public network works and needs no changes at all:
 irc.libera.chat:6697
 ```
 
-This is the recommended one. It costs nothing and touches no trust settings.
+It costs nothing and touches no trust settings. If you are testing the
+*interface* rather than the connection, stop here.
 
-**2. Trust the certificate on this machine.** The core builds its trust store
+**2. Launch the app with `SSL_CERT_FILE` pointing at the certificate.** This is
+the one to use for the dev server. `rustls-native-certs` reads that variable in
+place of the platform's store, so the trust change lives and dies with the
+process — nothing is installed, and a normal launch is unaffected.
+
+```powershell
+$env:SSL_CERT_FILE = "$PWD\dev\ergo\fullchain.pem"
+.\build\windows\x64\runner\Debug\ddirc.exe
+```
+
+```bash
+SSL_CERT_FILE="$PWD/dev/ergo/fullchain.pem" \
+  ./build/windows/x64/runner/Debug/ddirc.exe
+```
+
+Then add a network with address `localhost` and port `6697` — **address only,
+no port in that box**; the port has its own field.
+
+Verification stays fully on: the app checks the certificate against the file
+you named and the hostname against its SAN. It is not a skip, it is a
+different, smaller list of roots. Note the flip side — while the variable is
+set the app trusts *only* that certificate, so a public network will not
+connect in the same run.
+
+**3. Trust the certificate on this machine.** The core builds its trust store
 from `webpki-roots` plus the platform's own store, so once Windows trusts this
 certificate, ddIRC connects to `localhost:6697` with verification fully on.
 Nothing in the client is weakened; the operating system simply now agrees that
@@ -141,7 +166,8 @@ Get-ChildItem Cert:\CurrentUser\Root |
 
 Then add a network in ddIRC pointing at host `localhost`, port `6697`.
 
-Read this part before you run it:
+Prefer option 2 unless you need the app to reach the dev server and a public
+network in the same run. Read this part before you run it:
 
 - The matching **private key sits next to the certificate** in
   `dev/ergo/privkey.pem`. Anyone who gets that file can impersonate
