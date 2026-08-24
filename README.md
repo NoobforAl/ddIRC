@@ -1,5 +1,7 @@
 # ddIRC
 
+[![Lint](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml)
+
 A minimal, modern IRC client. Android-first, built on a reusable native core.
 
 **Status:** Phases 1–4 complete.
@@ -268,3 +270,58 @@ Live-network testing proved the TLS handshake, registration, `ISUPPORT` parsing,
 error surfacing, and reconnect path against Libera.Chat. It is deliberately not
 part of the test suite: it needs unfiltered egress and a cooperative server, so
 it cannot be a regression asset.
+
+### A local server to test against
+
+```bash
+make dev-server        # ergo on 127.0.0.1:6697, waits until the port accepts
+make test-integration  # the end-to-end suite, against it
+make dev-server-logs   # follow it
+make dev-server-stop   # stop, keeping accounts and certificates
+make dev-server-clean  # stop and throw the state away
+```
+
+This exists so the connection path can be exercised without unfiltered egress or
+a public network's goodwill. It is a real server, not a mock: real TLS, real
+registration, real `ISUPPORT`, and SASL with open account registration
+(`REGISTER` works before connect), so the SASL path can be driven end to end.
+
+**It serves TLS, not plaintext.** `ddirc-core` sets `use_tls: true`
+unconditionally and never sets `dangerously_accept_invalid_certs`, so a
+plaintext dev server would be unreachable and a "just disable verification for
+tests" switch would put a certificate-skipping path into the shipped client.
+Instead ergo generates a self-signed pair on first start, and anything
+connecting trusts that certificate explicitly:
+
+```
+dev/ergo/fullchain.pem
+```
+
+The generated certificate already carries `localhost` and `127.0.0.1` in its
+SAN, so hostname verification passes as-is.
+
+`irc-core/ddirc-core/tests/dev_server.rs` drives it: connect over real TLS,
+register, join, exchange a message between two clients, set a topic. Every test
+is `#[ignore]`d, so `cargo test` stays hermetic for CI and for machines without
+Docker. One of them is the guard — it asserts that **without**
+`extra_root_cert` the same connection is refused, so if verification is ever
+weakened the suite says so instead of quietly proving nothing.
+
+Everything generated — config, certificates, the account datastore — lands in
+`dev/ergo/`, which is gitignored. The config the entrypoint writes contains a
+randomly generated oper password, so it is per-machine and never committed. The
+listener is bound to loopback: this server has a self-signed certificate and
+open registration, and must not be reachable from anywhere else.
+
+### Continuous integration
+
+`.github/workflows/lint.yml` runs `make lint` — `flutter analyze`, `cargo fmt
+--check`, and `cargo clippy -D warnings` — on every push to `main` and every
+pull request. It calls the Makefile target rather than repeating the commands,
+so a local check and CI cannot drift apart.
+
+Both toolchains are pinned. Clippy runs with `-D warnings`, and an unpinned
+toolchain would fail CI on unchanged code the day a new lint ships.
+
+It does **not** run `make test` yet. That waits on the integration tests, which
+need the dev server above and a way to trust its certificate.

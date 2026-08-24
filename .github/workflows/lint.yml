@@ -1,0 +1,50 @@
+# Lint only — no tests yet. `make test` is deliberately not run here until the
+# integration tests have a server to talk to; see TODO.md.
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push supersedes the run already in flight. Nothing here is worth
+# finishing twice.
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Both toolchains are pinned rather than floating. `make lint` runs clippy
+      # with `-D warnings`, so a lint newly added in a toolchain release would
+      # fail CI on code that has not changed — which is the project's stated
+      # posture for dependencies anyway.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          components: rustfmt, clippy
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: stable
+          cache: true
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The Cargo workspace is one level down.
+          workspaces: irc-core
+
+      - run: flutter pub get
+
+      # One target rather than three steps. The Makefile is the single source of
+      # truth for what "clean" means — its own comment says this is what CI
+      # should run — so a local check and CI cannot drift apart.
+      - run: make lint
