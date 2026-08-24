@@ -1,0 +1,34 @@
+# A throwaway IRC server, for development and tests.
+#
+# The client is TLS-only and verifies certificates — there is no
+# `dangerously_accept_invalid_certs` path through ddirc-core — so a dev server
+# has to speak real TLS rather than plaintext on 6667. Ergo's own entrypoint
+# writes a config and generates a self-signed pair on first start; both land in
+# `dev/ergo/` on the host, so a test can point a trust store at
+# `dev/ergo/fullchain.pem` instead of weakening the client.
+#
+#   make dev-server        start it (first run generates config and certs)
+#   make dev-server-stop   stop it, keeping accounts and certs
+#   make dev-server-clean  stop it and throw the state away
+#
+# Bound to loopback only. This server has a self-signed certificate and open
+# account registration; it must never be reachable from anywhere else.
+
+services:
+  ircd:
+    image: ghcr.io/ergochat/ergo:stable
+    container_name: ddirc-dev-ircd
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6697:6697"
+    volumes:
+      # Config, certificates and the account datastore all live here, readable
+      # from the host so tests can find the certificate.
+      - ./ergo:/ircd
+    healthcheck:
+      # The TLS port accepting a connection is the thing tests actually wait on.
+      test: ["CMD", "sh", "-c", "nc -z 127.0.0.1 6697"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s

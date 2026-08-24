@@ -22,8 +22,11 @@ MANIFEST := --manifest-path $(RUST)/Cargo.toml
 # churn it.
 DART_SRC := lib
 
+COMPOSE ?= docker compose -f dev/compose.yaml
+
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test build codegen clean
+.PHONY: help fix fmt lint test build codegen clean \
+        dev-server dev-server-stop dev-server-clean dev-server-logs
 
 help:
 	@echo "ddIRC"
@@ -31,10 +34,16 @@ help:
 	@echo "  make fix      format + auto-fix Dart and Rust, then lint"
 	@echo "  make fmt      format only"
 	@echo "  make lint     analyze Dart, clippy Rust (warnings are errors)"
-	@echo "  make test     run the Rust test suite"
+	@echo "  make test     run the Rust test suite (hermetic)"
+	@echo "  make test-integration  end-to-end, needs make dev-server"
 	@echo "  make build    debug build for Windows"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make clean    drop build output for both halves"
+	@echo ""
+	@echo "  make dev-server        local IRC server on 127.0.0.1:6697 (TLS)"
+	@echo "  make dev-server-stop   stop it, keeping accounts and certs"
+	@echo "  make dev-server-clean  stop it and throw the state away"
+	@echo "  make dev-server-logs   follow its log"
 	@echo ""
 	@echo "Override a tool path if it is not on PATH, e.g."
 	@echo "  make fix FLUTTER=/c/src/flutter/bin/flutter"
@@ -59,6 +68,13 @@ lint:
 test:
 	$(CARGO) test $(MANIFEST) --workspace
 
+## End-to-end against the local server; `make dev-server` must be up.
+#
+# These are `#[ignore]`d so the line above stays hermetic — it runs in CI and on
+# machines with no Docker.
+test-integration:
+	$(CARGO) test $(MANIFEST) -p ddirc-core --test dev_server -- --ignored
+
 build:
 	$(FLUTTER) build windows --debug
 
@@ -69,3 +85,25 @@ codegen:
 clean:
 	$(FLUTTER) clean
 	$(CARGO) clean $(MANIFEST)
+
+## A real IRC server to test against, on loopback only.
+#
+# The client is TLS-only and verifies certificates, so this serves real TLS with
+# a self-signed certificate rather than plaintext on 6667. `--wait` blocks until
+# the TLS port actually accepts, so a test can run straight after this returns.
+dev-server:
+	$(COMPOSE) up -d --wait
+	@echo ""
+	@echo "  irc://localhost:6697 (TLS)"
+	@echo "  certificate: dev/ergo/fullchain.pem (trust it; do not disable verification)"
+
+dev-server-stop:
+	$(COMPOSE) down
+
+## Also drops the accounts, certificates and generated config in dev/ergo/.
+dev-server-clean:
+	$(COMPOSE) down -v
+	rm -rf dev/ergo
+
+dev-server-logs:
+	$(COMPOSE) logs -f
