@@ -41,6 +41,7 @@ help:
 	@echo "  make clean    drop build output for both halves"
 	@echo ""
 	@echo "  make dev-server        local IRC server on 127.0.0.1:6697 (TLS)"
+	@echo "                         writes dev/server.txt: where it is, how to reach it"
 	@echo "  make dev-server-stop   stop it, keeping accounts and certs"
 	@echo "  make dev-server-clean  stop it and throw the state away"
 	@echo "  make dev-server-logs   follow its log"
@@ -93,19 +94,25 @@ clean:
 # The client is TLS-only and verifies certificates, so this serves real TLS with
 # a self-signed certificate rather than plaintext on 6667. `--wait` blocks until
 # the TLS port actually accepts, so a test can run straight after this returns.
+# The address and the certificate's fingerprint go into dev/server.txt rather
+# than scrolling past once: ergo generates the certificate per checkout, so
+# none of it is the same on two machines. Stopping deletes the file again,
+# because a stale one describing a server that is not up would be worse than
+# having none.
 dev-server:
 	$(COMPOSE) up -d --wait
+	@sh dev/server-info.sh
 	@echo ""
-	@echo "  irc://localhost:6697 (TLS)"
-	@echo "  certificate: dev/ergo/fullchain.pem (trust it; do not disable verification)"
+	@cat dev/server.txt
 
 dev-server-stop:
 	$(COMPOSE) down
+	@rm -f dev/server.txt
 
 ## Also drops the accounts, certificates and generated config in dev/ergo/.
 dev-server-clean:
 	$(COMPOSE) down -v
-	rm -rf dev/ergo
+	rm -rf dev/ergo dev/server.txt
 
 dev-server-logs:
 	$(COMPOSE) logs -f

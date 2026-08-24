@@ -287,6 +287,10 @@ it cannot be a regression asset.
 
 ### A local server to test against
 
+[`dev/README.md`](dev/README.md) is the practical guide: what is on the server,
+how to register an account for SASL, how to poke it by hand, and what it takes
+to point the app itself at it.
+
 ```bash
 make dev-server        # ergo on 127.0.0.1:6697, waits until the port accepts
 make test-integration  # the end-to-end suite, against it
