@@ -97,6 +97,7 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final wide = MediaQuery.of(context).size.width >= _wideLayout;
     final active = session.active;
 
@@ -107,7 +108,6 @@ class _SessionScreenState extends State<SessionScreen> {
       onSelect: _select,
       onDisconnect: _disconnect,
       onChannelSettings: _openChannelSettings,
-      onAppSettings: _openAppSettings,
     );
     final members = active == null
         ? const SizedBox.shrink()
@@ -131,28 +131,22 @@ class _SessionScreenState extends State<SessionScreen> {
               SizedBox(
                 width: _channelPanelWidth,
                 child: Container(
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     border: Border(
-                      right: BorderSide(
-                        color: Tokens.rule,
-                        width: Tokens.hairline,
-                      ),
+                      right: BorderSide(color: t.rule, width: Tokens.hairline),
                     ),
                   ),
                   child: channels,
                 ),
               ),
-            Expanded(child: _conversationPane(wide, active)),
+            Expanded(child: _conversationPane(t, wide, active)),
             if (wide && active != null && active.isChannel)
               SizedBox(
                 width: _memberPanelWidth,
                 child: Container(
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     border: Border(
-                      left: BorderSide(
-                        color: Tokens.rule,
-                        width: Tokens.hairline,
-                      ),
+                      left: BorderSide(color: t.rule, width: Tokens.hairline),
                     ),
                   ),
                   child: members,
@@ -164,7 +158,7 @@ class _SessionScreenState extends State<SessionScreen> {
     );
   }
 
-  Widget _conversationPane(bool wide, Conversation? active) {
+  Widget _conversationPane(Tokens t, bool wide, Conversation? active) {
     return Column(
       children: [
         _Header(
@@ -181,15 +175,11 @@ class _SessionScreenState extends State<SessionScreen> {
         if (active?.topic != null) _TopicBar(topic: active!.topic!),
         Expanded(
           child: active == null
-              ? const Center(
+              ? Center(
                   child: Text(
                     'Not in a channel yet.\nUse /join #channel below.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Tokens.faint,
-                      fontSize: 13,
-                      height: 1.6,
-                    ),
+                    style: TextStyle(color: t.faint, fontSize: 13, height: 1.6),
                   ),
                 )
               : MessageView(
@@ -199,18 +189,18 @@ class _SessionScreenState extends State<SessionScreen> {
                 ),
         ),
         if (_error != null) _ErrorBar(text: _error!),
-        _composerBar(active),
+        _composerBar(t, active),
       ],
     );
   }
 
-  Widget _composerBar(Conversation? active) {
+  Widget _composerBar(Tokens t, Conversation? active) {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
-      decoration: const BoxDecoration(
-        color: Tokens.surface,
+      decoration: BoxDecoration(
+        color: t.surface,
         border: Border(
-          top: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          top: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: Row(
@@ -225,28 +215,28 @@ class _SessionScreenState extends State<SessionScreen> {
               maxLines: 4,
               minLines: 1,
               autocorrect: false,
-              style: const TextStyle(color: Tokens.text, fontSize: 14),
+              style: TextStyle(color: t.text, fontSize: 14),
               decoration: InputDecoration(
                 // The hint always explains the state, so a composer that
                 // cannot send never looks simply broken.
                 hintText: active == null
                     ? 'Join a channel to talk — try /join #channel'
                     : 'Message ${active.name}',
-                hintStyle: const TextStyle(color: Tokens.faint, fontSize: 14),
+                hintStyle: TextStyle(color: t.faint, fontSize: 14),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 11,
                 ),
-                enabledBorder: _border(Tokens.rule, Tokens.hairline),
-                focusedBorder: _border(Tokens.accent, 1),
+                enabledBorder: _border(t.rule, Tokens.hairline),
+                focusedBorder: _border(t.accent, 1),
               ),
             ),
           ),
           IconButton(
             onPressed: _submit,
             icon: const Icon(Icons.arrow_upward, size: 19),
-            color: Tokens.accent,
+            color: t.accent,
             tooltip: 'Send',
           ),
         ],
@@ -286,13 +276,14 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final unread = session.totalUnread;
 
     return Container(
       padding: EdgeInsets.fromLTRB(wide ? 20 : 4, 8, 8, 8),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          bottom: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: Row(
@@ -304,13 +295,13 @@ class _Header extends StatelessWidget {
                 IconButton(
                   onPressed: onOpenChannels,
                   icon: const Icon(Icons.menu, size: 20),
-                  color: Tokens.muted,
+                  color: t.muted,
                   tooltip: 'Channels',
                 ),
                 if (unread > 0)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 8, right: 8),
-                    child: _Dot(color: Tokens.accent, size: 6),
+                    child: _Dot(color: t.accent, size: 6),
                   ),
               ],
             ),
@@ -319,8 +310,8 @@ class _Header extends StatelessWidget {
           Expanded(
             child: Text(
               conversation?.name ?? session.nick,
-              style: const TextStyle(
-                color: Tokens.text,
+              style: TextStyle(
+                color: t.text,
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
               ),
@@ -333,7 +324,7 @@ class _Header extends StatelessWidget {
                 padding: const EdgeInsets.only(right: 4),
                 child: Text(
                   '${conversation!.members.length}',
-                  style: const TextStyle(color: Tokens.muted, fontSize: 13),
+                  style: TextStyle(color: t.muted, fontSize: 13),
                 ),
               )
             else
@@ -342,7 +333,7 @@ class _Header extends StatelessWidget {
                 icon: const Icon(Icons.people_outline, size: 17),
                 label: Text('${conversation!.members.length}'),
                 style: TextButton.styleFrom(
-                  foregroundColor: Tokens.muted,
+                  foregroundColor: t.muted,
                   visualDensity: VisualDensity.compact,
                 ),
               ),
@@ -382,15 +373,16 @@ class _SettingsMenu extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return PopupMenuButton<_SettingsTarget>(
       icon: const Icon(Icons.tune, size: 18),
-      color: Tokens.surface,
+      color: t.surface,
       elevation: 0,
       tooltip: 'Settings',
       position: PopupMenuPosition.under,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: Tokens.rule, width: Tokens.hairline),
+        side: BorderSide(color: t.rule, width: Tokens.hairline),
       ),
       onSelected: (target) => switch (target) {
         _SettingsTarget.channel => onChannelSettings(),
@@ -445,10 +437,11 @@ class _MenuRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = enabled ? Tokens.text : Tokens.faint;
+    final t = context.tokens;
+    final color = enabled ? t.text : t.faint;
     return Row(
       children: [
-        Icon(icon, size: 15, color: enabled ? Tokens.muted : Tokens.faint),
+        Icon(icon, size: 15, color: enabled ? t.muted : t.faint),
         const SizedBox(width: 10),
         Flexible(
           child: Text(
@@ -469,15 +462,16 @@ class _StatusDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final (color, label) = switch (status) {
-      ConnectionStatus_Connected() => (Tokens.ok, 'Connected'),
-      ConnectionStatus_Connecting() => (Tokens.warn, 'Connecting'),
-      ConnectionStatus_Registering() => (Tokens.warn, 'Registering'),
+      ConnectionStatus_Connected() => (t.ok, 'Connected'),
+      ConnectionStatus_Connecting() => (t.warn, 'Connecting'),
+      ConnectionStatus_Registering() => (t.warn, 'Registering'),
       ConnectionStatus_Reconnecting(:final retryInSecs) => (
-        Tokens.warn,
+        t.warn,
         'Reconnecting in ${retryInSecs}s',
       ),
-      ConnectionStatus_Disconnected() => (Tokens.bad, 'Disconnected'),
+      ConnectionStatus_Disconnected() => (t.bad, 'Disconnected'),
     };
     return Tooltip(
       message: label,
@@ -509,12 +503,13 @@ class _TopicBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 7, 20, 8),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          bottom: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: Tooltip(
@@ -523,11 +518,7 @@ class _TopicBar extends StatelessWidget {
           topic,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Tokens.muted,
-            fontSize: 12,
-            height: 1.3,
-          ),
+          style: TextStyle(color: t.muted, fontSize: 12, height: 1.3),
         ),
       ),
     );
@@ -542,14 +533,12 @@ class _ErrorBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
-      color: Tokens.bad.withValues(alpha: 0.10),
-      child: Text(
-        text,
-        style: const TextStyle(color: Tokens.bad, fontSize: 12),
-      ),
+      color: t.bad.withValues(alpha: 0.10),
+      child: Text(text, style: TextStyle(color: t.bad, fontSize: 12)),
     );
   }
 }

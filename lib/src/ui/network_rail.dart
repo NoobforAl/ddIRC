@@ -20,23 +20,26 @@ class NetworkRail extends StatelessWidget {
     required this.onSelect,
     required this.onAdd,
     required this.onEdit,
+    required this.onAppSettings,
   });
 
   final Workspace workspace;
   final ValueChanged<Profile> onSelect;
   final VoidCallback onAdd;
   final ValueChanged<Profile> onEdit;
+  final VoidCallback onAppSettings;
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final profiles = workspace.profiles.profiles;
 
     return Container(
       width: networkRailWidth,
-      decoration: const BoxDecoration(
-        color: Tokens.surface,
+      decoration: BoxDecoration(
+        color: t.surface,
         border: Border(
-          right: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          right: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: Column(
@@ -62,7 +65,14 @@ class NetworkRail extends StatelessWidget {
             ),
           ),
           const Divider(height: Tokens.hairline),
-          _AddButton(onTap: onAdd),
+          _RailButton(icon: Icons.add, tooltip: 'Add a network', onTap: onAdd),
+          // The rail is the only surface on screen in every state, so it is
+          // also the only place app settings can always be reached from.
+          _RailButton(
+            icon: Icons.settings_outlined,
+            tooltip: 'App settings',
+            onTap: onAppSettings,
+          ),
         ],
       ),
     );
@@ -96,6 +106,7 @@ class _RailEntry extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: InkWell(
@@ -111,7 +122,7 @@ class _RailEntry extends StatelessWidget {
               Container(
                 width: 2,
                 height: 26,
-                color: selected ? Tokens.accent : Colors.transparent,
+                color: selected ? t.accent : Colors.transparent,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -155,6 +166,7 @@ class _Mark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final live = connected || connecting;
 
     return Stack(
@@ -165,10 +177,10 @@ class _Mark extends StatelessWidget {
           height: 34,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected ? Tokens.surfaceHover : null,
+            color: selected ? t.surfaceHover : null,
             borderRadius: BorderRadius.circular(9),
             border: Border.all(
-              color: selected ? Tokens.accent : Tokens.rule,
+              color: selected ? t.accent : t.rule,
               width: selected ? 1 : Tokens.hairline,
             ),
           ),
@@ -176,7 +188,7 @@ class _Mark extends StatelessWidget {
             profile.initials,
             style: TextStyle(
               // A disconnected network is legible but clearly dormant.
-              color: live ? Tokens.text : Tokens.faint,
+              color: live ? t.text : t.faint,
               fontSize: 12,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.2,
@@ -212,11 +224,12 @@ class _StatusPip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final color = failed
-        ? Tokens.bad
+        ? t.bad
         : connecting
-        ? Tokens.warn
-        : Tokens.ok;
+        ? t.warn
+        : t.ok;
 
     return Container(
       width: 8,
@@ -226,7 +239,7 @@ class _StatusPip extends StatelessWidget {
         shape: BoxShape.circle,
         // Ringed in the panel colour so it reads as sitting on top of the
         // mark rather than being part of its border.
-        border: Border.all(color: Tokens.surface, width: 1.5),
+        border: Border.all(color: t.surface, width: 1.5),
       ),
     );
   }
@@ -240,17 +253,18 @@ class _Count extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
-        color: highlighted ? Tokens.accent : Tokens.badge,
+        color: highlighted ? t.accent : t.badge,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Tokens.surface, width: 1.5),
+        border: Border.all(color: t.surface, width: 1.5),
       ),
       child: Text(
         count > 99 ? '99+' : '$count',
         style: TextStyle(
-          color: highlighted ? Tokens.bg : Tokens.text,
+          color: highlighted ? t.onAccent : t.text,
           fontSize: 9.5,
           fontWeight: FontWeight.w600,
           fontFeatures: const [FontFeature.tabularFigures()],
@@ -260,28 +274,42 @@ class _Count extends StatelessWidget {
   }
 }
 
-class _AddButton extends StatelessWidget {
-  const _AddButton({required this.onTap});
+/// One of the utility buttons in the rail's footer.
+///
+/// The rail is too narrow for a label, so the tooltip is the only thing that
+/// names the action.
+class _RailButton extends StatelessWidget {
+  const _RailButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
 
+  final IconData icon;
+  final String tooltip;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: const SizedBox(
-        height: 46,
-        child: Icon(Icons.add, size: 19, color: Tokens.muted),
+    final t = context.tokens;
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 46,
+          child: Icon(icon, size: 19, color: t.muted),
+        ),
       ),
     );
   }
 }
 
 /// The connection status of one session, for the rail and the header.
-Color statusColor(ConnectionStatus status) => switch (status) {
-  ConnectionStatus_Connected() => Tokens.ok,
-  ConnectionStatus_Connecting() => Tokens.warn,
-  ConnectionStatus_Registering() => Tokens.warn,
-  ConnectionStatus_Reconnecting() => Tokens.warn,
-  ConnectionStatus_Disconnected() => Tokens.bad,
+Color statusColor(ConnectionStatus status, Tokens t) => switch (status) {
+  ConnectionStatus_Connected() => t.ok,
+  ConnectionStatus_Connecting() => t.warn,
+  ConnectionStatus_Registering() => t.warn,
+  ConnectionStatus_Reconnecting() => t.warn,
+  ConnectionStatus_Disconnected() => t.bad,
 };

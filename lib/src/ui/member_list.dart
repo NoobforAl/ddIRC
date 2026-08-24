@@ -12,16 +12,17 @@ class MemberList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
-      color: Tokens.surface,
+      color: t.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
             padding: EdgeInsets.fromLTRB(14, 14, onClose == null ? 14 : 6, 13),
-            decoration: const BoxDecoration(
+            decoration: BoxDecoration(
               border: Border(
-                bottom: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+                bottom: BorderSide(color: t.rule, width: Tokens.hairline),
               ),
             ),
             child: Row(
@@ -29,8 +30,8 @@ class MemberList extends StatelessWidget {
                 Expanded(
                   child: Text(
                     '${members.length} ${members.length == 1 ? 'member' : 'members'}',
-                    style: const TextStyle(
-                      color: Tokens.muted,
+                    style: TextStyle(
+                      color: t.muted,
                       fontSize: 12,
                       letterSpacing: 0.2,
                     ),
@@ -40,7 +41,7 @@ class MemberList extends StatelessWidget {
                   IconButton(
                     onPressed: onClose,
                     icon: const Icon(Icons.close, size: 18),
-                    color: Tokens.muted,
+                    color: t.muted,
                     visualDensity: VisualDensity.compact,
                   ),
               ],
@@ -48,10 +49,10 @@ class MemberList extends StatelessWidget {
           ),
           Expanded(
             child: members.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       'No members yet.',
-                      style: TextStyle(color: Tokens.faint, fontSize: 12),
+                      style: TextStyle(color: t.faint, fontSize: 12),
                     ),
                   )
                 : ListView.builder(
@@ -73,10 +74,11 @@ class _MemberRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final prefix = member.prefix;
     // Away members recede rather than disappear — still readable, clearly
     // secondary.
-    final color = member.away ? Tokens.faint : Tokens.text;
+    final color = member.away ? t.faint : t.text;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
@@ -89,7 +91,7 @@ class _MemberRow extends StatelessWidget {
             child: Text(
               prefix ?? '',
               style: TextStyle(
-                color: member.away ? Tokens.faint : Tokens.accent,
+                color: member.away ? t.faint : t.accent,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),

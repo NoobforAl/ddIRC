@@ -123,8 +123,9 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final config = session.config;
-    final (statusLabel, statusColor) = _describe(session.status);
+    final (statusLabel, statusColor) = _describe(session.status, t);
 
     return SettingsDialog(
       title: 'Server settings',
@@ -133,11 +134,11 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
         SettingsSection(
           label: 'Identity',
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(18, 2, 18, 6),
               child: Text(
                 'Nickname',
-                style: TextStyle(color: Tokens.text, fontSize: 13.5),
+                style: TextStyle(color: t.text, fontSize: 13.5),
               ),
             ),
             Padding(
@@ -208,16 +209,12 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
         SettingsSection(
           label: 'Disconnect',
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(18, 2, 18, 10),
               child: Text(
                 'Closes this network and its conversations. Other networks '
                 'stay connected. Scrollback is not kept.',
-                style: TextStyle(
-                  color: Tokens.faint,
-                  fontSize: 11.5,
-                  height: 1.4,
-                ),
+                style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
               ),
             ),
             SettingsActions(
@@ -235,16 +232,17 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
     );
   }
 
-  static (String, Color) _describe(ConnectionStatus status) => switch (status) {
-    ConnectionStatus_Connected() => ('Connected', Tokens.ok),
-    ConnectionStatus_Connecting() => ('Connecting', Tokens.warn),
-    ConnectionStatus_Registering() => ('Registering', Tokens.warn),
-    ConnectionStatus_Reconnecting(:final retryInSecs, :final attempt) => (
-      'Reconnecting in ${retryInSecs}s (attempt $attempt)',
-      Tokens.warn,
-    ),
-    ConnectionStatus_Disconnected() => ('Disconnected', Tokens.bad),
-  };
+  static (String, Color) _describe(ConnectionStatus status, Tokens t) =>
+      switch (status) {
+        ConnectionStatus_Connected() => ('Connected', t.ok),
+        ConnectionStatus_Connecting() => ('Connecting', t.warn),
+        ConnectionStatus_Registering() => ('Registering', t.warn),
+        ConnectionStatus_Reconnecting(:final retryInSecs, :final attempt) => (
+          'Reconnecting in ${retryInSecs}s (attempt $attempt)',
+          t.warn,
+        ),
+        ConnectionStatus_Disconnected() => ('Disconnected', t.bad),
+      };
 
   /// Never renders a credential — only which mechanism was used.
   static String _describeAuth(AuthOutcome? auth, ServerConfig config) {

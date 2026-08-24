@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// How loudly a conversation is allowed to ask for attention.
@@ -28,6 +28,16 @@ enum Density {
   final double verticalPadding;
 }
 
+/// Display names for Flutter's own [ThemeMode], so the settings UI can render
+/// it the same way it renders [Density] and [NotifyLevel].
+extension ThemeModeLabel on ThemeMode {
+  String get label => switch (this) {
+    ThemeMode.system => 'System',
+    ThemeMode.light => 'Light',
+    ThemeMode.dark => 'Dark',
+  };
+}
+
 /// Client-side preferences.
 ///
 /// None of this reaches the network — it is purely how the client renders and
@@ -40,6 +50,7 @@ class AppSettings extends ChangeNotifier {
   static const _kTwentyFourHour = 'ui.clock24';
   static const _kSystemMessages = 'ui.systemMessages';
   static const _kDensity = 'ui.density';
+  static const _kThemeMode = 'ui.themeMode';
   static const _kColors = 'ui.mircColors';
   static const _kNotifyPrefix = 'notify.';
 
@@ -50,6 +61,7 @@ class AppSettings extends ChangeNotifier {
   bool _showSystemMessages = true;
   bool _renderColors = true;
   Density _density = Density.comfortable;
+  ThemeMode _themeMode = ThemeMode.dark;
   final Map<String, NotifyLevel> _notify = {};
 
   /// Load from disk, falling back to defaults if the store is unavailable.
@@ -80,6 +92,10 @@ class AppSettings extends ChangeNotifier {
       (d) => d.name == prefs.getString(_kDensity),
       orElse: () => _density,
     );
+    _themeMode = ThemeMode.values.firstWhere(
+      (m) => m.name == prefs.getString(_kThemeMode),
+      orElse: () => _themeMode,
+    );
     for (final key in prefs.getKeys()) {
       if (!key.startsWith(_kNotifyPrefix)) continue;
       final level = NotifyLevel.values.firstWhere(
@@ -95,6 +111,7 @@ class AppSettings extends ChangeNotifier {
   bool get showSystemMessages => _showSystemMessages;
   bool get renderColors => _renderColors;
   Density get density => _density;
+  ThemeMode get themeMode => _themeMode;
 
   set showTimestamps(bool value) => _set(_kTimestamps, value, () {
     _showTimestamps = value;
@@ -114,6 +131,10 @@ class AppSettings extends ChangeNotifier {
 
   set density(Density value) => _set(_kDensity, value.name, () {
     _density = value;
+  });
+
+  set themeMode(ThemeMode value) => _set(_kThemeMode, value.name, () {
+    _themeMode = value;
   });
 
   /// The notification level for one conversation on one network.

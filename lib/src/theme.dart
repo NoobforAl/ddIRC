@@ -8,52 +8,215 @@ import 'package:flutter/material.dart';
 /// weights, one accent, three status colours. Typography and spacing carry the
 /// layout, so there are no gradients, shadows or elevation anywhere in the app,
 /// and separation is a hairline.
-class Tokens {
+///
+/// There are two instances, [dark] and [light]. They ride on [ThemeData] as a
+/// [ThemeExtension] so that `themeMode` picks between them and Flutter animates
+/// the change; widgets never name one directly, they read `context.tokens`.
+class Tokens extends ThemeExtension<Tokens> {
+  const Tokens._({
+    required this.brightness,
+    required this.bg,
+    required this.surface,
+    required this.surfaceHover,
+    required this.rule,
+    required this.text,
+    required this.muted,
+    required this.faint,
+    required this.accent,
+    required this.onAccent,
+    required this.mention,
+    required this.mentionRule,
+    required this.ok,
+    required this.warn,
+    required this.bad,
+    required this.badge,
+  });
+
   /// 0.5 logical pixels: a true hairline on any density.
+  ///
+  /// A metric rather than a colour, so it stays a compile-time constant and
+  /// keeps working inside `const` widget expressions.
   static const hairline = 0.5;
 
-  static const bg = Color(0xFF101012);
-  static const surface = Color(0xFF161619);
-  static const surfaceHover = Color(0xFF1D1D22);
-  static const rule = Color(0xFF2A2A30);
+  final Brightness brightness;
 
-  static const text = Color(0xFFE6E6EA);
-  static const muted = Color(0xFF83838F);
-  static const faint = Color(0xFF5A5A64);
+  final Color bg;
+  final Color surface;
+  final Color surfaceHover;
+  final Color rule;
 
-  static const accent = Color(0xFF7FB3FF);
+  final Color text;
+  final Color muted;
+  final Color faint;
+
+  final Color accent;
+
+  /// What sits *on* [accent] — badge text, a filled button's label, a switch
+  /// thumb. Not the same thing as [bg], even though in the dark palette they
+  /// happen to share a value.
+  final Color onAccent;
 
   /// A wash, not a shout — a mention should catch the eye on a scan without
   /// making the message harder to read.
-  static const mention = Color(0x1A7FB3FF);
-  static const mentionRule = Color(0xFF7FB3FF);
+  final Color mention;
+  final Color mentionRule;
 
-  static const ok = Color(0xFF6FCF8B);
-  static const warn = Color(0xFFE0B341);
-  static const bad = Color(0xFFE06C6C);
+  final Color ok;
+  final Color warn;
+  final Color bad;
 
-  static const badge = Color(0xFF3A6EA5);
+  final Color badge;
 
-  static ThemeData theme() {
+  static const dark = Tokens._(
+    brightness: Brightness.dark,
+    bg: Color(0xFF101012),
+    surface: Color(0xFF161619),
+    surfaceHover: Color(0xFF1D1D22),
+    rule: Color(0xFF2A2A30),
+    text: Color(0xFFE6E6EA),
+    muted: Color(0xFF83838F),
+    faint: Color(0xFF5A5A64),
+    accent: Color(0xFF7FB3FF),
+    onAccent: Color(0xFF101012),
+    mention: Color(0x1A7FB3FF),
+    mentionRule: Color(0xFF7FB3FF),
+    ok: Color(0xFF6FCF8B),
+    warn: Color(0xFFE0B341),
+    bad: Color(0xFFE06C6C),
+    badge: Color(0xFF3A6EA5),
+  );
+
+  /// Not an inversion of [dark]: an accent that reads well *on* near-black is
+  /// too pale to read *against* near-white, so the accent and the three status
+  /// colours are darkened rather than flipped.
+  static const light = Tokens._(
+    brightness: Brightness.light,
+    bg: Color(0xFFFCFCFD),
+    surface: Color(0xFFF3F3F6),
+    surfaceHover: Color(0xFFE9E9EE),
+    rule: Color(0xFFDCDCE2),
+    text: Color(0xFF17171B),
+    muted: Color(0xFF63636E),
+    faint: Color(0xFF8E8E99),
+    accent: Color(0xFF2A62C4),
+    onAccent: Color(0xFFFFFFFF),
+    mention: Color(0x142A62C4),
+    mentionRule: Color(0xFF2A62C4),
+    ok: Color(0xFF1E7F45),
+    warn: Color(0xFF8A6100),
+    bad: Color(0xFFC0392F),
+    // Pale rather than solid, so an unread count still carries [text] and only
+    // a mention gets the loud accent chip. The dark palette gets the same
+    // effect the other way round, from a mid blue under near-white text.
+    badge: Color(0xFFC9D9F5),
+  );
+
+  /// The palette a mode resolves to right now.
+  ///
+  /// Inside the app, `themeMode` on [MaterialApp] does this and widgets read
+  /// `context.tokens`. This is for the one caller that needs a colour before
+  /// there is a context at all: the native window background, which is painted
+  /// before the first frame.
+  static Tokens forMode(ThemeMode mode) => switch (mode) {
+    ThemeMode.light => light,
+    ThemeMode.dark => dark,
+    ThemeMode.system =>
+      WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+              Brightness.light
+          ? light
+          : dark,
+  };
+
+  static ThemeData themeFor(Tokens t) {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: bg,
+      brightness: t.brightness,
+      scaffoldBackgroundColor: t.bg,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: accent,
-        brightness: Brightness.dark,
-        surface: bg,
+        seedColor: t.accent,
+        brightness: t.brightness,
+        surface: t.bg,
       ),
       // Ornament the design excludes.
-      dividerTheme: const DividerThemeData(
+      dividerTheme: DividerThemeData(
         thickness: hairline,
-        color: rule,
+        color: t.rule,
         space: hairline,
       ),
       splashFactory: NoSplash.splashFactory,
       highlightColor: Colors.transparent,
+      extensions: [t],
     );
   }
+
+  @override
+  Tokens copyWith({
+    Brightness? brightness,
+    Color? bg,
+    Color? surface,
+    Color? surfaceHover,
+    Color? rule,
+    Color? text,
+    Color? muted,
+    Color? faint,
+    Color? accent,
+    Color? onAccent,
+    Color? mention,
+    Color? mentionRule,
+    Color? ok,
+    Color? warn,
+    Color? bad,
+    Color? badge,
+  }) {
+    return Tokens._(
+      brightness: brightness ?? this.brightness,
+      bg: bg ?? this.bg,
+      surface: surface ?? this.surface,
+      surfaceHover: surfaceHover ?? this.surfaceHover,
+      rule: rule ?? this.rule,
+      text: text ?? this.text,
+      muted: muted ?? this.muted,
+      faint: faint ?? this.faint,
+      accent: accent ?? this.accent,
+      onAccent: onAccent ?? this.onAccent,
+      mention: mention ?? this.mention,
+      mentionRule: mentionRule ?? this.mentionRule,
+      ok: ok ?? this.ok,
+      warn: warn ?? this.warn,
+      bad: bad ?? this.bad,
+      badge: badge ?? this.badge,
+    );
+  }
+
+  /// Cross-fades one palette into the other, which is what turns switching
+  /// themes into a transition rather than a flash.
+  @override
+  Tokens lerp(covariant ThemeExtension<Tokens>? other, double t) {
+    if (other is! Tokens) return this;
+    return Tokens._(
+      brightness: t < 0.5 ? brightness : other.brightness,
+      bg: Color.lerp(bg, other.bg, t)!,
+      surface: Color.lerp(surface, other.surface, t)!,
+      surfaceHover: Color.lerp(surfaceHover, other.surfaceHover, t)!,
+      rule: Color.lerp(rule, other.rule, t)!,
+      text: Color.lerp(text, other.text, t)!,
+      muted: Color.lerp(muted, other.muted, t)!,
+      faint: Color.lerp(faint, other.faint, t)!,
+      accent: Color.lerp(accent, other.accent, t)!,
+      onAccent: Color.lerp(onAccent, other.onAccent, t)!,
+      mention: Color.lerp(mention, other.mention, t)!,
+      mentionRule: Color.lerp(mentionRule, other.mentionRule, t)!,
+      ok: Color.lerp(ok, other.ok, t)!,
+      warn: Color.lerp(warn, other.warn, t)!,
+      bad: Color.lerp(bad, other.bad, t)!,
+      badge: Color.lerp(badge, other.badge, t)!,
+    );
+  }
+}
+
+/// `context.tokens` — the only way UI code should reach the palette.
+extension TokensOf on BuildContext {
+  Tokens get tokens => Theme.of(this).extension<Tokens>() ?? Tokens.dark;
 }
 
 /// The mIRC colour palette, indices 0-98.
@@ -92,15 +255,17 @@ class MircPalette {
 
   /// A foreground colour that is guaranteed readable on `on`.
   ///
-  /// Colour 1 (black) is extremely common in messages written on light-themed
-  /// clients, and rendering it literally on our dark background produces
-  /// invisible text. Rather than dropping colour support, nudge anything with
-  /// too little contrast back to the normal text colour — the styling intent is
-  /// mostly decorative, but legibility is not optional.
+  /// Senders pick a colour for the background *they* are looking at, so either
+  /// theme sees the problem from one end or the other: colour 1 (black) is
+  /// common in messages written on light clients and vanishes on our dark
+  /// surface, and colour 0 (white) does the same on our light one. Rather than
+  /// dropping colour support, nudge anything with too little contrast against
+  /// `on` back to `fallback` — the styling intent is mostly decorative, but
+  /// legibility is not optional.
   static Color resolve(
     int? index, {
     required Color on,
-    Color fallback = Tokens.text,
+    required Color fallback,
   }) {
     final color = _raw(index);
     if (color == null) return fallback;

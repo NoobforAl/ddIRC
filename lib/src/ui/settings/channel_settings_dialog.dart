@@ -105,6 +105,7 @@ class _ChannelSettingsDialogState extends State<ChannelSettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final settings = SettingsScope.of(context);
     final members = conversation.members;
     final privileged = members.where((m) => m.prefix != null).length;
@@ -198,11 +199,7 @@ class _ChannelSettingsDialogState extends State<ChannelSettingsDialog> {
                     ? 'Leaving removes the channel and its scrollback from this '
                           'session. Rejoin any time with /join ${conversation.name}.'
                     : 'This conversation closes when you leave it.',
-                style: const TextStyle(
-                  color: Tokens.faint,
-                  fontSize: 11.5,
-                  height: 1.4,
-                ),
+                style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
               ),
             ),
             if (conversation.isChannel)

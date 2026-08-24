@@ -26,6 +26,26 @@ class AppSettingsDialog extends StatelessWidget {
       subtitle: 'Applies to every server',
       children: [
         SettingsSection(
+          label: 'Appearance',
+          children: [
+            SettingsChoice<ThemeMode>(
+              label: 'Theme',
+              options: ThemeMode.values,
+              labelFor: (m) => m.label,
+              value: settings.themeMode,
+              onChanged: (v) => settings.themeMode = v,
+            ),
+            SettingsChoice<Density>(
+              label: 'Density',
+              options: Density.values,
+              labelFor: (d) => d.label,
+              value: settings.density,
+              onChanged: (v) => settings.density = v,
+            ),
+          ],
+        ),
+        const SettingsRule(),
+        SettingsSection(
           label: 'Messages',
           children: [
             SettingsSwitch(
@@ -40,13 +60,6 @@ class AppSettingsDialog extends StatelessWidget {
               label: '24-hour clock',
               value: settings.twentyFourHour,
               onChanged: (v) => settings.twentyFourHour = v,
-            ),
-            SettingsChoice<Density>(
-              label: 'Density',
-              options: Density.values,
-              labelFor: (d) => d.label,
-              value: settings.density,
-              onChanged: (v) => settings.density = v,
             ),
           ],
         ),

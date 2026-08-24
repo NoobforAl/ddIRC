@@ -5,6 +5,7 @@ import '../model/workspace.dart';
 import '../theme.dart';
 import 'network_rail.dart';
 import 'session_screen.dart';
+import 'settings/app_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
 
 /// The whole app: networks on the left, then the selected network's session.
@@ -33,6 +34,7 @@ class WorkspaceScreen extends StatelessWidget {
               onSelect: (profile) => _select(context, workspace, profile),
               onAdd: () => _edit(context, workspace, null),
               onEdit: (profile) => _edit(context, workspace, profile),
+              onAppSettings: () => AppSettingsDialog.show(context),
             ),
             Expanded(
               child: session == null
@@ -106,6 +108,7 @@ class _Empty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final profiles = workspace.profiles.profiles;
 
     return Center(
@@ -115,36 +118,36 @@ class _Empty extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'ddIRC',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 26,
                 fontWeight: FontWeight.w600,
-                color: Tokens.text,
+                color: t.text,
                 letterSpacing: -0.5,
               ),
             ),
             const SizedBox(height: 6),
-            const Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.lock_outline, size: 12, color: Tokens.muted),
+                Icon(Icons.lock_outline, size: 12, color: t.muted),
                 SizedBox(width: 5),
                 Text(
                   'Every connection uses TLS.',
-                  style: TextStyle(fontSize: 12.5, color: Tokens.muted),
+                  style: TextStyle(fontSize: 12.5, color: t.muted),
                 ),
               ],
             ),
             const SizedBox(height: 26),
             if (profiles.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(bottom: 16),
                 child: Text(
                   'No networks yet.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Tokens.faint, fontSize: 13),
+                  style: TextStyle(color: t.faint, fontSize: 13),
                 ),
               )
             else ...[
@@ -162,7 +165,7 @@ class _Empty extends StatelessWidget {
               icon: const Icon(Icons.add, size: 17),
               label: Text(profiles.isEmpty ? 'Add a network' : 'Add another'),
               style: TextButton.styleFrom(
-                foregroundColor: Tokens.accent,
+                foregroundColor: t.accent,
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 textStyle: const TextStyle(
                   fontSize: 13.5,
@@ -192,6 +195,7 @@ class _ProfileRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
@@ -202,9 +206,7 @@ class _ProfileRow extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: failure != null
-                  ? Tokens.bad.withValues(alpha: 0.4)
-                  : Tokens.rule,
+              color: failure != null ? t.bad.withValues(alpha: 0.4) : t.rule,
               width: Tokens.hairline,
             ),
           ),
@@ -217,8 +219,8 @@ class _ProfileRow extends StatelessWidget {
                     child: Text(
                       profile.name,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Tokens.text,
+                      style: TextStyle(
+                        color: t.text,
                         fontSize: 13.5,
                         fontWeight: FontWeight.w600,
                       ),
@@ -226,14 +228,14 @@ class _ProfileRow extends StatelessWidget {
                   ),
                   Text(
                     connecting ? 'Connecting…' : profile.nickname,
-                    style: const TextStyle(color: Tokens.muted, fontSize: 12),
+                    style: TextStyle(color: t.muted, fontSize: 12),
                   ),
                 ],
               ),
               const SizedBox(height: 2),
               Text(
                 '${profile.host}:${profile.port}',
-                style: const TextStyle(color: Tokens.faint, fontSize: 11.5),
+                style: TextStyle(color: t.faint, fontSize: 11.5),
               ),
               // The reason a network would not connect belongs with that
               // network, not in a banner that outlives the attempt.
@@ -241,11 +243,7 @@ class _ProfileRow extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   failure!,
-                  style: const TextStyle(
-                    color: Tokens.bad,
-                    fontSize: 11.5,
-                    height: 1.35,
-                  ),
+                  style: TextStyle(color: t.bad, fontSize: 11.5, height: 1.35),
                 ),
               ],
             ],

@@ -50,6 +50,7 @@ class _MessageViewState extends State<MessageView> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final settings = SettingsScope.of(context);
     final all = widget.conversation.lines;
     // Filtering before grouping, not during: a hidden join between two of
@@ -64,10 +65,10 @@ class _MessageViewState extends State<MessageView> {
     }
 
     if (lines.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
           'Nothing here yet.',
-          style: TextStyle(color: Tokens.faint, fontSize: 13),
+          style: TextStyle(color: t.faint, fontSize: 13),
         ),
       );
     }
@@ -110,17 +111,14 @@ class _SystemLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
       child: Center(
         child: Text(
           text,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Tokens.muted,
-            fontSize: 11.5,
-            height: 1.3,
-          ),
+          style: TextStyle(color: t.muted, fontSize: 11.5, height: 1.3),
         ),
       ),
     );
@@ -140,6 +138,7 @@ class _MessageLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final message = line.message!;
     final mine = message.isSelf;
 
@@ -148,11 +147,9 @@ class _MessageLine extends StatelessWidget {
       // A wash, not a shout. The rule on the leading edge is what actually
       // catches the eye when scanning a long channel.
       decoration: line.isMention
-          ? const BoxDecoration(
-              color: Tokens.mention,
-              border: Border(
-                left: BorderSide(color: Tokens.mentionRule, width: 2),
-              ),
+          ? BoxDecoration(
+              color: t.mention,
+              border: Border(left: BorderSide(color: t.mentionRule, width: 2)),
             )
           : null,
       padding: EdgeInsets.fromLTRB(
@@ -200,6 +197,7 @@ class _SenderLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     // Privilege is plain text, straight from the server's ISUPPORT — never a
     // badge, and never a hardcoded @/+ that would break on networks with
     // halfop or owner prefixes.
@@ -207,8 +205,8 @@ class _SenderLabel extends StatelessWidget {
     final time = settings.showTimestamps
         ? Text(
             settings.formatTime(at),
-            style: const TextStyle(
-              color: Tokens.faint,
+            style: TextStyle(
+              color: t.faint,
               fontSize: 10.5,
               fontFeatures: [FontFeature.tabularFigures()],
             ),
@@ -217,7 +215,7 @@ class _SenderLabel extends StatelessWidget {
     final nick = Text(
       '$prefix${message.sender}',
       style: TextStyle(
-        color: mine ? Tokens.accent : Tokens.muted,
+        color: mine ? t.accent : t.muted,
         fontSize: 11.5,
         fontWeight: FontWeight.w600,
       ),
@@ -256,7 +254,8 @@ class _MessageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const base = TextStyle(color: Tokens.text, fontSize: 14, height: 1.4);
+    final t = context.tokens;
+    final base = TextStyle(color: t.text, fontSize: 14, height: 1.4);
 
     // Actions read in the third person; notices are services rather than
     // people, and the classic -nick- form is worth keeping so they are
@@ -268,9 +267,9 @@ class _MessageBody extends StatelessWidget {
         : '';
 
     final style = message.isAction
-        ? base.copyWith(fontStyle: FontStyle.italic, color: Tokens.text)
+        ? base.copyWith(fontStyle: FontStyle.italic, color: t.text)
         : message.isNotice
-        ? base.copyWith(color: Tokens.muted)
+        ? base.copyWith(color: t.muted)
         : base;
 
     return RichText(
@@ -281,9 +280,9 @@ class _MessageBody extends StatelessWidget {
           if (leading.isNotEmpty)
             TextSpan(
               text: leading,
-              style: style.copyWith(color: Tokens.faint),
+              style: style.copyWith(color: t.faint),
             ),
-          ...message.spans.map((span) => _span(span, style, renderColors)),
+          ...message.spans.map((span) => _span(span, style, renderColors, t)),
         ],
       ),
     );
@@ -293,12 +292,17 @@ class _MessageBody extends StatelessWidget {
   ///
   /// The text is already free of control characters, so nothing here needs to
   /// re-sanitise; only the styling flags matter.
-  static TextSpan _span(rust.TextSpan span, TextStyle base, bool colors) {
+  static TextSpan _span(
+    rust.TextSpan span,
+    TextStyle base,
+    bool colors,
+    Tokens t,
+  ) {
     final s = span.style;
     final background = colors ? MircPalette.background(s.bg) : null;
     // Contrast is measured against whatever this run actually sits on, so a
     // server-chosen foreground can never vanish into its own background.
-    final surface = background ?? Tokens.bg;
+    final surface = background ?? t.bg;
 
     var style = base.copyWith(
       fontWeight: s.bold ? FontWeight.w700 : null,
@@ -319,8 +323,8 @@ class _MessageBody extends StatelessWidget {
     // since it is sometimes the only styling a message carries.
     if (s.inverse) {
       style = style.copyWith(
-        color: background ?? Tokens.bg,
-        backgroundColor: style.color ?? Tokens.text,
+        color: background ?? t.bg,
+        backgroundColor: style.color ?? t.text,
       );
     }
 

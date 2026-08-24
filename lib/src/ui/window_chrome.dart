@@ -23,15 +23,15 @@ const double windowChromeHeight = 34;
 ///
 /// Called from `main`, and only on desktop — the window must be reconfigured
 /// while it is still hidden, otherwise the caption flashes on screen first.
-Future<void> prepareWindow() async {
+Future<void> prepareWindow(Tokens t) async {
   if (!hasWindowChrome) return;
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
-    const WindowOptions(
+    WindowOptions(
       size: Size(1180, 780),
       minimumSize: Size(420, 480),
       center: true,
-      backgroundColor: Tokens.bg,
+      backgroundColor: t.bg,
       // The frame is ours from here on; the OS draws nothing — including
       // macOS's own traffic lights, which would otherwise sit beside ours.
       titleBarStyle: TitleBarStyle.hidden,
@@ -72,12 +72,13 @@ class _TitleStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       height: windowChromeHeight,
-      decoration: const BoxDecoration(
-        color: Tokens.bg,
+      decoration: BoxDecoration(
+        color: t.bg,
         border: Border(
-          bottom: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          bottom: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       // The frame sits above the navigator, so there is no Material in scope;
@@ -110,15 +111,12 @@ class _Title extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Align(
+    final t = context.tokens;
+    return Align(
       alignment: Alignment.centerLeft,
       child: Text(
         'ddIRC',
-        style: TextStyle(
-          color: Tokens.faint,
-          fontSize: 11.5,
-          letterSpacing: 0.3,
-        ),
+        style: TextStyle(color: t.faint, fontSize: 11.5, letterSpacing: 0.3),
       ),
     );
   }

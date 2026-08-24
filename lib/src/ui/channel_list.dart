@@ -13,7 +13,6 @@ class ChannelList extends StatelessWidget {
     required this.onSelect,
     this.onDisconnect,
     this.onChannelSettings,
-    this.onAppSettings,
   });
 
   final SessionModel session;
@@ -25,10 +24,10 @@ class ChannelList extends StatelessWidget {
 
   /// Opens the settings for one conversation — right-click or long-press.
   final ValueChanged<Conversation>? onChannelSettings;
-  final VoidCallback? onAppSettings;
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final conversations = session.conversations;
     final active = session.active;
     // Read here rather than per row, so changing a channel's level in the
@@ -36,19 +35,19 @@ class ChannelList extends StatelessWidget {
     final settings = SettingsScope.of(context);
 
     return Container(
-      color: Tokens.surface,
+      color: t.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _header(),
+          _header(t),
           Expanded(
             child: conversations.isEmpty
-                ? const Center(
+                ? Center(
                     child: Text(
                       'No channels yet.\nUse /join #channel',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Tokens.faint,
+                        color: t.faint,
                         fontSize: 12,
                         height: 1.5,
                       ),
@@ -76,18 +75,18 @@ class ChannelList extends StatelessWidget {
                     },
                   ),
           ),
-          if (onDisconnect != null) _footer(),
+          if (onDisconnect != null) _footer(t),
         ],
       ),
     );
   }
 
-  Widget _header() {
+  Widget _header(Tokens t) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 8, 10),
-      decoration: const BoxDecoration(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+      decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          bottom: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: Row(
@@ -101,8 +100,8 @@ class ChannelList extends StatelessWidget {
                   // The server's own name for the network wins once it
                   // arrives; until then, the name the user gave it.
                   session.network ?? networkName,
-                  style: const TextStyle(
-                    color: Tokens.text,
+                  style: TextStyle(
+                    color: t.text,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                   ),
@@ -111,38 +110,28 @@ class ChannelList extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   session.nick,
-                  style: const TextStyle(color: Tokens.muted, fontSize: 12),
+                  style: TextStyle(color: t.muted, fontSize: 12),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-          if (onAppSettings != null)
-            IconButton(
-              onPressed: onAppSettings,
-              icon: const Icon(Icons.settings_outlined, size: 17),
-              color: Tokens.muted,
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              tooltip: 'App settings',
-            ),
         ],
       ),
     );
   }
 
-  Widget _footer() {
+  Widget _footer(Tokens t) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          top: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          top: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: TextButton(
         onPressed: onDisconnect,
         style: TextButton.styleFrom(
-          foregroundColor: Tokens.muted,
+          foregroundColor: t.muted,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: const RoundedRectangleBorder(),
         ),
@@ -169,6 +158,7 @@ class _ChannelRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final unread = conversation.unread;
     final mentions = conversation.unreadMentions;
 
@@ -182,10 +172,10 @@ class _ChannelRow extends StatelessWidget {
         // The active channel is marked by a leading rule and a lifted
         // background — no pill, no fill, consistent with the hairline language.
         decoration: BoxDecoration(
-          color: selected ? Tokens.surfaceHover : null,
+          color: selected ? t.surfaceHover : null,
           border: Border(
             left: BorderSide(
-              color: selected ? Tokens.accent : Colors.transparent,
+              color: selected ? t.accent : Colors.transparent,
               width: 2,
             ),
           ),
@@ -198,9 +188,7 @@ class _ChannelRow extends StatelessWidget {
                 conversation.name,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: selected
-                      ? Tokens.text
-                      : (unread > 0 ? Tokens.text : Tokens.muted),
+                  color: selected ? t.text : (unread > 0 ? t.text : t.muted),
                   fontSize: 13,
                   fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400,
                 ),
@@ -208,11 +196,7 @@ class _ChannelRow extends StatelessWidget {
             ),
             if (muted) ...[
               const SizedBox(width: 6),
-              const Icon(
-                Icons.notifications_off_outlined,
-                size: 13,
-                color: Tokens.faint,
-              ),
+              Icon(Icons.notifications_off_outlined, size: 13, color: t.faint),
             ],
             if (unread > 0) ...[
               const SizedBox(width: 8),
@@ -233,17 +217,18 @@ class _Badge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
         // A mention is worth interrupting for; ambient chatter is not.
-        color: highlighted ? Tokens.accent : Tokens.badge,
+        color: highlighted ? t.accent : t.badge,
         borderRadius: BorderRadius.circular(9),
       ),
       child: Text(
         count > 99 ? '99+' : '$count',
         style: TextStyle(
-          color: highlighted ? Tokens.bg : Tokens.text,
+          color: highlighted ? t.onAccent : t.text,
           fontSize: 10.5,
           fontWeight: FontWeight.w600,
           fontFeatures: const [FontFeature.tabularFigures()],

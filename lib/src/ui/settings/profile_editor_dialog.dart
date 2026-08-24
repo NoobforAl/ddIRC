@@ -204,6 +204,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final connected = WorkspaceScope.of(
       context,
     ).isConnected(widget.profile?.id ?? '');
@@ -216,6 +217,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           label: 'Server',
           children: [
             _field(
+              t,
               _Input.name,
               'Name',
               hint: 'Optional — defaults to the host',
@@ -226,26 +228,28 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 Expanded(
                   flex: 3,
                   child: _field(
+                    t,
                     _Input.host,
                     'Address',
                     hint: 'irc.example.org',
                   ),
                 ),
-                Expanded(child: _field(_Input.port, 'Port')),
+                Expanded(child: _field(t, _Input.port, 'Port')),
               ],
             ),
-            _field(_Input.channels, 'Channels', hint: 'Comma-separated'),
+            _field(t, _Input.channels, 'Channels', hint: 'Comma-separated'),
           ],
         ),
         const SettingsRule(),
         SettingsSection(
           label: 'Identity',
           children: [
-            _field(_Input.nick, 'Nickname'),
-            _saslToggle(),
+            _field(t, _Input.nick, 'Nickname'),
+            _saslToggle(t),
             if (_showSasl) ...[
-              _field(_Input.account, 'SASL account'),
+              _field(t, _Input.account, 'SASL account'),
               _field(
+                t,
                 _Input.password,
                 'SASL password',
                 obscure: true,
@@ -253,16 +257,12 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                     ? 'Stored — leave blank to keep it'
                     : null,
               ),
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
                 child: Text(
                   'Kept in the platform keychain, never in app settings, and '
                   'zeroized by the core once authentication completes.',
-                  style: TextStyle(
-                    color: Tokens.faint,
-                    fontSize: 11.5,
-                    height: 1.4,
-                  ),
+                  style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
                 ),
               ),
             ],
@@ -295,7 +295,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     );
   }
 
-  Widget _saslToggle() {
+  Widget _saslToggle(Tokens t) {
     return InkWell(
       onTap: () => setState(() => _showSasl = !_showSasl),
       child: Padding(
@@ -305,12 +305,12 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
             Icon(
               _showSasl ? Icons.expand_less : Icons.expand_more,
               size: 16,
-              color: Tokens.muted,
+              color: t.muted,
             ),
             const SizedBox(width: 4),
-            const Text(
+            Text(
               'SASL account (optional)',
-              style: TextStyle(color: Tokens.muted, fontSize: 12.5),
+              style: TextStyle(color: t.muted, fontSize: 12.5),
             ),
           ],
         ),
@@ -319,6 +319,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   }
 
   Widget _field(
+    Tokens t,
     _Input field,
     String label, {
     String? hint,
@@ -333,7 +334,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           Text(
             label,
             style: TextStyle(
-              color: error == null ? Tokens.muted : Tokens.bad,
+              color: error == null ? t.muted : t.bad,
               fontSize: 12,
             ),
           ),
@@ -361,10 +362,11 @@ class _SecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return TextButton(
       onPressed: onPressed,
       style: TextButton.styleFrom(
-        foregroundColor: Tokens.muted,
+        foregroundColor: t.muted,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),

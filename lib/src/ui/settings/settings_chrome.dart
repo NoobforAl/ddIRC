@@ -25,17 +25,18 @@ class SettingsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final viewport = MediaQuery.of(context).size;
 
     return Dialog(
-      backgroundColor: Tokens.surface,
+      backgroundColor: t.surface,
       surfaceTintColor: Colors.transparent,
       // No elevation anywhere in this app; the hairline is the separation.
       elevation: 0,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: Tokens.rule, width: Tokens.hairline),
+        side: BorderSide(color: t.rule, width: Tokens.hairline),
       ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -63,11 +64,12 @@ class SettingsDialog extends StatelessWidget {
   }
 
   Widget _header(BuildContext context) {
+    final t = context.tokens;
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 15, 8, 14),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Tokens.rule, width: Tokens.hairline),
+          bottom: BorderSide(color: t.rule, width: Tokens.hairline),
         ),
       ),
       child: Row(
@@ -79,8 +81,8 @@ class SettingsDialog extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    color: Tokens.text,
+                  style: TextStyle(
+                    color: t.text,
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
                   ),
@@ -91,7 +93,7 @@ class SettingsDialog extends StatelessWidget {
                     subtitle!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Tokens.muted, fontSize: 12),
+                    style: TextStyle(color: t.muted, fontSize: 12),
                   ),
                 ],
               ],
@@ -100,7 +102,7 @@ class SettingsDialog extends StatelessWidget {
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
             icon: const Icon(Icons.close, size: 18),
-            color: Tokens.muted,
+            color: t.muted,
             visualDensity: VisualDensity.compact,
             tooltip: 'Close',
           ),
@@ -123,6 +125,7 @@ class SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -130,8 +133,8 @@ class SettingsSection extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
           child: Text(
             label.toUpperCase(),
-            style: const TextStyle(
-              color: Tokens.faint,
+            style: TextStyle(
+              color: t.faint,
               fontSize: 10.5,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.9,
@@ -161,6 +164,7 @@ class SettingsSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return InkWell(
       onTap: () => onChanged(!value),
       child: Padding(
@@ -171,16 +175,13 @@ class SettingsSwitch extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    label,
-                    style: const TextStyle(color: Tokens.text, fontSize: 13.5),
-                  ),
+                  Text(label, style: TextStyle(color: t.text, fontSize: 13.5)),
                   if (description != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       description!,
-                      style: const TextStyle(
-                        color: Tokens.faint,
+                      style: TextStyle(
+                        color: t.faint,
                         fontSize: 11.5,
                         height: 1.35,
                       ),
@@ -193,11 +194,11 @@ class SettingsSwitch extends StatelessWidget {
             Switch(
               value: value,
               onChanged: onChanged,
-              activeThumbColor: Tokens.bg,
-              activeTrackColor: Tokens.accent,
-              inactiveThumbColor: Tokens.muted,
-              inactiveTrackColor: Tokens.surfaceHover,
-              trackOutlineColor: WidgetStatePropertyAll(Tokens.rule),
+              activeThumbColor: t.onAccent,
+              activeTrackColor: t.accent,
+              inactiveThumbColor: t.muted,
+              inactiveTrackColor: t.surfaceHover,
+              trackOutlineColor: WidgetStatePropertyAll(t.rule),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ],
@@ -231,31 +232,25 @@ class SettingsChoice<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 9, 18, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(color: Tokens.text, fontSize: 13.5),
-          ),
+          Text(label, style: TextStyle(color: t.text, fontSize: 13.5)),
           if (description != null) ...[
             const SizedBox(height: 2),
             Text(
               description!,
-              style: const TextStyle(
-                color: Tokens.faint,
-                fontSize: 11.5,
-                height: 1.35,
-              ),
+              style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.35),
             ),
           ],
           const SizedBox(height: 9),
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(7),
-              border: Border.all(color: Tokens.rule, width: Tokens.hairline),
+              border: Border.all(color: t.rule, width: Tokens.hairline),
             ),
             clipBehavior: Clip.antiAlias,
             child: Row(
@@ -294,15 +289,16 @@ class _Segment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return InkWell(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 9),
         decoration: BoxDecoration(
-          color: selected ? Tokens.surfaceHover : null,
+          color: selected ? t.surfaceHover : null,
           border: Border(
             left: BorderSide(
-              color: leadingRule ? Tokens.rule : Colors.transparent,
+              color: leadingRule ? t.rule : Colors.transparent,
               width: Tokens.hairline,
             ),
           ),
@@ -311,7 +307,7 @@ class _Segment extends StatelessWidget {
           label,
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: selected ? Tokens.accent : Tokens.muted,
+            color: selected ? t.accent : t.muted,
             fontSize: 12.5,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
           ),
@@ -338,6 +334,7 @@ class SettingsReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
       child: Row(
@@ -347,14 +344,14 @@ class SettingsReadout extends StatelessWidget {
             width: 108,
             child: Text(
               label,
-              style: const TextStyle(color: Tokens.muted, fontSize: 12.5),
+              style: TextStyle(color: t.muted, fontSize: 12.5),
             ),
           ),
           Expanded(
             child: SelectableText(
               value,
               style: TextStyle(
-                color: valueColor ?? Tokens.text,
+                color: valueColor ?? t.text,
                 fontSize: 12.5,
                 height: 1.35,
                 fontFamily: monospace ? 'monospace' : null,
@@ -397,6 +394,7 @@ class SettingsField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final invalid = error != null;
 
     return Shake(
@@ -416,27 +414,24 @@ class SettingsField extends StatelessWidget {
             autocorrect: false,
             enableSuggestions: false,
             style: TextStyle(
-              color: enabled ? Tokens.text : Tokens.muted,
+              color: enabled ? t.text : t.muted,
               fontSize: 13.5,
               height: 1.35,
             ),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: const TextStyle(color: Tokens.faint, fontSize: 13.5),
+              hintStyle: TextStyle(color: t.faint, fontSize: 13.5),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 11,
                 vertical: 11,
               ),
               enabledBorder: outlinedBorder(
-                invalid ? Tokens.bad : Tokens.rule,
+                invalid ? t.bad : t.rule,
                 invalid ? 1 : Tokens.hairline,
               ),
-              disabledBorder: outlinedBorder(Tokens.rule, Tokens.hairline),
-              focusedBorder: outlinedBorder(
-                invalid ? Tokens.bad : Tokens.accent,
-                1,
-              ),
+              disabledBorder: outlinedBorder(t.rule, Tokens.hairline),
+              focusedBorder: outlinedBorder(invalid ? t.bad : t.accent, 1),
             ),
           ),
           if (invalid)
@@ -444,11 +439,7 @@ class SettingsField extends StatelessWidget {
               padding: const EdgeInsets.only(top: 5),
               child: Text(
                 error!,
-                style: const TextStyle(
-                  color: Tokens.bad,
-                  fontSize: 11.5,
-                  height: 1.35,
-                ),
+                style: TextStyle(color: t.bad, fontSize: 11.5, height: 1.35),
               ),
             ),
         ],
@@ -493,13 +484,14 @@ class SettingsPrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return FilledButton(
       onPressed: onPressed,
       style: FilledButton.styleFrom(
-        backgroundColor: Tokens.accent,
-        foregroundColor: Tokens.bg,
-        disabledBackgroundColor: Tokens.surfaceHover,
-        disabledForegroundColor: Tokens.faint,
+        backgroundColor: t.accent,
+        foregroundColor: t.onAccent,
+        disabledBackgroundColor: t.surfaceHover,
+        disabledForegroundColor: t.faint,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
@@ -524,12 +516,13 @@ class SettingsDangerButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        foregroundColor: Tokens.bad,
+        foregroundColor: t.bad,
         side: BorderSide(
-          color: Tokens.bad.withValues(alpha: 0.45),
+          color: t.bad.withValues(alpha: 0.45),
           width: Tokens.hairline,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
@@ -550,7 +543,8 @@ class SettingsNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isError ? Tokens.bad : Tokens.muted;
+    final t = context.tokens;
+    final color = isError ? t.bad : t.muted;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
       child: Text(
