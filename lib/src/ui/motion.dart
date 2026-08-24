@@ -205,3 +205,98 @@ class Appear extends StatelessWidget {
     );
   }
 }
+
+/// A rotating arc, for work under way with no knowable duration.
+///
+/// Hand-drawn rather than Material's `CircularProgressIndicator`, which
+/// arrives with its own stroke weight, its own easing and a footprint that
+/// will not sit inside a line of text. This is a hairline arc in whatever
+/// colour the caller is already using, sized to the text beside it.
+class Spinner extends StatefulWidget {
+  const Spinner({
+    super.key,
+    required this.color,
+    this.size = 13,
+    this.stroke = 1.6,
+  });
+
+  final Color color;
+  final double size;
+  final double stroke;
+
+  @override
+  State<Spinner> createState() => _SpinnerState();
+}
+
+class _SpinnerState extends State<Spinner> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+
+  bool _spinning = false;
+
+  void _sync() {
+    // With motion off the arc is still drawn — it says "waiting" by being
+    // there — it simply does not turn.
+    final wanted = !context.motion.disabled;
+    if (wanted == _spinning) return;
+    _spinning = wanted;
+    wanted ? _controller.repeat() : _controller.stop();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: widget.size,
+      child: RotationTransition(
+        turns: _controller,
+        child: CustomPaint(
+          painter: _Arc(color: widget.color, stroke: widget.stroke),
+        ),
+      ),
+    );
+  }
+}
+
+class _Arc extends CustomPainter {
+  const _Arc({required this.color, required this.stroke});
+
+  final Color color;
+  final double stroke;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    // Three-quarters of a turn: enough of a gap that the rotation is legible,
+    // enough arc that it still reads as a ring rather than a stray tick.
+    // Inset by half the stroke: an arc is drawn centred on the rectangle's
+    // edge, so at full size its outer half falls outside the box and is clipped.
+    canvas.drawArc(
+      (Offset.zero & size).deflate(stroke / 2),
+      0,
+      3.6,
+      false,
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_Arc old) => old.color != color || old.stroke != stroke;
+}

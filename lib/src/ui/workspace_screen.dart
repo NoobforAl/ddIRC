@@ -182,6 +182,76 @@ class _Empty extends StatelessWidget {
   }
 }
 
+/// Try again, on a row that failed.
+///
+/// A button rather than "click the row again": after a failure the row is
+/// carrying an error message, and clicking an error is not an obvious way to
+/// ask for a second attempt. The icon turns as it is pressed, so the retry is
+/// acknowledged before the connection has anything to report.
+class _RetryButton extends StatefulWidget {
+  const _RetryButton({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_RetryButton> createState() => _RetryButtonState();
+}
+
+class _RetryButtonState extends State<_RetryButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _turn = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500),
+  );
+
+  @override
+  void dispose() {
+    _turn.dispose();
+    super.dispose();
+  }
+
+  void _retry() {
+    if (!context.motion.disabled) _turn.forward(from: 0);
+    widget.onTap();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Touchable(
+      onTap: _retry,
+      borderRadius: BorderRadius.circular(6),
+      builder: (context, touch) => AnimatedContainer(
+        duration: context.motion.fast,
+        curve: Motion.curve,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: t.surfaceHover.withValues(alpha: touch.wash),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RotationTransition(
+              turns: CurvedAnimation(parent: _turn, curve: Motion.curve),
+              child: Icon(Icons.refresh, size: 14, color: t.accent),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              'Retry',
+              style: TextStyle(
+                color: t.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ProfileRow extends StatelessWidget {
   const _ProfileRow({
     required this.profile,
@@ -233,9 +303,37 @@ class _ProfileRow extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Text(
-                    connecting ? 'Connecting…' : profile.nickname,
-                    style: TextStyle(color: t.muted, fontSize: 12),
+                  // Nickname, unless the row has something more urgent to
+                  // say. Switched rather than swapped, so a connection that
+                  // fails does not blink between three unrelated states.
+                  AnimatedSwitcher(
+                    duration: context.motion.normal,
+                    switchInCurve: Motion.curve,
+                    switchOutCurve: Motion.exit,
+                    transitionBuilder: Motion.scaleFade,
+                    child: connecting
+                        ? Row(
+                            key: const ValueKey('connecting'),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Spinner(color: t.warn, size: 12),
+                              const SizedBox(width: 7),
+                              Text(
+                                'Connecting…',
+                                style: TextStyle(color: t.muted, fontSize: 12),
+                              ),
+                            ],
+                          )
+                        : failure != null
+                        ? _RetryButton(
+                            key: const ValueKey('retry'),
+                            onTap: onTap,
+                          )
+                        : Text(
+                            profile.nickname,
+                            key: const ValueKey('nick'),
+                            style: TextStyle(color: t.muted, fontSize: 12),
+                          ),
                   ),
                 ],
               ),
@@ -246,13 +344,21 @@ class _ProfileRow extends StatelessWidget {
               ),
               // The reason a network would not connect belongs with that
               // network, not in a banner that outlives the attempt.
-              if (failure != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  failure!,
-                  style: TextStyle(color: t.bad, fontSize: 11.5, height: 1.35),
-                ),
-              ],
+              Reveal(
+                child: failure == null
+                    ? null
+                    : Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          failure!,
+                          style: TextStyle(
+                            color: t.bad,
+                            fontSize: 11.5,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+              ),
             ],
           ),
         ),

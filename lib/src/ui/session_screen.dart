@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../model/profile.dart';
 import '../model/session.dart';
@@ -6,9 +7,11 @@ import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
 import 'channel_list.dart';
+import 'conversation_tabs.dart';
 import 'member_list.dart';
 import 'message_view.dart';
 import 'motion.dart';
+import 'touchable.dart';
 import 'settings/app_settings_dialog.dart';
 import 'settings/channel_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
@@ -34,17 +37,92 @@ class _SessionScreenState extends State<SessionScreen> {
   final _scaffold = GlobalKey<ScaffoldState>();
   String? _error;
 
+  /// Which suggestion the keyboard is on. Always a valid index into the
+  /// current matches, because the list is recomputed on every keystroke.
+  int _highlighted = 0;
+
+  /// Escape hides the list without clearing what has been typed. Reset as soon
+  /// as the text changes, so it dismisses this attempt and not the next one.
+  bool _dismissed = false;
+
   SessionModel get session => widget.session;
 
   @override
   void initState() {
     super.initState();
     session.addListener(_onChanged);
+    _composer.addListener(_onTyped);
+    // On the focus node rather than an ancestor Shortcuts: the focused node is
+    // asked first, so arrows and Enter can be claimed for the list before the
+    // text field treats them as caret movement and submission.
+    _composerFocus.onKeyEvent = _onComposerKey;
+  }
+
+  /// The commands matching what has been typed so far.
+  ///
+  /// Empty unless the composer holds a bare `/word` — once there is a space
+  /// the user is writing arguments, and a list of commands is in the way.
+  List<SlashCommand> get _suggestions {
+    if (_dismissed) return const [];
+    final text = _composer.text;
+    if (!text.startsWith('/') || text.contains(' ')) return const [];
+    return SlashCommand.matching(text.substring(1));
+  }
+
+  void _onTyped() {
+    if (!mounted) return;
+    setState(() {
+      _dismissed = false;
+      _highlighted = 0;
+    });
+  }
+
+  void _complete(SlashCommand command) {
+    // The trailing space is the point: completing a command leaves the caret
+    // where its argument goes, not butted against the name.
+    _composer.value = TextEditingValue(
+      text: '/${command.name} ',
+      selection: TextSelection.collapsed(offset: command.name.length + 2),
+    );
+    setState(() => _dismissed = false);
+    _composerFocus.requestFocus();
+  }
+
+  KeyEventResult _onComposerKey(FocusNode node, KeyEvent event) {
+    final matches = _suggestions;
+    if (matches.isEmpty || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.arrowDown) {
+      setState(() => _highlighted = (_highlighted + 1) % matches.length);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _highlighted = (_highlighted - 1 + matches.length) % matches.length;
+      });
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.tab || key == LogicalKeyboardKey.enter) {
+      // Enter completes rather than sends. What is in the composer is a bare
+      // command name with no argument, which sending would only reject.
+      _complete(matches[_highlighted.clamp(0, matches.length - 1)]);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      setState(() => _dismissed = true);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
   void dispose() {
     session.removeListener(_onChanged);
+    _composer.removeListener(_onTyped);
+    _composerFocus.onKeyEvent = null;
     _composer.dispose();
     _composerFocus.dispose();
     super.dispose();
@@ -71,6 +149,13 @@ class _SessionScreenState extends State<SessionScreen> {
     if (MediaQuery.of(context).size.width < _wideLayout) {
       Navigator.of(context).maybePop();
     }
+  }
+
+  /// Give up on the current attempt and dial again immediately.
+  Future<void> _retry() async {
+    final profile = ProfileScope.of(context).byId(session.profileId);
+    if (profile == null) return;
+    await WorkspaceScope.of(context).reconnect(profile);
   }
 
   void _disconnect() {
@@ -174,6 +259,15 @@ class _SessionScreenState extends State<SessionScreen> {
           onNetworkEditor: _openNetworkEditor,
           onAppSettings: _openAppSettings,
         ),
+        // Anything other than "connected" gets a bar of its own. The status
+        // dot in the header can say something is wrong, but it has nowhere to
+        // put the reason, the countdown, or a way to stop waiting.
+        _ConnectionBar(status: session.status, onRetry: _retry),
+        ConversationTabs(
+          session: session,
+          onSelect: session.select,
+          onClose: session.closeTab,
+        ),
         // A topic arriving, or switching to a channel that has none, moves
         // the whole scrollback. Unrolling it says which way everything went.
         Reveal(child: topic == null ? null : _TopicBar(topic: topic)),
@@ -205,6 +299,11 @@ class _SessionScreenState extends State<SessionScreen> {
         // Growing rather than appearing, so a rejected command never shoves
         // the composer out from under a caret already being typed into.
         Reveal(child: _error == null ? null : _ErrorBar(text: _error!)),
+        _CommandSuggestions(
+          commands: _suggestions,
+          highlighted: _highlighted,
+          onPick: _complete,
+        ),
         _composerBar(t, active),
       ],
     );
@@ -564,6 +663,256 @@ class _ErrorBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
       color: t.bad.withValues(alpha: 0.10),
       child: Text(text, style: TextStyle(color: t.bad, fontSize: 12)),
+    );
+  }
+}
+
+/// Command completions, listed directly above the composer.
+///
+/// Above rather than below, and anchored to the composer rather than floating
+/// over the scrollback: the list is about what is being typed, so it belongs
+/// against the thing being typed into. It also means the newest messages stay
+/// visible while a command is being written.
+///
+/// Enter picks the highlighted row instead of sending, because a bare command
+/// name with no argument is not a message the server would accept anyway.
+class _CommandSuggestions extends StatelessWidget {
+  const _CommandSuggestions({
+    required this.commands,
+    required this.highlighted,
+    required this.onPick,
+  });
+
+  final List<SlashCommand> commands;
+  final int highlighted;
+  final ValueChanged<SlashCommand> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    if (commands.isEmpty) return const Reveal();
+
+    return Reveal(
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.surface,
+          border: Border(
+            top: BorderSide(color: t.rule, width: Tokens.hairline),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (i, command) in commands.indexed)
+              _SuggestionRow(
+                command: command,
+                highlighted: i == highlighted.clamp(0, commands.length - 1),
+                onTap: () => onPick(command),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 7),
+              child: Text(
+                '↑↓ to choose · Tab or Enter to complete · Esc to dismiss',
+                style: TextStyle(color: t.faint, fontSize: 10.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SuggestionRow extends StatelessWidget {
+  const _SuggestionRow({
+    required this.command,
+    required this.highlighted,
+    required this.onTap,
+  });
+
+  final SlashCommand command;
+  final bool highlighted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Touchable(
+      onTap: onTap,
+      builder: (context, touch) => AnimatedContainer(
+        duration: context.motion.fast,
+        curve: Motion.curve,
+        decoration: BoxDecoration(
+          color: highlighted
+              ? t.surfaceHover
+              : t.surfaceHover.withValues(alpha: touch.wash),
+          border: Border(
+            left: BorderSide(
+              color: highlighted ? t.accent : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(18, 6, 20, 6),
+        child: Row(
+          children: [
+            Text(
+              '/${command.name}',
+              style: TextStyle(
+                color: t.accent,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Text(
+              command.usage,
+              style: TextStyle(color: t.faint, fontSize: 11.5),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                command.description,
+                textAlign: TextAlign.right,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: t.muted, fontSize: 11.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A strip under the header for any connection that is not up.
+///
+/// The core reconnects on its own, so this is not an error to dismiss — it is
+/// a progress report on something already happening. It says what is going on,
+/// how long until the next attempt, and offers the one thing the user might
+/// reasonably want that waiting does not give them: start again now.
+class _ConnectionBar extends StatelessWidget {
+  const _ConnectionBar({required this.status, required this.onRetry});
+
+  final ConnectionStatus status;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    // Connected is the silent case, and it is the common one — a bar that is
+    // there whenever nothing is wrong is a bar nobody reads.
+    final (color, label, waiting) = switch (status) {
+      ConnectionStatus_Connected() => (t.ok, null, false),
+      ConnectionStatus_Connecting() => (t.warn, 'Connecting…', true),
+      ConnectionStatus_Registering() => (t.warn, 'Registering…', true),
+      ConnectionStatus_Reconnecting(:final retryInSecs, :final attempt) => (
+        t.warn,
+        'Connection lost — retrying in ${retryInSecs}s (attempt $attempt)',
+        true,
+      ),
+      ConnectionStatus_Disconnected() => (t.bad, 'Disconnected', false),
+    };
+
+    return Reveal(
+      child: label == null
+          ? null
+          : Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 7, 10, 7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.10),
+                border: Border(
+                  bottom: BorderSide(color: t.rule, width: Tokens.hairline),
+                ),
+              ),
+              child: Row(
+                children: [
+                  // The spinner turns only while something is actually being
+                  // attempted; a disconnected session is not working on it.
+                  if (waiting) ...[
+                    Spinner(color: color, size: 12),
+                    const SizedBox(width: 9),
+                  ],
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(color: color, fontSize: 12),
+                    ),
+                  ),
+                  _RetryNow(onTap: onRetry),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+/// Stop waiting out the backoff and dial again.
+class _RetryNow extends StatefulWidget {
+  const _RetryNow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  State<_RetryNow> createState() => _RetryNowState();
+}
+
+class _RetryNowState extends State<_RetryNow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _turn = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500),
+  );
+
+  @override
+  void dispose() {
+    _turn.dispose();
+    super.dispose();
+  }
+
+  void _tap() {
+    // The icon turns on press. Reconnecting tears the session down and builds
+    // a new one, so without this the only feedback is the screen blinking.
+    if (!context.motion.disabled) _turn.forward(from: 0);
+    widget.onTap();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Touchable(
+      onTap: _tap,
+      borderRadius: BorderRadius.circular(6),
+      builder: (context, touch) => AnimatedContainer(
+        duration: context.motion.fast,
+        curve: Motion.curve,
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: t.surfaceHover.withValues(alpha: touch.wash),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            RotationTransition(
+              turns: CurvedAnimation(parent: _turn, curve: Motion.curve),
+              child: Icon(Icons.refresh, size: 14, color: t.accent),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              'Retry now',
+              style: TextStyle(
+                color: t.accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

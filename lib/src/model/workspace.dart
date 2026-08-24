@@ -110,6 +110,21 @@ class Workspace extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Tear a connection down and dial it again from scratch.
+  ///
+  /// The core reconnects on its own with a backoff that grows to minutes, and
+  /// there is no command to tell it to hurry. So "retry now" is honestly
+  /// implemented: drop the connection the user is tired of waiting on, and
+  /// make a fresh one whose first attempt is immediate.
+  ///
+  /// The scrollback goes with it, which is the cost of not having a
+  /// wake-the-backoff command in the core. Worth it: a user pressing retry has
+  /// already decided the current attempt is not working.
+  Future<String?> reconnect(Profile profile) async {
+    disconnect(profile.id);
+    return connect(profile);
+  }
+
   /// Called when a profile is deleted: its connection must not outlive it.
   void forget(String profileId) {
     disconnect(profileId);
