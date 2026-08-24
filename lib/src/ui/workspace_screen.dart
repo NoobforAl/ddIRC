@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../model/profile.dart';
 import '../model/workspace.dart';
 import '../theme.dart';
+import 'motion.dart';
 import 'network_rail.dart';
 import 'session_screen.dart';
 import 'settings/app_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
+import 'touchable.dart';
 
 /// The whole app: networks on the left, then the selected network's session.
 ///
@@ -198,12 +200,17 @@ class _ProfileRow extends StatelessWidget {
     final t = context.tokens;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
+      child: Touchable(
+        // A network already dialling is not a second target; it stops
+        // reporting hover so it stops looking like one.
         onTap: connecting ? null : onTap,
         borderRadius: BorderRadius.circular(8),
-        child: Container(
+        builder: (context, touch) => AnimatedContainer(
+          duration: context.motion.fast,
+          curve: Motion.curve,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
+            color: t.surfaceHover.withValues(alpha: touch.wash),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: failure != null ? t.bad.withValues(alpha: 0.4) : t.rule,

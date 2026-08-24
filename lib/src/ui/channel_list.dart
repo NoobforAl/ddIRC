@@ -4,6 +4,7 @@ import '../model/session.dart';
 import '../model/settings.dart';
 import '../theme.dart';
 import 'motion.dart';
+import 'touchable.dart';
 
 /// Joined channels and open conversations, with unread counts.
 class ChannelList extends StatelessWidget {
@@ -164,13 +165,13 @@ class _ChannelRow extends StatelessWidget {
     final unread = conversation.unread;
     final mentions = conversation.unreadMentions;
 
-    return InkWell(
+    return Touchable(
       onTap: onTap,
       // Right-click on desktop, long-press on touch: the channel's own
       // settings, without a per-row button cluttering the list.
       onSecondaryTap: onSettings,
       onLongPress: onSettings,
-      child: AnimatedContainer(
+      builder: (context, touch) => AnimatedContainer(
         duration: m.normal,
         curve: Motion.curve,
         // The active channel is marked by a leading rule and a lifted
@@ -178,7 +179,12 @@ class _ChannelRow extends StatelessWidget {
         // Both slide across as selection moves, so the eye can follow it down
         // the list rather than re-finding it.
         decoration: BoxDecoration(
-          color: selected ? t.surfaceHover : Colors.transparent,
+          // Hover and selection share a colour and differ only in weight, so
+          // the pointer can preview a row without impersonating the one the
+          // user is already in.
+          color: selected
+              ? t.surfaceHover
+              : t.surfaceHover.withValues(alpha: touch.wash),
           border: Border(
             left: BorderSide(
               color: selected ? t.accent : Colors.transparent,

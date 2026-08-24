@@ -5,6 +5,7 @@ import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
 import 'motion.dart';
+import 'touchable.dart';
 
 /// Width of the rail. Just wide enough for a 34px mark and its gutters.
 const double networkRailWidth = 56;
@@ -111,11 +112,11 @@ class _RailEntry extends StatelessWidget {
     final m = context.motion;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: InkWell(
+      child: Touchable(
         onTap: onTap,
         onSecondaryTap: onEdit,
         onLongPress: onEdit,
-        child: SizedBox(
+        builder: (context, touch) => SizedBox(
           height: 42,
           child: Row(
             children: [
@@ -138,6 +139,7 @@ class _RailEntry extends StatelessWidget {
                   failed: failed,
                   unread: unread,
                   mentions: mentions,
+                  touch: touch,
                 ),
               ),
               const SizedBox(width: 10),
@@ -158,6 +160,7 @@ class _Mark extends StatelessWidget {
     required this.failed,
     required this.unread,
     required this.mentions,
+    required this.touch,
   });
 
   final Profile profile;
@@ -167,6 +170,7 @@ class _Mark extends StatelessWidget {
   final bool failed;
   final int unread;
   final int mentions;
+  final Touch touch;
 
   @override
   Widget build(BuildContext context) {
@@ -184,9 +188,13 @@ class _Mark extends StatelessWidget {
           height: 34,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            // Transparent rather than null, so selecting the network fades the
-            // fill up from nothing instead of stamping it on.
-            color: selected ? t.surfaceHover : Colors.transparent,
+            // Selection and hover share a colour and differ only in weight,
+            // so the pointer can preview a row without impersonating the one
+            // the user is already in. Transparent rather than null, so the
+            // fill fades up from nothing instead of being stamped on.
+            color: selected
+                ? t.surfaceHover
+                : t.surfaceHover.withValues(alpha: touch.wash),
             borderRadius: BorderRadius.circular(9),
             border: Border.all(
               color: selected ? t.accent : t.rule,
@@ -327,13 +335,25 @@ class _RailButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final m = context.motion;
     return Tooltip(
       message: tooltip,
-      child: InkWell(
+      child: Touchable(
         onTap: onTap,
-        child: SizedBox(
+        builder: (context, touch) => AnimatedContainer(
+          duration: m.fast,
+          curve: Motion.curve,
           height: 46,
-          child: Icon(icon, size: 19, color: t.muted),
+          alignment: Alignment.center,
+          color: t.surfaceHover.withValues(alpha: touch.wash),
+          // The icon comes forward as well. A wash alone is easy to miss on a
+          // strip this narrow, and the icon is the part being aimed at.
+          child: TweenAnimationBuilder<Color?>(
+            duration: m.fast,
+            curve: Motion.curve,
+            tween: ColorTween(end: touch == Touch.none ? t.muted : t.text),
+            builder: (context, color, _) => Icon(icon, size: 19, color: color),
+          ),
         ),
       ),
     );
