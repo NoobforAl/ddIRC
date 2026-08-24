@@ -382,6 +382,8 @@ impl Actor {
     ///
     /// TLS is always on and `dangerously_accept_invalid_certs` is never set, so
     /// there is no path through this code that skips certificate verification.
+    /// `cert_path` only ever *adds* a root to the platform's trust store, and
+    /// is unset outside tests.
     /// `channels` and `nick_password` are deliberately left unset: the crate
     /// would act on them at end-of-MOTD, and we want to control both ordering
     /// and rate limiting ourselves.
@@ -396,6 +398,7 @@ impl Actor {
             realname: Some(self.config.realname().to_owned()),
             ping_time: Some(60),
             ping_timeout: Some(20),
+            cert_path: self.config.extra_root_cert.clone(),
             ..IrcConfig::default()
         }
     }

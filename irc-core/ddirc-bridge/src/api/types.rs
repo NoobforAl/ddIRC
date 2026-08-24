@@ -372,6 +372,10 @@ impl From<ServerConfig> for types::ServerConfig {
             sasl_password: secret(config.sasl_password),
             nickserv_password: secret(config.nickserv_password),
             server_password: secret(config.server_password),
+            // Not exposed to Dart on purpose: trusting an extra certificate is
+            // a test-only affordance, and an app-settable one would be a way to
+            // talk the client into trusting an attacker's certificate.
+            extra_root_cert: None,
         }
     }
 }

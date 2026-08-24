@@ -5,6 +5,8 @@
 //! or protocol internals, and it leaves us free to change or vendor the
 //! underlying crate without touching Dart.
 
+use std::path::Path;
+
 use zeroize::Zeroizing;
 
 use crate::text::format::TextSpan;
@@ -32,6 +34,8 @@ pub enum ConfigError {
     PlaintextPort(u16),
     #[error("SASL requires both an account and a password")]
     IncompleteSaslCredentials,
+    #[error("certificate to trust not found: {0}")]
+    MissingRootCert(String),
 }
 
 /// How to reach a server. TLS is not configurable: every connection uses it.
@@ -58,6 +62,18 @@ pub struct ServerConfig {
     pub nickserv_password: Option<Zeroizing<String>>,
     /// Server-level `PASS`, for private servers.
     pub server_password: Option<Zeroizing<String>>,
+
+    /// Path to a PEM certificate to trust in addition to the platform's roots.
+    ///
+    /// *Added* to the trust store, never a replacement for it, and unrelated to
+    /// the `irc` crate's `dangerously_accept_invalid_certs`, which this crate
+    /// never sets — a server presenting an otherwise untrusted certificate is
+    /// still refused. It exists so tests can reach the self-signed dev server
+    /// in `dev/` without a verification-skipping path existing in the client.
+    ///
+    /// Unreachable from Dart: the FFI layer's own `ServerConfig` has no such
+    /// field, so nothing the app can configure ever sets this.
+    pub extra_root_cert: Option<String>,
 }
 
 impl ServerConfig {
@@ -89,6 +105,14 @@ impl ServerConfig {
         }
         if self.sasl_account.is_some() != self.sasl_password.is_some() {
             return Err(ConfigError::IncompleteSaslCredentials);
+        }
+        // The `irc` crate ignores an unreadable certificate path silently, so
+        // catching it here is the difference between a clear error and a
+        // handshake that fails ten seconds later for no stated reason.
+        if let Some(path) = &self.extra_root_cert {
+            if !Path::new(path).is_file() {
+                return Err(ConfigError::MissingRootCert(path.clone()));
+            }
         }
         Ok(())
     }

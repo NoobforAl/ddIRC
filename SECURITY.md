@@ -29,6 +29,13 @@ in Phase 2 is confined to generated code.
 - Roots come from `webpki-roots` *plus* the platform store. The bundled Mozilla
   set is added first, so TLS still verifies on Android even where the native
   store is unreadable.
+- **`ServerConfig::extra_root_cert` adds a root; it never replaces the store or
+  skips verification.** It exists so integration tests can reach the self-signed
+  dev server in `dev/`, which is the alternative to a verification-skipping
+  switch existing at all. It is not reachable from the app: the FFI layer's own
+  `ServerConfig` has no such field, so nothing Dart can set reaches it. An
+  unreadable path is rejected at config validation rather than being silently
+  ignored, which is what the `irc` crate does on its own.
 - Conventional plaintext ports (6660–6669, 194) are **rejected at config
   validation** with an explanation, rather than failing later as an opaque
   handshake error.
@@ -147,7 +154,7 @@ dependency automatically.
 
 | Advisory | Crate | Assessment |
 |---|---|---|
-| RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which we never set. Not on any code path we use. |
+| RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which is set only by `ServerConfig::extra_root_cert` — a field the integration tests use and the app cannot set. Not on any code path a shipped build reaches. |
 
 ## Reporting
 
