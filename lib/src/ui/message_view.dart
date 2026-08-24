@@ -4,6 +4,7 @@ import '../model/session.dart';
 import '../model/settings.dart';
 import '../rust/api/types.dart' as rust;
 import '../theme.dart';
+import 'layout.dart';
 
 /// The scrollback for one conversation.
 class MessageView extends StatefulWidget {
@@ -113,7 +114,10 @@ class _SystemLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
+      padding: EdgeInsets.symmetric(
+        horizontal: context.layout.gutter,
+        vertical: 3,
+      ),
       child: Center(
         child: Text(
           text,
@@ -141,6 +145,7 @@ class _MessageLine extends StatelessWidget {
     final t = context.tokens;
     final message = line.message!;
     final mine = message.isSelf;
+    final gutter = context.layout.gutter;
 
     return Container(
       width: double.infinity,
@@ -152,10 +157,12 @@ class _MessageLine extends StatelessWidget {
               border: Border(left: BorderSide(color: t.mentionRule, width: 2)),
             )
           : null,
+      // A mentioned line gives up two points on the leading edge to the
+      // rule, so its text still starts on the same vertical line as the rest.
       padding: EdgeInsets.fromLTRB(
-        line.isMention ? 18 : 20,
+        line.isMention ? gutter - 2 : gutter,
         settings.density.verticalPadding,
-        20,
+        gutter,
         settings.density.verticalPadding,
       ),
       child: Column(

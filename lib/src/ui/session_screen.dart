@@ -8,6 +8,7 @@ import '../rust/api/types.dart';
 import '../theme.dart';
 import 'channel_list.dart';
 import 'conversation_tabs.dart';
+import 'layout.dart';
 import 'member_list.dart';
 import 'message_view.dart';
 import 'motion.dart';
@@ -17,15 +18,20 @@ import 'settings/channel_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
 import 'settings/server_settings_dialog.dart';
 
-/// Below this width the side panels become drawers.
-const _wideLayout = 900.0;
 const _channelPanelWidth = 210.0;
 const _memberPanelWidth = 190.0;
 
 class SessionScreen extends StatefulWidget {
-  const SessionScreen({super.key, required this.session});
+  const SessionScreen({super.key, required this.session, this.rail});
 
   final SessionModel session;
+
+  /// The network rail, when the screen is too narrow for it to stand beside
+  /// the conversation and it has to share the channel drawer instead.
+  ///
+  /// Handed down rather than built here because the workspace owns it: it
+  /// lists every network, including the ones this session is not.
+  final Widget? rail;
 
   @override
   State<SessionScreen> createState() => _SessionScreenState();
@@ -146,9 +152,9 @@ class _SessionScreenState extends State<SessionScreen> {
 
   void _select(String name) {
     session.select(name);
-    if (MediaQuery.of(context).size.width < _wideLayout) {
-      Navigator.of(context).maybePop();
-    }
+    // Picking a channel out of the drawer is the end of that errand, so the
+    // drawer closes onto what was chosen. Nothing to close when it is pinned.
+    if (!context.layout.channelsPinned) Navigator.of(context).maybePop();
   }
 
   /// Give up on the current attempt and dial again immediately.
@@ -184,7 +190,8 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final wide = MediaQuery.of(context).size.width >= _wideLayout;
+    final layout = context.layout;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final active = session.active;
 
     final channels = ChannelList(
@@ -199,21 +206,39 @@ class _SessionScreenState extends State<SessionScreen> {
         ? const SizedBox.shrink()
         : MemberList(
             members: active.members,
-            onClose: wide ? null : () => Navigator.of(context).maybePop(),
+            onClose: layout.membersPinned
+                ? null
+                : () => Navigator.of(context).maybePop(),
           );
 
     return Scaffold(
       key: _scaffold,
-      drawer: wide
+      // Networks and channels answer the same question — where am I — so on a
+      // narrow screen they are one drawer behind one button rather than two
+      // competing for an edge each.
+      drawer: layout.channelsPinned
           ? null
-          : Drawer(width: 260, child: SafeArea(child: channels)),
-      endDrawer: wide || active == null || !active.isChannel
+          : Drawer(
+              width: Layout.drawerWidth(screenWidth, preferred: 300),
+              child: SafeArea(
+                child: Row(
+                  children: [
+                    if (widget.rail != null) widget.rail!,
+                    Expanded(child: channels),
+                  ],
+                ),
+              ),
+            ),
+      endDrawer: layout.membersPinned || active == null || !active.isChannel
           ? null
-          : Drawer(width: 240, child: SafeArea(child: members)),
+          : Drawer(
+              width: Layout.drawerWidth(screenWidth, preferred: 260),
+              child: SafeArea(child: members),
+            ),
       body: SafeArea(
         child: Row(
           children: [
-            if (wide)
+            if (layout.channelsPinned)
               SizedBox(
                 width: _channelPanelWidth,
                 child: Container(
@@ -225,8 +250,8 @@ class _SessionScreenState extends State<SessionScreen> {
                   child: channels,
                 ),
               ),
-            Expanded(child: _conversationPane(t, wide, active)),
-            if (wide && active != null && active.isChannel)
+            Expanded(child: _conversationPane(t, layout, active)),
+            if (layout.membersPinned && active != null && active.isChannel)
               SizedBox(
                 width: _memberPanelWidth,
                 child: Container(
@@ -244,14 +269,14 @@ class _SessionScreenState extends State<SessionScreen> {
     );
   }
 
-  Widget _conversationPane(Tokens t, bool wide, Conversation? active) {
+  Widget _conversationPane(Tokens t, Layout layout, Conversation? active) {
     final topic = active?.topic;
     return Column(
       children: [
         _Header(
           session: session,
           conversation: active,
-          wide: wide,
+          layout: layout,
           onOpenChannels: () => _scaffold.currentState?.openDrawer(),
           onOpenMembers: () => _scaffold.currentState?.openEndDrawer(),
           onChannelSettings: _openChannelSettings,
@@ -310,8 +335,9 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Widget _composerBar(Tokens t, Conversation? active) {
+    final g = context.layout.gutter;
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 8, 10),
+      padding: EdgeInsets.fromLTRB(g, 8, 8, 10),
       decoration: BoxDecoration(
         color: t.surface,
         border: Border(
@@ -370,7 +396,7 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.session,
     required this.conversation,
-    required this.wide,
+    required this.layout,
     required this.onOpenChannels,
     required this.onOpenMembers,
     required this.onChannelSettings,
@@ -381,7 +407,7 @@ class _Header extends StatelessWidget {
 
   final SessionModel session;
   final Conversation? conversation;
-  final bool wide;
+  final Layout layout;
   final VoidCallback onOpenChannels;
   final VoidCallback onOpenMembers;
   final VoidCallback onChannelSettings;
@@ -395,7 +421,15 @@ class _Header extends StatelessWidget {
     final unread = session.totalUnread;
 
     return Container(
-      padding: EdgeInsets.fromLTRB(wide ? 20 : 4, 8, 8, 8),
+      // The gutter is the text's left edge everywhere in this column, so the
+      // conversation's name lines up with the messages under it. When the
+      // channel button is here instead, its own padding does that job.
+      padding: EdgeInsets.fromLTRB(
+        layout.channelsPinned ? layout.gutter : 4,
+        8,
+        8,
+        8,
+      ),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: t.rule, width: Tokens.hairline),
@@ -403,7 +437,7 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
-          if (!wide)
+          if (!layout.channelsPinned)
             Stack(
               alignment: Alignment.topRight,
               children: [
@@ -434,7 +468,10 @@ class _Header extends StatelessWidget {
             ),
           ),
           if (conversation != null && conversation!.isChannel)
-            if (wide)
+            // A count when the list is beside us, a button when it is not:
+            // the number is the same information either way, and only one of
+            // them needs to be reachable.
+            if (layout.membersPinned)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
                 child: Text(
@@ -628,9 +665,10 @@ class _TopicBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final g = context.layout.gutter;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 7, 20, 8),
+      padding: EdgeInsets.fromLTRB(g, 7, g, 8),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: t.rule, width: Tokens.hairline),
@@ -658,9 +696,10 @@ class _ErrorBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final g = context.layout.gutter;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 6),
+      padding: EdgeInsets.fromLTRB(g, 6, g, 6),
       color: t.bad.withValues(alpha: 0.10),
       child: Text(text, style: TextStyle(color: t.bad, fontSize: 12)),
     );
@@ -690,6 +729,7 @@ class _CommandSuggestions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final g = context.layout.gutter;
     if (commands.isEmpty) return const Reveal();
 
     return Reveal(
@@ -711,7 +751,7 @@ class _CommandSuggestions extends StatelessWidget {
                 onTap: () => onPick(command),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 7),
+              padding: EdgeInsets.fromLTRB(g, 4, g, 7),
               child: Text(
                 '↑↓ to choose · Tab or Enter to complete · Esc to dismiss',
                 style: TextStyle(color: t.faint, fontSize: 10.5),
@@ -738,6 +778,9 @@ class _SuggestionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    // Less the two points the selection rule takes, so the command name
+    // starts on the same line as the messages above it either way.
+    final g = context.layout.gutter;
     return Touchable(
       onTap: onTap,
       builder: (context, touch) => AnimatedContainer(
@@ -754,7 +797,7 @@ class _SuggestionRow extends StatelessWidget {
             ),
           ),
         ),
-        padding: const EdgeInsets.fromLTRB(18, 6, 20, 6),
+        padding: EdgeInsets.fromLTRB(g - 2, 6, g, 6),
         child: Row(
           children: [
             Text(
@@ -801,6 +844,7 @@ class _ConnectionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final g = context.layout.gutter;
 
     // Connected is the silent case, and it is the common one — a bar that is
     // there whenever nothing is wrong is a bar nobody reads.
@@ -821,7 +865,7 @@ class _ConnectionBar extends StatelessWidget {
           ? null
           : Container(
               width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 7, 10, 7),
+              padding: EdgeInsets.fromLTRB(g, 7, 10, 7),
               decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.10),
                 border: Border(

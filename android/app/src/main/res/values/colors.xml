@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The window Android paints while the process starts, and behind
+     the Flutter view once it has. Tokens.bg in lib/src/theme.dart;
+     the two are the same colour and change together, so the app does
+     not step from one background to another as it comes up. -->
+<resources>
+    <color name="window_background">#FCFCFD</color>
+</resources>

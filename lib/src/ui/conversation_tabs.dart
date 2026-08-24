@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../model/session.dart';
 import '../theme.dart';
+import 'layout.dart';
 import 'motion.dart';
 import 'touchable.dart';
 
@@ -95,7 +96,7 @@ class _Tab extends StatelessWidget {
       builder: (context, touch) => AnimatedContainer(
         duration: m.normal,
         curve: Motion.curve,
-        constraints: const BoxConstraints(maxWidth: 190),
+        constraints: BoxConstraints(maxWidth: context.layout.tabMaxWidth),
         decoration: BoxDecoration(
           color: selected
               ? t.surfaceHover

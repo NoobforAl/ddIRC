@@ -25,7 +25,7 @@ DART_SRC := lib
 COMPOSE ?= docker compose -f dev/compose.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test test-integration build codegen clean \
+.PHONY: help fix fmt lint test test-integration build codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs
 
 help:
@@ -38,6 +38,7 @@ help:
 	@echo "  make test-integration  end-to-end, needs make dev-server"
 	@echo "  make build    debug build for Windows"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
+	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
 	@echo "  make clean    drop build output for both halves"
 	@echo ""
 	@echo "  make dev-server        local IRC server on 127.0.0.1:6697 (TLS)"
@@ -84,6 +85,13 @@ build:
 # Needs `flutter` on PATH: the generator shells out to it by name.
 codegen:
 	PATH="$(dir $(FLUTTER)):$$PATH" flutter_rust_bridge_codegen generate
+
+## Redraw every launcher icon from the mark's spec.
+#
+# The output is committed, so this only needs running after MarkSpec
+# changes - and `flutter test` fails if it was needed and not run.
+icons:
+	$(DART) run tool/make_icons.dart
 
 clean:
 	$(FLUTTER) clean

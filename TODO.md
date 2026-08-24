@@ -7,8 +7,8 @@
 - ✅ Add the test suite to CI.
 - ✅ Add app settings to the home page.
 - Add animations for every action in the app.
-- Make the layout responsive.
-- Create an app icon (still to be decided).
+- ✅ Make the layout responsive.
+- ✅ Create an app icon.
 - Add build configuration for the other platforms: Linux, macOS and iOS.
 - Give the core a reconnect command, so "Retry now" can wake the backoff
   instead of tearing the connection down and losing the scrollback.

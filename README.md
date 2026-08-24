@@ -62,6 +62,28 @@ On desktop the app draws its own title bar: traffic-light close, minimise and
 maximise on the left, their glyphs appearing on hover. The native caption is
 hidden before the first frame, so it never flashes. Mobile is unaffected.
 
+## The mark
+
+A hash on a rounded square. `#` is the channel sigil — it is what an IRC
+address looks like, it predates every other use of the character, and unlike a
+wordmark it is still legible at sixteen pixels.
+
+It is described once, as numbers, in `lib/src/ui/mark_spec.dart`: four strokes
+and a corner radius, every value a fraction of the side. Two things read it.
+`AppMark` paints it on the splash and the empty screen, and
+`tool/make_icons.dart` rasterises it into every launcher icon — the Windows
+`.ico` at seven sizes, Android's legacy and adaptive icons at five densities,
+and a PNG and SVG under `assets/icon/` for anywhere outside a build.
+
+```bash
+make icons     # redraw them all; the output is committed
+```
+
+Each size is *drawn* at that size from signed distance fields rather than
+downscaled from one master, which is why the 16px taskbar icon keeps its
+counters. `flutter test` re-renders and compares bytes, so changing the spec
+without rerunning the generator fails a test instead of shipping a stale icon.
+
 ## Settings
 
 Three dialogs, reachable from the ⚙/⚌ controls in the header, and from a
@@ -120,6 +142,8 @@ beside it in one Cargo workspace.
 ```
 ddIRC/
 ├─ lib/               # Dart UI + generated bindings under lib/src/rust
+├─ assets/icon/       # the mark as PNG and SVG, generated
+├─ tool/              # build-time scripts: make_icons.dart
 ├─ android/           # Flutter Android host
 ├─ windows/           # Flutter Windows host
 ├─ rust_builder/      # cargokit glue that builds Rust during a Flutter build
@@ -253,6 +277,23 @@ of something every call site has to remember. Nothing animates for decoration:
 each transition answers *what just changed, and where did it go*. The one
 looping animation is the status dot while a connection is pending, because amber
 alone cannot tell "still trying" from "settled".
+
+**Size is a token too.** `lib/src/ui/layout.dart` names three widths —
+`compact`, `medium`, `expanded` — measured once at the top of the tree and read
+as `context.layout`. Widgets ask it questions (`layout.channelsPinned`,
+`layout.gutter`) rather than comparing pixel widths, because a breakpoint
+buried in a widget is one nobody else can find, and the panes only read as one
+app if they all change their mind at the same width. Three rather than two
+because there are two independent decisions: the channel list earns its place
+early, the member list only once the conversation between them is still wide
+enough to read. Below `compact` the rail and the channel list share one
+drawer — they answer the same question, so on a phone they are one button.
+
+**The splash is shy.** Startup draws nothing for the first 140ms, so a warm
+start never flashes a logo; if it does appear it stays long enough to be read.
+It exists mostly for the case that used to produce an empty window and no
+explanation: a native core that will not load now gets a sentence, the
+underlying error, and a retry.
 
 ## Dependency posture
 

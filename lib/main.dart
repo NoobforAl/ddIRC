@@ -11,21 +11,39 @@ import 'src/model/settings.dart';
 import 'src/model/workspace.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/theme.dart';
+import 'src/ui/boot_screen.dart';
 import 'src/ui/window_chrome.dart';
 import 'src/ui/workspace_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Preferences and saved networks are read before the first frame, so
-  // nothing renders with defaults and then visibly reflows. Settings come
-  // first because the window itself is painted in the chosen theme.
+  // nothing renders with defaults and then visibly reflows. Both are a
+  // key/value read on the platform's own store — no network, no native
+  // library, nothing that can hang. Settings come first because the window
+  // itself is painted in the chosen theme.
   final settings = await AppSettings.load();
   // Reconfigure the window while it is still hidden, so the native caption
   // never flashes before ours replaces it.
   await prepareWindow(Tokens.forMode(settings.themeMode));
-  await RustLib.init();
   final profiles = await ProfileStore.load();
   runApp(DdIrcApp(settings: settings, profiles: profiles));
+}
+
+/// Bring up the native core.
+///
+/// The only part of startup that is slow, and the only part that can fail: it
+/// is a dynamic library resolved by the operating system, so it can be
+/// missing, be the wrong architecture, or be a build that does not match these
+/// bindings. Everything else is already in memory by the time this runs, which
+/// is why it is the only thing behind the splash.
+///
+/// Guarded rather than blindly called, because [BootScreen] retries: the
+/// bridge throws on a second initialisation, and a failure late in the first
+/// one can still have left it marked as initialised.
+Future<void> startCore() async {
+  if (RustLib.instance.initialized) return;
+  await RustLib.init();
 }
 
 class DdIrcApp extends StatefulWidget {
@@ -73,7 +91,13 @@ class _DdIrcAppState extends State<DdIrcApp> {
               // every dialog on the root navigator — sits under the same frame.
               builder: (context, child) =>
                   WindowFrame(child: child ?? const SizedBox.shrink()),
-              home: const WorkspaceScreen(),
+              // Inside MaterialApp rather than around it, so the splash is
+              // themed and cross-fades into the app. The scopes stay above it,
+              // because dialogs are routes and have to be able to reach them.
+              home: BootScreen(
+                load: startCore,
+                builder: (context) => const WorkspaceScreen(),
+              ),
             ),
           ),
         ),

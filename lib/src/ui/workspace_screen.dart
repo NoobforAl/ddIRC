@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../model/profile.dart';
 import '../model/workspace.dart';
 import '../theme.dart';
+import 'app_mark.dart';
+import 'layout.dart';
 import 'motion.dart';
 import 'network_rail.dart';
 import 'session_screen.dart';
@@ -29,31 +31,52 @@ class WorkspaceScreen extends StatelessWidget {
 
     return Scaffold(
       body: SafeArea(
-        child: Row(
-          children: [
-            NetworkRail(
+        // The one measurement in the app. Taken here, inside the safe area and
+        // below the window frame, so it is the room the app actually has —
+        // everything below reads the answer rather than measuring again and
+        // reaching a slightly different one.
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final layout = Layout.forWidth(constraints.maxWidth);
+            final rail = NetworkRail(
               workspace: workspace,
               onSelect: (profile) => _select(context, workspace, profile),
               onAdd: () => _edit(context, workspace, null),
               onEdit: (profile) => _edit(context, workspace, profile),
               onAppSettings: () => AppSettingsDialog.show(context),
-            ),
-            Expanded(
-              child: session == null
-                  ? _Empty(
-                      workspace: workspace,
-                      onAdd: () => _edit(context, workspace, null),
-                      onConnect: (p) => _select(context, workspace, p),
-                    )
-                  : SessionScreen(
-                      // Rebuild the session subtree when the network changes,
-                      // so scroll position and composer focus belong to one
-                      // conversation rather than leaking across networks.
-                      key: ValueKey(session.profileId),
-                      session: session,
-                    ),
-            ),
-          ],
+            );
+
+            return LayoutScope(
+              layout: layout,
+              child: Row(
+                children: [
+                  if (layout.channelsPinned) rail,
+                  Expanded(
+                    child: session == null
+                        ? _Empty(
+                            workspace: workspace,
+                            layout: layout,
+                            onAdd: () => _edit(context, workspace, null),
+                            onConnect: (p) => _select(context, workspace, p),
+                            onAppSettings: () =>
+                                AppSettingsDialog.show(context),
+                          )
+                        : SessionScreen(
+                            // Rebuild the session subtree when the network
+                            // changes, so scroll position and composer focus
+                            // belong to one conversation rather than leaking
+                            // across networks.
+                            key: ValueKey(session.profileId),
+                            session: session,
+                            // Narrow: the rail has nowhere to stand, so it
+                            // travels into the drawer with the channel list.
+                            rail: layout.channelsPinned ? null : rail,
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
@@ -100,13 +123,17 @@ class WorkspaceScreen extends StatelessWidget {
 class _Empty extends StatelessWidget {
   const _Empty({
     required this.workspace,
+    required this.layout,
     required this.onAdd,
     required this.onConnect,
+    required this.onAppSettings,
   });
 
   final Workspace workspace;
+  final Layout layout;
   final VoidCallback onAdd;
   final ValueChanged<Profile> onConnect;
+  final VoidCallback onAppSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -114,68 +141,95 @@ class _Empty extends StatelessWidget {
     final profiles = workspace.profiles.profiles;
 
     return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 340),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'ddIRC',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w600,
-                color: t.text,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.lock_outline, size: 12, color: t.muted),
-                SizedBox(width: 5),
-                Text(
-                  'Every connection uses TLS.',
-                  style: TextStyle(fontSize: 12.5, color: t.muted),
-                ),
-              ],
-            ),
-            const SizedBox(height: 26),
-            if (profiles.isEmpty)
-              Padding(
-                padding: EdgeInsets.only(bottom: 16),
-                child: Text(
-                  'No networks yet.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: t.faint, fontSize: 13),
-                ),
-              )
-            else ...[
-              for (final profile in profiles)
-                _ProfileRow(
-                  profile: profile,
-                  connecting: workspace.isConnecting(profile.id),
-                  failure: workspace.failureFor(profile.id),
-                  onTap: () => onConnect(profile),
-                ),
+      // Scrollable rather than centred and clipped: a phone in landscape has
+      // barely a couple of hundred points of height, and a saved network that
+      // cannot be reached is worse than a list that scrolls.
+      child: SingleChildScrollView(
+        padding: EdgeInsets.symmetric(
+          horizontal: layout.gutter + 8,
+          vertical: 24,
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 340),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Center(child: AppMark(size: 44)),
               const SizedBox(height: 14),
-            ],
-            TextButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add, size: 17),
-              label: Text(profiles.isEmpty ? 'Add a network' : 'Add another'),
-              style: TextButton.styleFrom(
-                foregroundColor: t.accent,
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                textStyle: const TextStyle(
-                  fontSize: 13.5,
+              Text(
+                'ddIRC',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 26,
                   fontWeight: FontWeight.w600,
+                  color: t.text,
+                  letterSpacing: -0.5,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.lock_outline, size: 12, color: t.muted),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Every connection uses TLS.',
+                    style: TextStyle(fontSize: 12.5, color: t.muted),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 26),
+              if (profiles.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    'No networks yet.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: t.faint, fontSize: 13),
+                  ),
+                )
+              else ...[
+                for (final profile in profiles)
+                  _ProfileRow(
+                    profile: profile,
+                    connecting: workspace.isConnecting(profile.id),
+                    failure: workspace.failureFor(profile.id),
+                    onTap: () => onConnect(profile),
+                  ),
+                const SizedBox(height: 14),
+              ],
+              TextButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add, size: 17),
+                label: Text(profiles.isEmpty ? 'Add a network' : 'Add another'),
+                style: TextButton.styleFrom(
+                  foregroundColor: t.accent,
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  textStyle: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              // App settings live in the rail, and on a narrow screen the rail
+              // is inside a drawer that only exists once something is
+              // connected. Without this there is no route to settings at all
+              // on a phone with no networks — which is the state every new
+              // install starts in.
+              if (!layout.channelsPinned)
+                TextButton.icon(
+                  onPressed: onAppSettings,
+                  icon: const Icon(Icons.settings_outlined, size: 16),
+                  label: const Text('App settings'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: t.muted,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    textStyle: const TextStyle(fontSize: 12.5),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
