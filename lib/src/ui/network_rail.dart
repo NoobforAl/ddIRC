@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../model/profile.dart';
+import '../model/proxy.dart';
+import '../model/session.dart';
 import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
@@ -95,7 +97,10 @@ class _RailEntry extends StatelessWidget {
   });
 
   final Profile profile;
-  final Object? session;
+
+  /// The live connection, if there is one. Typed rather than opaque because
+  /// the tooltip reports how it actually connected.
+  final SessionModel? session;
   final bool connecting;
   final bool failed;
   final bool selected;
@@ -112,38 +117,49 @@ class _RailEntry extends StatelessWidget {
     final m = context.motion;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Touchable(
-        onTap: onTap,
-        onSecondaryTap: onEdit,
-        onLongPress: onEdit,
-        builder: (context, touch) => SizedBox(
-          height: 42,
-          child: Row(
-            children: [
-              // The same 2px leading rule the channel list uses for its
-              // selection, so "where am I" reads identically in both columns.
-              AnimatedContainer(
-                duration: m.normal,
-                curve: Motion.curve,
-                width: 2,
-                height: 26,
-                color: selected ? t.accent : Colors.transparent,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _Mark(
-                  profile: profile,
-                  connected: connected,
-                  selected: selected,
-                  connecting: connecting,
-                  failed: failed,
-                  unread: unread,
-                  mentions: mentions,
-                  touch: touch,
+      // The rail is too narrow for a label, so the tooltip is the only place
+      // a network can say how it reached its server — and until now the only
+      // places that said were two settings dialogs and the debug log, neither
+      // of which is somewhere you look while chatting.
+      child: Tooltip(
+        message: networkTooltip(
+          profile.name,
+          session?.config.proxy,
+          live: connected,
+        ),
+        child: Touchable(
+          onTap: onTap,
+          onSecondaryTap: onEdit,
+          onLongPress: onEdit,
+          builder: (context, touch) => SizedBox(
+            height: 42,
+            child: Row(
+              children: [
+                // The same 2px leading rule the channel list uses for its
+                // selection, so "where am I" reads identically in both columns.
+                AnimatedContainer(
+                  duration: m.normal,
+                  curve: Motion.curve,
+                  width: 2,
+                  height: 26,
+                  color: selected ? t.accent : Colors.transparent,
                 ),
-              ),
-              const SizedBox(width: 10),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _Mark(
+                    profile: profile,
+                    connected: connected,
+                    selected: selected,
+                    connecting: connecting,
+                    failed: failed,
+                    unread: unread,
+                    mentions: mentions,
+                    touch: touch,
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+            ),
           ),
         ),
       ),

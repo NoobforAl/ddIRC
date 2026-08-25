@@ -229,6 +229,36 @@ Future<core.ProxyConfig?> resolveProxy(
   );
 }
 
+/// `host:port` for a proxy a live connection is actually using.
+///
+/// Mirrors [ProxyEndpoint.label] for the core's own type, so the same address
+/// is written the same way wherever it is shown.
+extension ProxyConfigLabel on core.ProxyConfig {
+  String get label => '$host:$port';
+}
+
+/// How one network is reaching its server, for the rail's tooltip.
+///
+/// Takes the proxy from the config the connection was *opened with*, not from
+/// the current settings. Those can be changed while a connection is up, and
+/// the gap between what is configured and what is actually in force is exactly
+/// what this exists to expose.
+///
+/// Says which either way, including when the answer is "directly". A label
+/// that only appears when a proxy is in use tells you nothing by its absence,
+/// and the failure worth catching here is believing a connection is proxied
+/// when it is not.
+String networkTooltip(
+  String name,
+  core.ProxyConfig? proxy, {
+  bool live = true,
+}) {
+  // Nothing has been reached yet, so there is no route to report. What an
+  // unconnected profile *would* use is the profile editor's business.
+  if (!live) return name;
+  return '$name\n${proxy == null ? 'Connected directly' : 'Through ${proxy.label}'}';
+}
+
 /// Makes [ProxySettings] available to the widget tree.
 class ProxyScope extends InheritedNotifier<ProxySettings> {
   const ProxyScope({

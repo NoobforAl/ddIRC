@@ -1,53 +1,71 @@
 # TODO
 
-All new work; none of it is started. The previous list is finished and its
-items are described in `README.md` and in the git history.
+Ordered easiest first. The cost jumps sharply after **Auto-connect**:
+everything above it is self-contained, and everything below carries either a
+new dependency, a per-platform decision, or an unanswered question.
 
-Everything below ships **disabled by default**. Items marked **beta** should
+Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
-## Server options
+## 1. Show the proxy in the main window
 
-- ✅ **Proxy, per server**, and ✅ **a global proxy setting** in app settings.
-  Both off by default.
+- **Say how each connection is actually reaching its server.**
 
-  The open question is settled: global is the default, and a server may
-  override it. Three choices per network — App default, Direct, Custom — rather
-  than a switch, because "off" and "not set" are different answers. A network
-  that must never be proxied has to be able to say so, or turning on the
-  app-wide proxy would sweep it up with everything else. The alternative, a
-  global proxy admitting no exceptions, was rejected: it makes one network's
-  requirements break every other network with no way to see why.
+  The reason to want this is the reason the proxy setting exists: a connection
+  that is silently *not* proxied looks exactly like one that is. Today the only
+  places that say are the two settings dialogs and the debug log, and neither
+  is somewhere you look while chatting.
 
-  SOCKS5 only. It is what the transport supports, and it is the right first
-  choice anyway — it carries arbitrary TCP and resolves the destination name at
-  the far end, so a proxy meant to hide where you are is not undone by a DNS
-  lookup from here. Tor's listener speaks exactly this, which is what makes the
-  Tor item below mostly a question of shipping Arti rather than of plumbing.
+  Report what the *live* connection used, not what the settings currently say
+  — those can differ, and the gap between them is the whole risk.
 
-  TLS is still negotiated end to end with the IRC server through the tunnel, so
-  the proxy carries ciphertext it cannot read. There is no direct-connection
-  fallback: a proxy that cannot be reached fails the connection.
+## 2. Auto-connect, per server
 
-- **Auto-connect, per server.** Not started.
+- **Connect this network at launch.** Off by default.
 
-- **Keep running in the background.** Not started. Worth settling first what
-  this means on each platform — a tray icon and a closed window on desktop, a
-  foreground service and its notification on Android, and on iOS most likely
-  nothing, since the OS does not keep a socket open for an app that is not in
-  front.
+  One flag on the profile, a checkbox in the editor, a pass at startup. No new
+  dependency and nothing undecided. Worth settling only how it behaves when
+  several are marked: connect them in the saved order, and do not let a slow
+  or failing one hold up the first frame.
 
-- **Show the proxy in the main window.** Not started, and the reason to want it
-  is the reason the setting exists: a connection that is silently *not* proxied
-  looks exactly like one that is. Today this is only visible in the two
-  settings dialogs and the debug log. The network rail's entries carry no
-  tooltip yet, which is the cheapest place to put it.
+## 3. `.onion` addresses — beta
 
-## Tor — beta
+- **Reach onion services.**
 
-- **Built-in Tor.** Research first: Arti is the Tor Project's own Rust
-  implementation, published as the `arti-client` crate, so this would be a
-  dependency rather than a bundled `tor` binary.
+  The transport already carries them: SOCKS5 resolves the destination name at
+  the far end, so an onion address travels to the proxy untouched. What has
+  never been looked at is this side — the client's own address validation, and
+  what certificate verification should mean for a name that is itself a public
+  key.
+
+  Small in code, but the certificate question needs answering before any of it
+  is written.
+
+## 4. Strip metadata before sending — beta
+
+- **Remove EXIF, timestamps, GPS, camera and software fields** from a file
+  before it is sent. On by default.
+
+  Listed apart from the rest of *Sending media* on purpose: it is the one part
+  that does not depend on how the bytes travel, so it can be built and tested
+  while that question is still open. Needs an image crate and per-format
+  handling.
+
+## 5. Keep running in the background
+
+- **Stay connected with the window closed.** Off by default.
+
+  Three separate platform integrations rather than one feature: a tray icon
+  and a hidden window on desktop, a foreground service and its notification on
+  Android, and on iOS most likely nothing at all, since the OS will not hold a
+  socket open for an app that is not in front. Worth deciding what it means on
+  each before building any of them.
+
+## 6. Built-in Tor — beta
+
+- **Ship Tor rather than expect it.** Research first: Arti is the Tor Project's
+  own Rust implementation, published as the `arti-client` crate, so this would
+  be a dependency rather than a bundled `tor` binary.
 
   Worth establishing during the research: whether Arti's embedded mode is
   ready for a shipping client, what it adds to the binary size and startup
@@ -59,12 +77,7 @@ additionally be labelled as such in the UI.
   real Tor for exercising it. What is left is bundling it, so that using Tor
   does not first require installing Tor.
 
-  One thing to settle when it is built: `.onion` addresses. They resolve at the
-  proxy, not here, so the transport already carries them — but the client's own
-  address validation and the TLS certificate check have not been looked at with
-  onion services in mind.
-
-## A local IRC server — beta
+## 7. A local IRC server — beta
 
 - **Run an IRC server inside the app**, so a user can host a small network
   without a separate daemon.
@@ -74,16 +87,19 @@ additionally be labelled as such in the UI.
   speaks plaintext would be unreachable from ddIRC itself — the same
   constraint that shaped `dev/`.
 
-## Sending media — beta
+## 8. Sending media — beta
+
+**Blocked on a decision** — see *The problem to solve* at the end of this
+section. The specification below is worth keeping either way; what is
+undecided is what carries the bytes.
 
 A protocol for sending files over IRC, since there is no standard one for
 in-band transfer.
 
 ### Defaults
 
-1. **Strip metadata before sending.** EXIF, timestamps, GPS, camera and
-   software fields — anything the file carries beyond its content. On by
-   default.
+1. **Strip metadata before sending** — moved out to item 4 above, because it
+   is buildable now and the rest of this is not.
 2. **Send in chunks, base64 encoded**, with a handshake first and an
    acknowledgement per chunk.
 
@@ -169,7 +185,12 @@ Most of the specification above — the handshake, the hashes, the chunking, the
 acknowledgements, the metadata stripping, the failure limits — survives either
 choice. What changes is what carries the bytes.
 
-## Logging
+## Done
+
+Kept here rather than deleted, because each one records a decision that would
+otherwise have to be made again.
+
+### Logging
 
 - ✅ **Save logs and debug logs**, as an app setting. Optional, off by default.
 
@@ -190,7 +211,7 @@ choice. What changes is what carries the bytes.
   a credential on the way into the debug log — a backstop, since the core
   strips secrets before they become events.
 
-## Error messages
+### Error messages
 
 - ✅ **Say what actually went wrong.** Done alongside the logger, because a
   debug log full of "an io error occurred" would have been worth nothing.
@@ -205,3 +226,27 @@ choice. What changes is what carries the bytes.
   parentheses, not a colon — so the strip that was meant to remove the wrapper
   never matched, and users saw it. Unwrapped by type now, in
   `model/errors.dart`.
+
+### Proxy
+
+- ✅ **Proxy, per server**, and ✅ **a global proxy setting** in app settings.
+  Both off by default.
+
+  The open question is settled: global is the default, and a server may
+  override it. Three choices per network — App default, Direct, Custom — rather
+  than a switch, because "off" and "not set" are different answers. A network
+  that must never be proxied has to be able to say so, or turning on the
+  app-wide proxy would sweep it up with everything else. The alternative, a
+  global proxy admitting no exceptions, was rejected: it makes one network's
+  requirements break every other network with no way to see why.
+
+  SOCKS5 only. It is what the transport supports, and it is the right first
+  choice anyway — it carries arbitrary TCP and resolves the destination name at
+  the far end, so a proxy meant to hide where you are is not undone by a DNS
+  lookup from here.
+
+  TLS is still negotiated end to end with the IRC server through the tunnel, so
+  the proxy carries ciphertext it cannot read. There is no direct-connection
+  fallback: a proxy that cannot be reached fails the connection.
+
+  `make dev-proxy` and `make dev-tor` bring up a fixture for each half.

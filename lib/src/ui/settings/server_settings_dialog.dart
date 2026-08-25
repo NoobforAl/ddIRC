@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../model/proxy.dart';
 import '../../model/session.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/types.dart';
@@ -193,6 +194,15 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
             const SettingsReadout(
               label: 'Transport',
               value: 'TLS, certificate verified',
+            ),
+            SettingsReadout(
+              label: 'Route',
+              // Read from the config this connection was opened with, so
+              // changing the proxy setting does not change what this says
+              // about a connection that is already up.
+              value: config.proxy == null
+                  ? 'Direct — no proxy'
+                  : 'SOCKS5 via ${config.proxy!.label}',
             ),
             SettingsReadout(
               label: 'Authentication',

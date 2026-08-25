@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ddirc/src/model/profile.dart';
 import 'package:ddirc/src/model/proxy.dart';
+import 'package:ddirc/src/rust/api/types.dart' as core;
 import 'package:ddirc/src/ui/settings/proxy_form.dart';
 
 const _tor = ProxyEndpoint(host: '127.0.0.1', port: 9050);
@@ -162,6 +163,37 @@ void main() {
       expect(
         _profile(mode: ProxyMode.custom, own: _tor).usesProxyAuth,
         isFalse,
+      );
+    });
+  });
+
+  group('the rail tooltip', () {
+    test('says how a live connection reached its server', () {
+      final line = networkTooltip(
+        'OFTC',
+        const core.ProxyConfig(host: '127.0.0.1', port: 9050),
+      );
+      expect(line, 'OFTC\nThrough 127.0.0.1:9050');
+    });
+
+    test('says "directly" just as plainly when there is no proxy', () {
+      // The half that matters. A label that appears only when a proxy is in
+      // use says nothing by its absence, and believing a connection is
+      // proxied when it is not is the failure this exists to catch.
+      expect(networkTooltip('OFTC', null), 'OFTC\nConnected directly');
+    });
+
+    test('reports no route for a network that is not connected', () {
+      // Nothing has been reached yet, so there is nothing true to say. What
+      // an unconnected profile *would* use is the editor's business.
+      expect(networkTooltip('OFTC', null, live: false), 'OFTC');
+      expect(
+        networkTooltip(
+          'OFTC',
+          const core.ProxyConfig(host: '127.0.0.1', port: 9050),
+          live: false,
+        ),
+        'OFTC',
       );
     });
   });
