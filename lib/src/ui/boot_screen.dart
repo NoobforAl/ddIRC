@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../model/errors.dart';
 import '../theme.dart';
 import 'app_mark.dart';
 import 'motion.dart';
@@ -315,7 +316,7 @@ class _Failed extends StatelessWidget {
                   // The real message, verbatim. It names the library and the
                   // reason, which is the only thing that will fix this.
                   child: SelectableText(
-                    '$error',
+                    describeError(error),
                     style: TextStyle(
                       color: t.faint,
                       fontSize: 11.5,

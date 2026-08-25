@@ -91,7 +91,7 @@ right-click or long-press on any channel in the list.
 
 | Dialog | What it holds |
 |---|---|
-| **App** | Timestamps, 12/24-hour clock, message density, whether joins and parts are shown, whether mIRC colours are rendered. Applies to every server; persists. |
+| **App** | Timestamps, 12/24-hour clock, message density, whether joins and parts are shown, whether mIRC colours are rendered, and the two logging switches. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
 | **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, authentication mechanism. Plus disconnect. |
 | **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account. Reached from the rail's context menu or the header menu. |
@@ -102,6 +102,42 @@ there** — see [SECURITY.md](SECURITY.md).
 Invalid input is reported on the field itself: the field turns red, states the
 problem underneath, and shakes. Nothing is reported in a banner somewhere else
 on the screen, and the layout never reflows.
+
+## Logs
+
+Off. Both of them, until someone turns them on.
+
+| | Records | Where |
+|---|---|---|
+| **Chat log** | What was said, as plain text | `logs/chat.log` |
+| **Debug log** | Connection and protocol events, never message content | `logs/debug.log` |
+
+Two switches rather than one, because they carry very different risks. Someone
+chasing a connection bug needs the second and has not thereby agreed to record
+their conversations in the first.
+
+Both live in `logs/` inside the application support directory — the app's own
+private data folder, the same one holding the settings file:
+
+| Platform | Path |
+|---|---|
+| Windows | `%APPDATA%\dev.ddirc\ddirc\logs\` |
+| Android | `/data/user/0/<package>/files/logs/` — app-private internal storage |
+| Linux | `~/.local/share/ddirc/logs/` |
+| macOS / iOS | `~/Library/Application Support/<bundle>/logs/` |
+
+Deliberately not Documents, Downloads or external storage. On Android those are
+readable by anything holding the storage permission, and a chat log is the last
+file in this app that should be. The folder is shown in App settings *before*
+either switch is turned on, and nothing is created on disk until there is a
+line to write — a user who never enables logging never gets a stray folder.
+
+Each file is capped at 5 MB with one rotated copy kept, so the pair has a
+ceiling rather than growing until a disk fills. A redaction pass blanks
+anything shaped like a credential on the way into the debug log; it is a
+backstop rather than the defence, since the core strips secrets before they
+ever become events. Write failures are swallowed — a full disk must not
+interrupt a conversation over a diagnostic.
 
 ## Why Rust, not C
 
@@ -326,6 +362,19 @@ start never flashes a logo; if it does appear it stays long enough to be read.
 It exists mostly for the case that used to produce an empty window and no
 explanation: a native core that will not load now gets a sentence, the
 underlying error, and a retry.
+
+**An error should name the thing that fixes it.** The `irc` crate's `Display`
+for its most common error is, in full, `an io error occurred` — with the real
+`io::Error` attached as a `#[source]` it never prints. So a mistyped hostname,
+a firewall, a wrong port and a server that is simply down all reached the user
+looking identical, and none of them suggested what to do. `conn/diagnose.rs`
+classifies the error instead of printing it, names the host and port that
+failed, and says what usually fixes that case; where it cannot classify one it
+walks the source chain, which at minimum recovers the detail the crate dropped.
+The same instinct applies at the other boundary: `AnyhowException.toString()`
+is `AnyhowException(msg)`, with parentheses rather than a colon, so the tidy-up
+that was meant to strip the wrapper silently matched nothing and users saw it.
+It is unwrapped by type now, not by regex over a `toString`.
 
 **A new message moves pixels, never layout.** `Arrive` fades and lifts a row
 into place with a `Transform`, which costs no layout at all. That is not a

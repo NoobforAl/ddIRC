@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../model/log.dart';
 import '../../model/settings.dart';
 import 'settings_chrome.dart';
 
@@ -82,6 +83,38 @@ class AppSettingsDialog extends StatelessWidget {
                   'already corrected; turn this off to ignore them entirely.',
               value: settings.renderColors,
               onChanged: (v) => settings.renderColors = v,
+            ),
+          ],
+        ),
+        const SettingsRule(),
+        SettingsSection(
+          label: 'Logging',
+          children: [
+            SettingsSwitch(
+              label: 'Save chat logs',
+              description:
+                  'Writes what is said to a file, in plain text. This is '
+                  'the most sensitive thing the app can store — anyone who '
+                  'can read the folder can read your conversations.',
+              value: settings.saveChatLogs,
+              onChanged: (v) => settings.saveChatLogs = v,
+            ),
+            SettingsSwitch(
+              label: 'Save debug logs',
+              description:
+                  'Connection and protocol events only, never message '
+                  'text. Turn this on before reproducing a bug, so the '
+                  'report can say what actually happened.',
+              value: settings.saveDebugLogs,
+              onChanged: (v) => settings.saveDebugLogs = v,
+            ),
+            SettingsReadout(
+              label: 'Folder',
+              // Shown whether or not either switch is on, so it is possible
+              // to know where the files would go before agreeing to them.
+              value:
+                  AppLog.instance.directoryPath ??
+                  'Unavailable on this platform',
             ),
           ],
         ),

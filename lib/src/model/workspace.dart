@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 
 import '../rust/api/client.dart' as core;
+import 'errors.dart';
+import 'log.dart';
 import 'profile.dart';
 import 'session.dart';
 import 'settings.dart';
@@ -86,8 +88,9 @@ class Workspace extends ChangeNotifier {
       _active = profile.id;
       return null;
     } catch (e) {
-      final message = '$e'.replaceFirst(RegExp(r'^[A-Za-z]*Exception:\s*'), '');
+      final message = describeError(e);
       _failures[profile.id] = message;
+      AppLog.instance.debug('[${profile.host}] could not connect: $message');
       return message;
     } finally {
       _connecting.remove(profile.id);

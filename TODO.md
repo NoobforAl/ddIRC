@@ -1,20 +1,171 @@
 # TODO
 
-- ✅ Add a light theme.
-- ✅ Add tests for the Rust core.
-- ✅ Add a dev IRC server with Docker Compose, for tests.
-- ✅ Add GitHub CI to run the lint checks.
-- ✅ Add the test suite to CI.
-- ✅ Add app settings to the home page.
-- ✅ Add animations for every action in the app.
-  (Member *departures* are still instant — animating one means holding a
-  row the model no longer has, which is a much bigger change than it looks.)
-- ✅ Make the layout responsive.
-- ✅ Create an app icon.
-- ✅ Add build configuration for the other platforms: Linux, macOS and iOS.
-  (Scaffolded and configured; none of the three has been built yet - no host.)
-- ✅ Give the core a reconnect command, so "Retry now" can wake the backoff
-  instead of tearing the connection down and losing the scrollback.
-- ✅ Let the app reach the dev server without trusting its certificate
-  machine-wide. (DDIRC_DEV_CA, debug builds only — it *adds* a root rather
-  than skipping verification, and is compiled out of release. See dev/README.md.)
+All new work; none of it is started. The previous list is finished and its
+items are described in `README.md` and in the git history.
+
+Everything below ships **disabled by default**. Items marked **beta** should
+additionally be labelled as such in the UI.
+
+## Server options
+
+- **Advanced options, per server.** Proxy, auto-connect, and keep running in
+  the background. All three off by default.
+- **A global proxy setting**, in app settings.
+
+  *Open question:* how the global and per-server proxy settings relate. The
+  usual answer is that global is the default and a server may override it,
+  with an explicit "no proxy" option, but it could equally be that a global
+  proxy applies to everything with no exceptions. This changes the UI, so it
+  is worth deciding before either is built.
+
+## Tor — beta
+
+- **Built-in Tor.** Research first: Arti is the Tor Project's own Rust
+  implementation, published as the `arti-client` crate, so this would be a
+  dependency rather than a bundled `tor` binary.
+
+  Worth establishing during the research: whether Arti's embedded mode is
+  ready for a shipping client, what it adds to the binary size and startup
+  time, and how the licence interacts with app-store distribution.
+
+## A local IRC server — beta
+
+- **Run an IRC server inside the app**, so a user can host a small network
+  without a separate daemon.
+
+  Undecided: whether it listens beyond loopback, and if so what its TLS story
+  is. The client requires TLS with no bypass, so a local server that only
+  speaks plaintext would be unreachable from ddIRC itself — the same
+  constraint that shaped `dev/`.
+
+## Sending media — beta
+
+A protocol for sending files over IRC, since there is no standard one for
+in-band transfer.
+
+### Defaults
+
+1. **Strip metadata before sending.** EXIF, timestamps, GPS, camera and
+   software fields — anything the file carries beyond its content. On by
+   default.
+2. **Send in chunks, base64 encoded**, with a handshake first and an
+   acknowledgement per chunk.
+
+### Handshake
+
+The sender opens with the file's description and hash. Use a fast hash rather
+than a cryptographic one — BLAKE3 or xxHash — since this detects corruption
+rather than tampering.
+
+```
+Filename: xxx, size: <bytes>, hash: xxx, chunk_size: <bytes>,
+total_chunks: xxx, encoding: base64
+```
+
+Fields worth adding to the ones above:
+
+| Field | Why |
+|---|---|
+| `transfer_id` | Two transfers between the same pair of users otherwise cannot be told apart, and every later message has to name the one it belongs to. |
+| `version` | The first version of a protocol that cannot say which version it is can never be changed compatibly. |
+| `mime_type` | So the receiver can refuse a type it will not display, before spending the transfer on it. |
+| `hash_algorithm` | Names the algorithm rather than assuming it, so it can be changed later. |
+| `encoded_size` | Lets the receiver check the total it was given against the total it got, independently of the chunk count. |
+
+*Open question:* the original note said `expected file: xxx`, whose meaning is
+not clear — it may be the filename after decoding, or the expected type.
+Worth settling.
+
+*Open question:* `encoding: base64 or 128`. Base64 is the safe choice on IRC,
+which is byte-oriented but full of characters that carry protocol meaning.
+There is no standard "base128"; if the goal is a denser encoding, Ascii85 is
+the usual candidate, at roughly 25% overhead against base64's 33%. It is
+worth confirming whether that gain justifies the risk of encountering a
+character some server mangles.
+
+### Transfer
+
+- Each chunk is sent as `part <n>: <payload>, hash: xxx`.
+- The receiver acknowledges each chunk.
+- A failed chunk is re-sent.
+- After **5** failures the transfer stops, in both directions.
+- An acknowledgement not received within **10 seconds** counts as a failure.
+- Maximum file size **128 MB**.
+- Keep the transfer's progress tracked internally, but keep the chunk traffic
+  itself out of the conversation view.
+
+  *Open question:* whether "hide this progress on UI" means no progress
+  indicator at all, or only that the raw protocol messages must not appear as
+  chat lines. A transfer with no visible progress and no way to cancel would
+  be hard to tell apart from the app having frozen.
+
+### The problem to solve before building this
+
+**The size limits and the transfer mechanism are, as specified, about four
+orders of magnitude apart.** The arithmetic, using this codebase's own
+numbers:
+
+- Outgoing messages are capped at 400 characters
+  (`MAX_MESSAGE_CHARS`, `conn/actor.rs`).
+- The send limiter sustains 0.5 messages per second after a burst of 5
+  (`SendLimiter::DEFAULT_PER_SEC`, `conn/ratelimit.rs`). That rate is not
+  arbitrary caution — it is roughly what servers tolerate before treating a
+  client as flooding.
+
+So base64 turns 128 MB into ~179 M characters, which is ~447,000 chunks, which
+at one message every two seconds is **about ten days** — before counting a
+single acknowledgement. The same sum puts a 1 MB image at ~2 hours and a
+200 KB avatar at ~23 minutes.
+
+Sending files as chat messages therefore cannot work for anything larger than
+a few kilobytes, at any rate a server will tolerate. Two directions worth
+weighing before writing the protocol:
+
+- **DCC**, the established IRC answer: peers negotiate in-band, then open a
+  direct TCP connection and send the file over that, subject to no message
+  rate limit at all. Its weaknesses are well known — it exposes IP addresses
+  and struggles with NAT — but it is what other clients implement and
+  interoperate with.
+- **Out-of-band upload**, where the file goes to a host over HTTPS and only a
+  link travels over IRC. Simplest to build, but adds a service to run.
+
+Most of the specification above — the handshake, the hashes, the chunking, the
+acknowledgements, the metadata stripping, the failure limits — survives either
+choice. What changes is what carries the bytes.
+
+## Logging
+
+- ✅ **Save logs and debug logs**, as an app setting. Optional, off by default.
+
+  Two independent switches, both off until asked for. Chat logs record what was
+  said; debug logs record connection and protocol events and never message
+  content, so turning on the one needed to chase a bug does not also start
+  recording conversations.
+
+  Written to `logs/` inside the app's own private data folder — on Windows
+  that is `%APPDATA%\dev.ddirc\ddirc\logs\`, beside the settings file; on
+  Android it is app-private internal storage, deliberately not Documents or
+  external storage, which are readable by anything holding the storage
+  permission. The folder is shown in settings before either switch is turned
+  on, and is not created until there is a line to write.
+
+  Each file is capped at 5 MB with one rotated copy kept, so the pair has a
+  ceiling a user can reason about. A `redact` pass blanks anything shaped like
+  a credential on the way into the debug log — a backstop, since the core
+  strips secrets before they become events.
+
+## Error messages
+
+- ✅ **Say what actually went wrong.** Done alongside the logger, because a
+  debug log full of "an io error occurred" would have been worth nothing.
+
+  The `irc` crate's `Display` for its commonest error is exactly that string,
+  with the underlying `io::Error` attached as a source it never prints — so a
+  mistyped hostname, a firewall, a wrong port and a server that is down all
+  arrived identical and unactionable. `conn/diagnose.rs` classifies them
+  instead, names the host and port, and says what usually fixes it.
+
+  On the Dart side `AnyhowException.toString()` is `AnyhowException(msg)` —
+  parentheses, not a colon — so the strip that was meant to remove the wrapper
+  never matched, and users saw it. Unwrapped by type now, in
+  `model/errors.dart`.

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../rust/api/client.dart' as core;
 import '../rust/api/types.dart';
+import 'log.dart';
 import 'settings.dart';
 
 /// How many lines to retain per conversation.
@@ -278,6 +279,26 @@ class SessionModel extends ChangeNotifier {
       active: _key(name) == _active,
       notify: settings.notifyFor(profileId, name),
     );
+    _log(name, line);
+  }
+
+  /// Mirror a line into the chat log, if one is being kept.
+  ///
+  /// The spans are flattened back to plain text rather than logged with their
+  /// formatting: a log is read in a text editor, and mIRC colour codes would
+  /// make it worse rather than more faithful.
+  void _log(String name, ChatLine line) {
+    if (!AppLog.instance.chatEnabled) return;
+    final message = line.message;
+    final text = message == null
+        ? line.system ?? ''
+        : '<${message.isAction ? '*' : ''}${message.sender}> '
+              '${message.spans.map((s) => s.text).join()}';
+    AppLog.instance.chat(
+      network: _network ?? config.host,
+      conversation: name,
+      text: text,
+    );
   }
 
   /// Status and error lines belong to whatever the user is currently reading;
@@ -305,7 +326,11 @@ class SessionModel extends ChangeNotifier {
     switch (event) {
       case IrcEvent_Status(:final status, :final detail):
         _status = status;
-        _addToActive(_describeStatus(status, detail));
+        final described = _describeStatus(status, detail);
+        _addToActive(described);
+        // The debug log's whole job: the sequence of connection states, and
+        // the reason each one was entered. No message content reaches it.
+        AppLog.instance.debug('[${_network ?? config.host}] $described');
 
       case IrcEvent_Registered(:final nick, :final network, :final auth):
         _nick = nick;
@@ -429,6 +454,9 @@ class SessionModel extends ChangeNotifier {
 
       case IrcEvent_Error(:final message):
         _addToActive('error: $message');
+        AppLog.instance.debug(
+          '[${_network ?? config.host}] error: $message',
+        );
     }
     notifyListeners();
   }

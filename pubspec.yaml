@@ -51,6 +51,11 @@ dependencies:
   # shared_preferences. Pinned like every other dependency.
   flutter_secure_storage: 11.0.0
 
+  # Where log files may be written. Every platform answers this differently and
+  # two of them (Android, iOS) can only be asked at runtime, so there is no
+  # honest way to hardcode it. First-party. Pinned like every other dependency.
+  path_provider: 2.1.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

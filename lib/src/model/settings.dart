@@ -52,6 +52,8 @@ class AppSettings extends ChangeNotifier {
   static const _kDensity = 'ui.density';
   static const _kThemeMode = 'ui.themeMode';
   static const _kColors = 'ui.mircColors';
+  static const _kChatLog = 'log.chat';
+  static const _kDebugLog = 'log.debug';
   static const _kNotifyPrefix = 'notify.';
 
   final SharedPreferences? _prefs;
@@ -60,6 +62,12 @@ class AppSettings extends ChangeNotifier {
   bool _twentyFourHour = true;
   bool _showSystemMessages = true;
   bool _renderColors = true;
+
+  /// Both off, and both stay off until asked for. A chat log is the most
+  /// sensitive file the app can write, and a debug log is dead weight to
+  /// anyone who is not chasing a bug.
+  bool _saveChatLogs = false;
+  bool _saveDebugLogs = false;
   Density _density = Density.comfortable;
   ThemeMode _themeMode = ThemeMode.dark;
   final Map<String, NotifyLevel> _notify = {};
@@ -88,6 +96,8 @@ class AppSettings extends ChangeNotifier {
     _showSystemMessages =
         prefs.getBool(_kSystemMessages) ?? _showSystemMessages;
     _renderColors = prefs.getBool(_kColors) ?? _renderColors;
+    _saveChatLogs = prefs.getBool(_kChatLog) ?? _saveChatLogs;
+    _saveDebugLogs = prefs.getBool(_kDebugLog) ?? _saveDebugLogs;
     _density = Density.values.firstWhere(
       (d) => d.name == prefs.getString(_kDensity),
       orElse: () => _density,
@@ -110,6 +120,8 @@ class AppSettings extends ChangeNotifier {
   bool get twentyFourHour => _twentyFourHour;
   bool get showSystemMessages => _showSystemMessages;
   bool get renderColors => _renderColors;
+  bool get saveChatLogs => _saveChatLogs;
+  bool get saveDebugLogs => _saveDebugLogs;
   Density get density => _density;
   ThemeMode get themeMode => _themeMode;
 
@@ -127,6 +139,14 @@ class AppSettings extends ChangeNotifier {
 
   set renderColors(bool value) => _set(_kColors, value, () {
     _renderColors = value;
+  });
+
+  set saveChatLogs(bool value) => _set(_kChatLog, value, () {
+    _saveChatLogs = value;
+  });
+
+  set saveDebugLogs(bool value) => _set(_kDebugLog, value, () {
+    _saveDebugLogs = value;
   });
 
   set density(Density value) => _set(_kDensity, value.name, () {

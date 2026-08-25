@@ -6,6 +6,7 @@
 
 import 'package:flutter/material.dart';
 
+import 'src/model/log.dart';
 import 'src/model/profile.dart';
 import 'src/model/settings.dart';
 import 'src/model/workspace.dart';
@@ -23,11 +24,31 @@ Future<void> main() async {
   // library, nothing that can hang. Settings come first because the window
   // itself is painted in the chosen theme.
   final settings = await AppSettings.load();
+  // Resolve the log directory whether or not logging is on, so the settings
+  // screen can show the path before the user commits to enabling anything.
+  // Nothing is created on disk until there is a line to write.
+  await AppLog.instance.start();
+  _followLogSettings(settings);
   // Reconfigure the window while it is still hidden, so the native caption
   // never flashes before ours replaces it.
   await prepareWindow(Tokens.forMode(settings.themeMode));
   final profiles = await ProfileStore.load();
   runApp(DdIrcApp(settings: settings, profiles: profiles));
+}
+
+/// Keep the log in step with the two switches that control it.
+///
+/// A listener rather than a read at startup, so turning logging off stops it
+/// immediately — a user who has just realised they are recording a
+/// conversation should not have to relaunch to make it stop.
+void _followLogSettings(AppSettings settings) {
+  void apply() => AppLog.instance.configure(
+    chat: settings.saveChatLogs,
+    debug: settings.saveDebugLogs,
+  );
+
+  apply();
+  settings.addListener(apply);
 }
 
 /// Bring up the native core.

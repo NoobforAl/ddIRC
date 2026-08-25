@@ -24,6 +24,7 @@ use crate::api::events::IrcEvent;
 use crate::api::types::{
     AuthOutcome, ChatMessage, ConfigError, ConnectionStatus, MemberView, ServerConfig, Target,
 };
+use crate::conn::diagnose;
 use crate::conn::ratelimit::{ReceiveLimiter, SendLimiter};
 use crate::conn::reconnect::Backoff;
 use crate::conn::sasl::{Credentials, NotAttempted, SaslNegotiator, SaslOutcome};
@@ -196,6 +197,20 @@ impl Actor {
         self.emit(IrcEvent::Status { status, detail });
     }
 
+    /// Put a failed attempt into words, naming the server it was about.
+    ///
+    /// Never `error.to_string()`: for the commonest failures the `irc` crate's
+    /// own message is "an io error occurred", which tells the user nothing and
+    /// drops the cause on the floor. See [`diagnose`].
+    fn describe(&self, error: &ConnectionError) -> String {
+        match error {
+            ConnectionError::Irc(irc) => {
+                diagnose::explain(irc, &self.config.host, self.config.port)
+            }
+            other => diagnose::chain(other),
+        }
+    }
+
     /// Reconnect loop. Returns when the user disconnects or the config is
     /// invalid, which is not worth retrying.
     async fn run(&mut self, mut commands: mpsc::Receiver<ClientCommand>) {
@@ -215,7 +230,7 @@ impl Actor {
 
             let disposition = match self.connect_once(&mut commands, &mut backoff).await {
                 Ok(disposition) => disposition,
-                Err(error) => Disposition::Lost(error.to_string()),
+                Err(error) => Disposition::Lost(self.describe(&error)),
             };
 
             let reason = match disposition {
