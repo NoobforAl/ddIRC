@@ -9,6 +9,7 @@ import 'motion.dart';
 import 'network_rail.dart';
 import 'session_screen.dart';
 import 'settings/app_settings_dialog.dart';
+import 'settings/network_picker_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
 import 'touchable.dart';
 
@@ -42,6 +43,7 @@ class WorkspaceScreen extends StatelessWidget {
               workspace: workspace,
               onSelect: (profile) => _select(context, workspace, profile),
               onAdd: () => _edit(context, workspace, null),
+              onBrowse: () => _browse(context, workspace),
               onEdit: (profile) => _edit(context, workspace, profile),
               onAppSettings: () => AppSettingsDialog.show(context),
             );
@@ -57,6 +59,7 @@ class WorkspaceScreen extends StatelessWidget {
                             workspace: workspace,
                             layout: layout,
                             onAdd: () => _edit(context, workspace, null),
+                            onBrowse: () => _browse(context, workspace),
                             onConnect: (p) => _select(context, workspace, p),
                             onAppSettings: () =>
                                 AppSettingsDialog.show(context),
@@ -95,12 +98,29 @@ class WorkspaceScreen extends StatelessWidget {
     await workspace.connect(profile);
   }
 
+  /// Pick one of the networks ddIRC ships knowing about, then edit it.
+  ///
+  /// The picker hands over an address and a channel list; the editor is still
+  /// what creates the profile, so the nickname is asked for and the proxy is
+  /// reviewed exactly as they are for a network typed in by hand. Nothing is
+  /// saved or dialled by browsing.
+  static Future<void> _browse(BuildContext context, Workspace workspace) async {
+    final pick = await NetworkPickerDialog.show(context);
+    if (pick == null || !context.mounted) return;
+    await _edit(context, workspace, null, preset: pick);
+  }
+
   static Future<void> _edit(
     BuildContext context,
     Workspace workspace,
-    Profile? profile,
-  ) async {
-    final result = await ProfileEditorDialog.show(context, profile: profile);
+    Profile? profile, {
+    NetworkPick? preset,
+  }) async {
+    final result = await ProfileEditorDialog.show(
+      context,
+      profile: profile,
+      preset: preset,
+    );
     if (result != ProfileEditorResult.savedAndConnect) return;
 
     // The editor saved a profile; find it again by id rather than holding the
@@ -125,6 +145,7 @@ class _Empty extends StatelessWidget {
     required this.workspace,
     required this.layout,
     required this.onAdd,
+    required this.onBrowse,
     required this.onConnect,
     required this.onAppSettings,
   });
@@ -132,6 +153,7 @@ class _Empty extends StatelessWidget {
   final Workspace workspace;
   final Layout layout;
   final VoidCallback onAdd;
+  final VoidCallback onBrowse;
   final ValueChanged<Profile> onConnect;
   final VoidCallback onAppSettings;
 
@@ -182,11 +204,16 @@ class _Empty extends StatelessWidget {
               const SizedBox(height: 26),
               if (profiles.isEmpty)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
-                    'No networks yet.',
+                    'No networks yet. ddIRC already knows where the ones '
+                    'still worth joining are.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: t.faint, fontSize: 13),
+                    style: TextStyle(
+                      color: t.faint,
+                      fontSize: 13,
+                      height: 1.45,
+                    ),
                   ),
                 )
               else ...[
@@ -199,10 +226,13 @@ class _Empty extends StatelessWidget {
                   ),
                 const SizedBox(height: 14),
               ],
+              // Browse leads, because on a fresh install it is the only one
+              // of the two that can be answered by someone who does not
+              // already know a server address by heart.
               TextButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add, size: 17),
-                label: Text(profiles.isEmpty ? 'Add a network' : 'Add another'),
+                onPressed: onBrowse,
+                icon: const Icon(Icons.travel_explore, size: 17),
+                label: const Text('Browse networks'),
                 style: TextButton.styleFrom(
                   foregroundColor: t.accent,
                   padding: const EdgeInsets.symmetric(vertical: 13),
@@ -210,6 +240,18 @@ class _Empty extends StatelessWidget {
                     fontSize: 13.5,
                     fontWeight: FontWeight.w600,
                   ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add, size: 16),
+                label: Text(
+                  profiles.isEmpty ? 'Add one by hand' : 'Add another by hand',
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: t.muted,
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  textStyle: const TextStyle(fontSize: 12.5),
                 ),
               ),
               // App settings live in the rail, and on a narrow screen the rail

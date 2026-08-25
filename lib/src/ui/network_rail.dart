@@ -23,6 +23,7 @@ class NetworkRail extends StatelessWidget {
     required this.workspace,
     required this.onSelect,
     required this.onAdd,
+    required this.onBrowse,
     required this.onEdit,
     required this.onAppSettings,
   });
@@ -30,6 +31,7 @@ class NetworkRail extends StatelessWidget {
   final Workspace workspace;
   final ValueChanged<Profile> onSelect;
   final VoidCallback onAdd;
+  final VoidCallback onBrowse;
   final ValueChanged<Profile> onEdit;
   final VoidCallback onAppSettings;
 
@@ -69,7 +71,16 @@ class NetworkRail extends StatelessWidget {
             ),
           ),
           const Divider(height: Tokens.hairline),
-          _RailButton(icon: Icons.add, tooltip: 'Add a network', onTap: onAdd),
+          _RailButton(
+            icon: Icons.travel_explore,
+            tooltip: 'Browse networks',
+            onTap: onBrowse,
+          ),
+          _RailButton(
+            icon: Icons.add,
+            tooltip: 'Add a network by hand',
+            onTap: onAdd,
+          ),
           // The rail is the only surface on screen in every state, so it is
           // also the only place app settings can always be reached from.
           _RailButton(

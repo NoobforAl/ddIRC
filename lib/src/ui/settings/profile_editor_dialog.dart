@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../../model/directory.dart';
 import '../../model/profile.dart';
 import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/client.dart' as core;
 import '../../theme.dart';
+import '../motion.dart';
+import '../touchable.dart';
+import 'network_picker_dialog.dart';
 import 'proxy_form.dart';
 import 'settings_chrome.dart';
 
@@ -18,18 +22,25 @@ enum ProfileEditorResult { saved, savedAndConnect, deleted }
 /// having two near-identical forms for "connect once" and "save a server"
 /// would be two places to get validation wrong.
 class ProfileEditorDialog extends StatefulWidget {
-  const ProfileEditorDialog({super.key, this.profile});
+  const ProfileEditorDialog({super.key, this.profile, this.preset});
 
   /// Null when adding.
   final Profile? profile;
 
+  /// What the network picker chose, when the user arrived that way.
+  ///
+  /// Only read when [profile] is null: it is a starting point for a new
+  /// network, never something that overwrites one the user already has.
+  final NetworkPick? preset;
+
   static Future<ProfileEditorResult?> show(
     BuildContext context, {
     Profile? profile,
+    NetworkPick? preset,
   }) {
     return showDialog<ProfileEditorResult>(
       context: context,
-      builder: (_) => ProfileEditorDialog(profile: profile),
+      builder: (_) => ProfileEditorDialog(profile: profile, preset: preset),
     );
   }
 
@@ -40,15 +51,31 @@ class ProfileEditorDialog extends StatefulWidget {
 enum _Input { name, host, port, nick, channels, account, password }
 
 class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
+  /// The picker's answer, or null. Never consulted while editing an existing
+  /// profile — [ProfileEditorDialog.preset] only starts new ones.
+  KnownNetwork? get _preset =>
+      widget.profile == null ? widget.preset?.network : null;
+
+  /// The channels ticked in the picker, on the same terms.
+  List<String>? get _presetChannels =>
+      widget.profile == null ? widget.preset?.channels : null;
+
   late final Map<_Input, TextEditingController> _fields = {
-    _Input.name: TextEditingController(text: widget.profile?.name ?? ''),
-    _Input.host: TextEditingController(text: widget.profile?.host ?? ''),
+    _Input.name: TextEditingController(
+      text: widget.profile?.name ?? _preset?.name ?? '',
+    ),
+    _Input.host: TextEditingController(
+      text: widget.profile?.host ?? _preset?.host ?? '',
+    ),
     _Input.port: TextEditingController(
-      text: '${widget.profile?.port ?? core.defaultTlsPort()}',
+      text: '${widget.profile?.port ?? _preset?.port ?? core.defaultTlsPort()}',
     ),
     _Input.nick: TextEditingController(text: widget.profile?.nickname ?? ''),
     _Input.channels: TextEditingController(
-      text: widget.profile?.channels.join(', ') ?? '',
+      text:
+          widget.profile?.channels.join(', ') ??
+          _presetChannels?.join(', ') ??
+          '',
     ),
     _Input.account: TextEditingController(
       text: widget.profile?.saslAccount ?? '',
@@ -176,9 +203,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       port: int.parse(_text(_Input.port)),
       nickname: _text(_Input.nick),
       altNicks: widget.profile?.altNicks ?? const [],
-      channels: _text(
-        _Input.channels,
-      ).split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toList(),
+      channels: _channelList(),
       saslAccount: _text(_Input.account).isEmpty ? null : _text(_Input.account),
       autoConnect: _autoConnect,
       proxyMode: _proxyMode,
@@ -301,7 +326,9 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 Expanded(child: _field(t, _Input.port, 'Port')),
               ],
             ),
+            _networkNote(t),
             _field(t, _Input.channels, 'Channels', hint: 'Comma-separated'),
+            _suggestedChannels(t),
             SettingsSwitch(
               label: 'Connect at launch',
               description:
@@ -368,6 +395,101 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         const SizedBox(height: 6),
       ],
     );
+  }
+
+  /// The catalogue entry for whatever address is currently typed, or null.
+  ///
+  /// Resolved from the field rather than held from the picker, so someone who
+  /// types `irc.oftc.net` by hand gets the same suggestions and the same
+  /// warnings as someone who arrived through Browse networks.
+  KnownNetwork? get _known => knownNetworkFor(_text(_Input.host));
+
+  /// Anything the network needs the user to know before they connect.
+  Widget _networkNote(Tokens t) {
+    final note = _known?.note;
+    return Reveal(
+      child: note == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: t.warn),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      note,
+                      style: TextStyle(
+                        color: t.muted,
+                        fontSize: 11.5,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  /// The channels this network is known for, as toggles over the field above.
+  ///
+  /// Toggles rather than a second list: the comma-separated field stays the
+  /// one place a channel list lives, and these write into it. Anything typed
+  /// by hand that is not in the catalogue is left alone by them, and a
+  /// suggestion the user has typed themselves still reads as selected.
+  Widget _suggestedChannels(Tokens t) {
+    final network = _known;
+    final suggestions = network?.channels ?? const <KnownChannel>[];
+    final joined = _channelList().map((c) => c.toLowerCase()).toSet();
+
+    return Reveal(
+      child: suggestions.isEmpty
+          ? null
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Popular on ${network!.name}',
+                    style: TextStyle(color: t.faint, fontSize: 11.5),
+                  ),
+                  const SizedBox(height: 7),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final channel in suggestions)
+                        _ChannelChip(
+                          label: channel.name,
+                          tooltip: channel.blurb,
+                          selected: joined.contains(channel.name.toLowerCase()),
+                          onTap: () => _toggleChannel(channel.name),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  /// The channels field, parsed. The same split the profile is built with.
+  List<String> _channelList() => parseChannels(_text(_Input.channels));
+
+  /// Add or remove one channel, leaving every other entry where it was.
+  ///
+  /// Written back through the controller rather than held in state, so the
+  /// correction is visible in the field the user could also have typed into —
+  /// there is never a selection that disagrees with what is on screen. The
+  /// field's own listener calls setState, which repaints the chips.
+  void _toggleChannel(String name) {
+    _fields[_Input.channels]!.text = toggleChannel(
+      _channelList(),
+      name,
+    ).join(', ');
   }
 
   /// Where this network's proxy comes from.
@@ -474,6 +596,81 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
             onSubmitted: (_) => _busy ? null : _save(thenConnect: true),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One suggested channel, on or off.
+///
+/// Small enough that a dozen of them wrap into the space a select box would
+/// have taken, and each one says what it is on hover rather than needing a
+/// second line of its own.
+class _ChannelChip extends StatelessWidget {
+  const _ChannelChip({
+    required this.label,
+    required this.tooltip,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final String tooltip;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final m = context.motion;
+
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 400),
+      child: Touchable(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        builder: (context, touch) => AnimatedContainer(
+          duration: m.fast,
+          curve: Motion.curve,
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+          decoration: BoxDecoration(
+            // Selected chips carry the accent at low opacity rather than at
+            // full strength: a dozen filled accent chips would outrank every
+            // control in the dialog, including the button that saves it.
+            color: selected
+                ? t.accent.withValues(alpha: 0.16)
+                : t.surfaceHover.withValues(alpha: touch.wash),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: selected ? t.accent : t.rule,
+              width: selected ? 1 : Tokens.hairline,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Appear(
+                child: selected
+                    ? Padding(
+                        key: const ValueKey('check'),
+                        padding: const EdgeInsets.only(right: 5),
+                        child: Icon(Icons.check, size: 11, color: t.accent),
+                      )
+                    : null,
+              ),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? t.text : t.muted,
+                  fontSize: 12,
+                  fontFamily: Fonts.mono,
+                  fontFamilyFallback: Fonts.monoFallback,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
