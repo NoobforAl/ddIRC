@@ -93,8 +93,8 @@ right-click or long-press on any channel in the list.
 |---|---|
 | **App** | Timestamps, 12/24-hour clock, message density, whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
-| **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, authentication mechanism. Plus disconnect. |
-| **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, and this network's proxy. Reached from the rail's context menu or the header menu. |
+| **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, route (direct or through which proxy), authentication mechanism. Plus disconnect. |
+| **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, whether to connect at launch, and this network's proxy. Reached from the rail's context menu or the header menu. |
 
 Preferences live in `shared_preferences`. **No credential is ever written
 there** — see [SECURITY.md](SECURITY.md).

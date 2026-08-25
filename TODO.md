@@ -1,34 +1,13 @@
 # TODO
 
-Ordered easiest first. The cost jumps sharply after **Auto-connect**:
-everything above it is self-contained, and everything below carries either a
-new dependency, a per-platform decision, or an unanswered question.
+Ordered easiest first. The cost jumps sharply after item 1: everything below
+it carries either a new dependency, a per-platform decision, or an unanswered
+question.
 
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
-## 1. Show the proxy in the main window
-
-- **Say how each connection is actually reaching its server.**
-
-  The reason to want this is the reason the proxy setting exists: a connection
-  that is silently *not* proxied looks exactly like one that is. Today the only
-  places that say are the two settings dialogs and the debug log, and neither
-  is somewhere you look while chatting.
-
-  Report what the *live* connection used, not what the settings currently say
-  — those can differ, and the gap between them is the whole risk.
-
-## 2. Auto-connect, per server
-
-- **Connect this network at launch.** Off by default.
-
-  One flag on the profile, a checkbox in the editor, a pass at startup. No new
-  dependency and nothing undecided. Worth settling only how it behaves when
-  several are marked: connect them in the saved order, and do not let a slow
-  or failing one hold up the first frame.
-
-## 3. `.onion` addresses — beta
+## 1. `.onion` addresses — beta
 
 - **Reach onion services.**
 
@@ -41,7 +20,7 @@ additionally be labelled as such in the UI.
   Small in code, but the certificate question needs answering before any of it
   is written.
 
-## 4. Strip metadata before sending — beta
+## 2. Strip metadata before sending — beta
 
 - **Remove EXIF, timestamps, GPS, camera and software fields** from a file
   before it is sent. On by default.
@@ -51,7 +30,7 @@ additionally be labelled as such in the UI.
   while that question is still open. Needs an image crate and per-format
   handling.
 
-## 5. Keep running in the background
+## 3. Keep running in the background
 
 - **Stay connected with the window closed.** Off by default.
 
@@ -61,7 +40,7 @@ additionally be labelled as such in the UI.
   socket open for an app that is not in front. Worth deciding what it means on
   each before building any of them.
 
-## 6. Built-in Tor — beta
+## 4. Built-in Tor — beta
 
 - **Ship Tor rather than expect it.** Research first: Arti is the Tor Project's
   own Rust implementation, published as the `arti-client` crate, so this would
@@ -77,7 +56,7 @@ additionally be labelled as such in the UI.
   real Tor for exercising it. What is left is bundling it, so that using Tor
   does not first require installing Tor.
 
-## 7. A local IRC server — beta
+## 5. A local IRC server — beta
 
 - **Run an IRC server inside the app**, so a user can host a small network
   without a separate daemon.
@@ -87,7 +66,7 @@ additionally be labelled as such in the UI.
   speaks plaintext would be unreachable from ddIRC itself — the same
   constraint that shaped `dev/`.
 
-## 8. Sending media — beta
+## 6. Sending media — beta
 
 **Blocked on a decision** — see *The problem to solve* at the end of this
 section. The specification below is worth keeping either way; what is
@@ -226,6 +205,36 @@ otherwise have to be made again.
   parentheses, not a colon — so the strip that was meant to remove the wrapper
   never matched, and users saw it. Unwrapped by type now, in
   `model/errors.dart`.
+
+### Show the proxy in the main window
+
+- ✅ **Every connection says how it reached its server.** The network rail's
+  tooltip, and a `Route` row in Server settings beneath `Transport`.
+
+  Both read the proxy from the config the connection was *opened with*, not
+  from the current settings — those can change while a connection is up, and
+  the gap between them is what this exists to expose.
+
+  It says "Connected directly" as plainly as it names a proxy. A label that
+  appears only when a proxy is in use says nothing by its absence, and
+  believing a connection is proxied when it is not is the failure worth
+  catching. An unconnected profile gets no route line: nothing has been
+  reached, so there is nothing true to say.
+
+### Auto-connect
+
+- ✅ **Connect this network at launch.** Off by default, and off for every
+  profile saved before the flag existed.
+
+  Marked networks are opened all at once and none of them awaited, so a server
+  that is down cannot hold up the others or the first frame — measured at 1.2 s
+  to a usable window with the marked server refusing connections, the failure
+  reported inline where the user would look anyway.
+
+  Which network you land on is decided up front rather than by whichever
+  connection wins the race: the first marked profile in saved order takes the
+  selection, and if it fails, whichever else arrives first is shown so a launch
+  that connected *something* never lands on an empty screen.
 
 ### Proxy
 

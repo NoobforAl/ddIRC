@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import '../rust/api/client.dart' as core;
@@ -32,6 +34,7 @@ class Workspace extends ChangeNotifier {
   final Map<String, String> _failures = {};
   final Set<String> _connecting = {};
   String? _active;
+  bool _startedAutomatic = false;
 
   /// Live sessions, in the order their profiles are saved, so the rail does
   /// not reshuffle as connections come and go.
@@ -60,10 +63,57 @@ class Workspace extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Connect every profile marked to connect at launch.
+  ///
+  /// All at once and none of them awaited: a network that is slow or refusing
+  /// connections must not hold up the others, and none of them may hold up the
+  /// first frame. Failures land in [failureFor] like any other, so a server
+  /// that is down at launch is reported where the user would look anyway
+  /// rather than interrupting a startup they did not ask to be part of.
+  ///
+  /// Which network you land on is decided here rather than by whichever
+  /// connection wins the race — otherwise the window you open into would
+  /// depend on how fast each server answered that morning. The first marked
+  /// profile in saved order takes the selection; if it fails, whichever else
+  /// arrives first is shown, so a launch that connected *something* never
+  /// lands on an empty screen.
+  ///
+  /// Runs once per launch, however many times it is called.
+  Future<void> connectAutomatic() async {
+    if (_startedAutomatic) return;
+    _startedAutomatic = true;
+
+    final marked = automatic;
+    if (marked.isEmpty) return;
+
+    for (final profile in marked) {
+      unawaited(connect(profile, focus: profile.id == marked.first.id));
+    }
+  }
+
+  /// The profiles [connectAutomatic] will open, in the order it opens them.
+  ///
+  /// Separated so the ordering — the part with a decision in it — can be
+  /// tested. The connecting itself crosses the FFI and cannot run in a widget
+  /// test.
+  @visibleForTesting
+  List<Profile> get automatic => [
+    for (final profile in profiles.profiles)
+      if (profile.autoConnect) profile,
+  ];
+
+  /// Whether [connectAutomatic] has already run this launch.
+  @visibleForTesting
+  bool get startedAutomatic => _startedAutomatic;
+
   /// Connect a saved profile, or bring it to the front if it is already up.
   ///
   /// Returns an error to show inline, or null on success.
-  Future<String?> connect(Profile profile) async {
+  ///
+  /// `focus` is false only for connections the user did not just ask for — the
+  /// ones made on their behalf at launch. Those still take the selection when
+  /// nothing else holds it.
+  Future<String?> connect(Profile profile, {bool focus = true}) async {
     if (_sessions.containsKey(profile.id)) {
       select(profile.id);
       return null;
@@ -104,7 +154,7 @@ class Workspace extends ChangeNotifier {
       session.addListener(notifyListeners);
 
       _sessions[profile.id] = session;
-      _active = profile.id;
+      if (focus || _active == null) _active = profile.id;
       return null;
     } catch (e) {
       final message = describeError(e);

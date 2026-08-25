@@ -4,6 +4,8 @@
 // layer only routes and presents: it never parses IRC, and everything it
 // renders has already been sanitised on the Rust side.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'src/model/log.dart';
@@ -92,6 +94,19 @@ class _DdIrcAppState extends State<DdIrcApp> {
     proxies: widget.proxies,
   );
 
+  /// Bring up the core, then start the connections that were asked for.
+  ///
+  /// The auto-connects are deliberately not awaited: the splash is waiting on
+  /// this, and a network that is down would otherwise hold the whole app
+  /// behind it. They resolve into the workspace as they arrive.
+  ///
+  /// Here rather than in `main`, because until the core has loaded there is
+  /// nothing to connect *with*.
+  Future<void> _start() async {
+    await startCore();
+    unawaited(_workspace.connectAutomatic());
+  }
+
   @override
   void dispose() {
     // Closes every live connection, so quitting never leaves a socket behind.
@@ -127,7 +142,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
                 // themed and cross-fades into the app. The scopes stay above
                 // it, because dialogs are routes and must reach them.
                 home: BootScreen(
-                  load: startCore,
+                  load: _start,
                   builder: (context) => const WorkspaceScreen(),
                 ),
               ),

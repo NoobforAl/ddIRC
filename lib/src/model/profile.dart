@@ -25,6 +25,7 @@ class Profile {
     this.saslAccount,
     this.proxyMode = ProxyMode.followDefault,
     this.proxy,
+    this.autoConnect = false,
   });
 
   /// Stable across renames, because it keys both the stored password and the
@@ -49,6 +50,13 @@ class Profile {
   /// [ProxyMode.custom]; kept when it is not, so switching away and back does
   /// not mean typing the address again.
   final ProxyEndpoint? proxy;
+
+  /// Connect this network when the app starts.
+  ///
+  /// Off, and off for every profile saved before this existed. Launching into
+  /// connections nobody asked for is the kind of default that has to be opted
+  /// into rather than out of.
+  final bool autoConnect;
 
   bool get usesSasl => (saslAccount ?? '').isNotEmpty;
 
@@ -83,6 +91,7 @@ class Profile {
     String? saslAccount,
     ProxyMode? proxyMode,
     ProxyEndpoint? proxy,
+    bool? autoConnect,
   }) {
     return Profile(
       id: id,
@@ -95,6 +104,7 @@ class Profile {
       saslAccount: saslAccount ?? this.saslAccount,
       proxyMode: proxyMode ?? this.proxyMode,
       proxy: proxy ?? this.proxy,
+      autoConnect: autoConnect ?? this.autoConnect,
     );
   }
 
@@ -131,6 +141,7 @@ class Profile {
     'saslAccount': saslAccount,
     'proxyMode': proxyMode.name,
     'proxy': proxy?.toJson(),
+    'autoConnect': autoConnect,
   };
 
   static Profile? fromJson(Map<String, Object?> json) {
@@ -158,6 +169,9 @@ class Profile {
       // exactly the default: follow the app, which is off.
       proxyMode: ProxyMode.byName(json['proxyMode']),
       proxy: ProxyEndpoint.fromJson(json['proxy']),
+      // Anything but a stored `true` is false, so a profile from before this
+      // existed - or one with a corrupted value - stays off.
+      autoConnect: json['autoConnect'] == true,
     );
   }
 

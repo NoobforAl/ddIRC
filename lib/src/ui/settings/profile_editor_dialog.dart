@@ -69,6 +69,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   bool _passwordTouched = false;
   late ProxyMode _proxyMode =
       widget.profile?.proxyMode ?? ProxyMode.followDefault;
+  late bool _autoConnect = widget.profile?.autoConnect ?? false;
 
   bool get _isNew => widget.profile == null;
 
@@ -179,6 +180,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         _Input.channels,
       ).split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toList(),
       saslAccount: _text(_Input.account).isEmpty ? null : _text(_Input.account),
+      autoConnect: _autoConnect,
       proxyMode: _proxyMode,
       // Kept even when the mode is not Custom, so switching to the app
       // default and back does not mean typing the address again. Nothing
@@ -300,6 +302,15 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               ],
             ),
             _field(t, _Input.channels, 'Channels', hint: 'Comma-separated'),
+            SettingsSwitch(
+              label: 'Connect at launch',
+              description:
+                  'Opens this network when ddIRC starts. Several may be '
+                  'marked; they connect together, and the first in the list '
+                  'is the one you land on.',
+              value: _autoConnect,
+              onChanged: (v) => setState(() => _autoConnect = v),
+            ),
           ],
         ),
         const SettingsRule(),
