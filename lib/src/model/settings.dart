@@ -55,6 +55,7 @@ class AppSettings extends ChangeNotifier {
   static const _kChatLog = 'log.chat';
   static const _kDebugLog = 'log.debug';
   static const _kStripMetadata = 'send.stripMetadata';
+  static const _kRunInBackground = 'app.runInBackground';
   static const _kNotifyPrefix = 'notify.';
 
   final SharedPreferences? _prefs;
@@ -77,6 +78,12 @@ class AppSettings extends ChangeNotifier {
   /// room a photograph was taken in, and a default that has to be found before
   /// it protects anyone is not a protection.
   bool _stripImageMetadata = true;
+
+  /// Off, because closing a window and having the app keep running is not what
+  /// closing a window means anywhere else. It has to be asked for, and the
+  /// first time it happens it must be something the user chose rather than
+  /// something they discover by finding the app still connected an hour later.
+  bool _runInBackground = false;
   Density _density = Density.comfortable;
   ThemeMode _themeMode = ThemeMode.dark;
   final Map<String, NotifyLevel> _notify = {};
@@ -108,6 +115,7 @@ class AppSettings extends ChangeNotifier {
     _saveChatLogs = prefs.getBool(_kChatLog) ?? _saveChatLogs;
     _saveDebugLogs = prefs.getBool(_kDebugLog) ?? _saveDebugLogs;
     _stripImageMetadata = prefs.getBool(_kStripMetadata) ?? _stripImageMetadata;
+    _runInBackground = prefs.getBool(_kRunInBackground) ?? _runInBackground;
     _density = Density.values.firstWhere(
       (d) => d.name == prefs.getString(_kDensity),
       orElse: () => _density,
@@ -133,6 +141,7 @@ class AppSettings extends ChangeNotifier {
   bool get saveChatLogs => _saveChatLogs;
   bool get saveDebugLogs => _saveDebugLogs;
   bool get stripImageMetadata => _stripImageMetadata;
+  bool get runInBackground => _runInBackground;
   Density get density => _density;
   ThemeMode get themeMode => _themeMode;
 
@@ -162,6 +171,10 @@ class AppSettings extends ChangeNotifier {
 
   set stripImageMetadata(bool value) => _set(_kStripMetadata, value, () {
     _stripImageMetadata = value;
+  });
+
+  set runInBackground(bool value) => _set(_kRunInBackground, value, () {
+    _runInBackground = value;
   });
 
   set density(Density value) => _set(_kDensity, value.name, () {

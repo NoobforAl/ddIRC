@@ -8,13 +8,27 @@ additionally be labelled as such in the UI.
 
 ## 1. Keep running in the background
 
-- **Stay connected with the window closed.** Off by default.
+Three separate platform integrations rather than one feature, and the question
+of what it *means* on each is now answered rather than open.
 
-  Three separate platform integrations rather than one feature: a tray icon
-  and a hidden window on desktop, a foreground service and its notification on
-  Android, and on iOS most likely nothing at all, since the OS will not hold a
-  socket open for an app that is not in front. Worth deciding what it means on
-  each before building any of them.
+- ✅ **Desktop** — built, and off by default. See *Done*.
+
+- **Android** — a foreground service and its permanent notification. Off by
+  default, and the only part of this item left to build.
+
+  The process belongs to the system there, so staying connected is not a
+  matter of keeping a window from closing: it needs a service holding the
+  Flutter engine alive, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`
+  and `POST_NOTIFICATIONS` in the manifest, and a notification the user cannot
+  dismiss. That is Kotlin rather than Dart, which is why it is separate from
+  the desktop half rather than the same switch reaching further.
+
+- ⛔ **iOS** — nothing to build, deliberately.
+
+  The OS will not hold a TCP socket open for an app that is not in front. The
+  honest behaviour is to reconnect on returning to the foreground, and for the
+  switch not to appear at all — which is what it does today. A control that
+  cannot keep its promise is worse than no control.
 
 ## 2. Built-in Tor — beta
 
@@ -145,6 +159,50 @@ choice. What changes is what carries the bytes.
 
 Kept here rather than deleted, because each one records a decision that would
 otherwise have to be made again.
+
+### Keep running in the background — the desktop half
+
+- ✅ **Closing the window can hide it instead of quitting.** Off by default,
+  on Windows, Linux and macOS.
+
+  There was nothing to keep alive. The connections live in the Rust core, on
+  its own threads, inside this process — hiding a window does not stop a
+  process, so a hidden window is already a connected one. What was missing was
+  the two halves of a door: a way to close the window without ending the
+  process, and a way back in afterwards.
+
+  The tray icon is the second half and is not decoration. It goes up with the
+  setting and comes down with it, so there is no arrangement in which the
+  window can hide with no icon to bring it back. Left-click restores, from
+  minimised as well as hidden — a window shown while still minimised looks
+  exactly like the click having done nothing. Right-click offers *Show* and
+  *Quit*, and nothing else: everything else the app can do it does better in
+  its own window, and a tray menu that grows into a second interface is a
+  second interface to keep in step.
+
+  The tooltip says how many networks are connected, and says "not connected"
+  as plainly as it says a number. An icon that mentions connections only when
+  it has some says nothing by its silence, and believing you are still on a
+  network when you are not is the failure worth catching.
+
+  **Closing is always intercepted, whichever way the setting is set.** The
+  setting decides between hiding and quitting; it does not decide who is in
+  charge of the close button. That is what closed a gap that predated this
+  work: quitting used to end the process without telling anyone, so every exit
+  looked like a ping timeout to everyone in the channel. Now both paths close
+  the connections first — verified against the dev server, which logs
+  `quit : ddirc_ui is no longer on the server` at the moment the window shuts.
+
+  Off by default, because closing a window and having the app keep running is
+  not what closing a window means anywhere else. The first time it happens it
+  has to be something the user chose, not something they discover by finding
+  the app still connected an hour later.
+
+  One new Dart dependency, `tray_manager` — the companion to `window_manager`,
+  which was already here. The tray icons are drawn by `make icons` from the
+  same `MarkSpec` as everything else, so they cannot drift from the taskbar
+  icon beside them; macOS gets a menu-bar template rather than the colour mark,
+  since the menu bar recolours what it is given.
 
 ### Logging
 

@@ -62,6 +62,64 @@ void main() {
     expect(committed[25], 2);
   });
 
+  test('the Windows tray icon is the current mark, at the tray sizes', () {
+    final committed = File('assets/tray/tray.ico').readAsBytesSync();
+    expect(
+      committed,
+      icons.ico([
+        // 16 at 100% scaling, then 125%, 150% and 200%. Windows picks from
+        // the file rather than resizing, so a missing size is a blurred tray
+        // icon — which is the kind of fault nobody bothers to report.
+        for (final size in [16, 20, 24, 32])
+          icons.png(icons.render(size), size, size),
+      ]),
+    );
+  });
+
+  test('the Linux tray icon is the current mark', () {
+    final committed = File('assets/tray/tray.png').readAsBytesSync();
+    expect(committed, icons.png(icons.render(64), 64, 64));
+  });
+
+  group('the macOS menu bar template', () {
+    test('is the current mark', () {
+      final committed = File('assets/tray/tray_template.png').readAsBytesSync();
+      expect(committed, icons.trayTemplate(44));
+    });
+
+    test('is one ink on transparency, which is what a template means', () {
+      // The menu bar recolours a template from its alpha alone and throws the
+      // colour away. An image with the mark's own field and near-white glyph
+      // in it comes out as a filled blob on a dark bar and a different blob on
+      // a light one, so every opaque pixel here has to be the same ink.
+      final pixels = icons.render(
+        44,
+        field: false,
+        scale: 1.5,
+        glyph: 0xFF000000,
+      );
+      var opaque = 0;
+      for (var i = 0; i < pixels.length; i += 4) {
+        if (pixels[i + 3] == 0) continue;
+        opaque++;
+        expect(pixels[i], 0, reason: 'red at byte $i');
+        expect(pixels[i + 1], 0, reason: 'green at byte $i');
+        expect(pixels[i + 2], 0, reason: 'blue at byte $i');
+      }
+      // And it must not be an empty image, which would pass the above.
+      expect(opaque, greaterThan(0));
+    });
+
+    test('fills the slot, rather than sitting in it as a speck', () {
+      // Without the field behind it the glyph alone occupies just over half
+      // the canvas, which in a 22-point menu bar slot is unreadable. It is
+      // drawn larger to compensate, and this is the assertion that notices if
+      // that compensation is ever dropped.
+      final pixels = icons.trayTemplate(44);
+      expect(pixels, isNot(icons.png(icons.render(44, field: false), 44, 44)));
+    });
+  });
+
   test('the icon is drawn, not scaled from one master', () {
     // The whole reason for a generator: the 16px icon is drawn at 16px. If it
     // were downscaled from a larger bitmap the strokes would go grey rather

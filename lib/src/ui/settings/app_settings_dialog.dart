@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/log.dart';
 import '../../model/settings.dart';
+import '../background.dart';
 import 'proxy_section.dart';
 import 'settings_chrome.dart';
 
@@ -48,6 +49,29 @@ class AppSettingsDialog extends StatelessWidget {
             ),
           ],
         ),
+        // Absent on Android and iOS rather than shown and disabled. On
+        // Android this needs a foreground service that does not exist yet; on
+        // iOS the OS will not hold a socket open for an app that is not in
+        // front, so the switch would be a promise the platform refuses to
+        // keep. A control for neither is better than a control that lies.
+        if (keepsRunningInBackground) ...[
+          const SettingsRule(),
+          SettingsSection(
+            label: 'Window',
+            children: [
+              SettingsSwitch(
+                label: 'Keep running when the window is closed',
+                description:
+                    'Closing the window hides it to the tray instead of '
+                    'quitting, so the connections stay up and nothing is '
+                    'missed while it is away. The tray icon brings it back, '
+                    'and is also how you quit for real.',
+                value: settings.runInBackground,
+                onChanged: (v) => settings.runInBackground = v,
+              ),
+            ],
+          ),
+        ],
         const SettingsRule(),
         SettingsSection(
           label: 'Messages',

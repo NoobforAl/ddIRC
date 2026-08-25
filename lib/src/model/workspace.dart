@@ -35,6 +35,7 @@ class Workspace extends ChangeNotifier {
   final Set<String> _connecting = {};
   String? _active;
   bool _startedAutomatic = false;
+  bool _closed = false;
 
   /// Live sessions, in the order their profiles are saved, so the rail does
   /// not reshuffle as connections come and go.
@@ -207,13 +208,28 @@ class Workspace extends ChangeNotifier {
     _failures.remove(profileId);
   }
 
-  @override
-  void dispose() {
+  /// Close every live connection, telling each server why.
+  ///
+  /// Separate from [dispose], and safe to call twice, because quitting closes
+  /// the connections first and tears the window down second — and the teardown
+  /// runs the widget tree's own dispose on its way out, which arrives back
+  /// here. Disposing a [ChangeNotifier] twice throws; saying goodbye twice
+  /// should not.
+  void closeAll() {
+    if (_closed) return;
+    _closed = true;
     for (final session in _sessions.values) {
       session.removeListener(notifyListeners);
+      // Sends a QUIT, so the servers hear it from us rather than finding out
+      // when the socket dies two minutes later.
       session.dispose();
     }
     _sessions.clear();
+  }
+
+  @override
+  void dispose() {
+    closeAll();
     super.dispose();
   }
 }

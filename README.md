@@ -62,6 +62,29 @@ On desktop the app draws its own title bar: traffic-light close, minimise and
 maximise on the left, their glyphs appearing on hover. The native caption is
 hidden before the first frame, so it never flashes. Mobile is unaffected.
 
+### Closing it, and not closing it
+
+**Keep running when the window is closed** is off by default. Turned on, the
+close button hides the window instead of quitting: the connections are held by
+the Rust core on its own threads inside this process, so a hidden window is
+still a connected one and nothing has to be re-established when it comes back.
+
+The tray icon is not an extra. A window that hides leaving nothing on screen is
+a lost app rather than a backgrounded one, so the icon goes up with the setting
+and comes down with it — there is no arrangement in which the window can hide
+with no icon to bring it back. Left-click restores; right-click offers *Show*
+and *Quit*. Its tooltip says how many networks are connected, and says "not
+connected" as plainly as it says a number.
+
+Closing is always intercepted, whichever way the setting is set. That is what
+lets a plain close send a `QUIT` first, so everyone in the channel sees you
+leave now rather than time out two minutes later.
+
+Desktop only, and the switch is absent — not disabled — elsewhere. Android
+needs a foreground service that has not been built yet; iOS will not hold a
+socket open for an app that is not in front, so the switch would be a promise
+the platform refuses to keep.
+
 ## The mark
 
 A hash on a rounded square. `#` is the channel sigil — it is what an IRC
@@ -73,7 +96,16 @@ and a corner radius, every value a fraction of the side. Two things read it.
 `AppMark` paints it on the splash and the empty screen, and
 `tool/make_icons.dart` rasterises it into every launcher icon — the Windows
 `.ico` at seven sizes, Android's legacy and adaptive icons at five densities,
-and a PNG and SVG under `assets/icon/` for anywhere outside a build.
+the tray icons under `assets/tray/`, and a PNG and SVG under `assets/icon/` for
+anywhere outside a build.
+
+The tray is the one place the mark ships as a Flutter asset, because a tray is
+a native control and takes a file rather than a widget. Windows and Linux get
+the mark as it appears everywhere else, since the icon sits beside the taskbar
+button and should be the same thing. macOS gets a *template* — the hash alone,
+one ink on transparency — because the menu bar recolours what it is given, and
+an image that is not a template comes out as a smudge on a dark bar and a
+different smudge on a light one.
 
 ```bash
 make icons     # redraw them all; the output is committed
@@ -91,7 +123,7 @@ right-click or long-press on any channel in the list.
 
 | Dialog | What it holds |
 |---|---|
-| **App** | Timestamps, 12/24-hour clock, message density, whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
+| **App** | Theme, timestamps, 12/24-hour clock, message density, whether closing the window quits or hides to the tray (desktop only), whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
 | **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, route (direct or through which proxy), authentication mechanism. Plus disconnect. |
 | **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, whether to connect at launch, and this network's proxy. Reached from the rail's context menu or the header menu. |
@@ -476,6 +508,12 @@ We depend on the published crate and treat vendoring as a **planned escape
 hatch**, not a surprise. IRC is a frozen protocol, so a fork carries no ongoing
 maintenance tax. If we hit the gaps they hit — flood protection, rustls
 behaviour — the fork goes in `irc-core/vendor/irc` and nothing else changes.
+
+`tray_manager` is the Dart side's only new dependency, and it is the companion
+to `window_manager`, which was already here. It exists because hiding a window
+without a way back is not a feature; nothing else in the tree needed a native
+tray, and writing one for three platforms to avoid one pinned package would
+have been the worse trade.
 
 The proxy support is the crate's own `proxy` feature, backed by
 `tokio-socks`. We take `tokio-socks` as a direct dependency as well, because

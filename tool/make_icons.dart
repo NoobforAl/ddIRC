@@ -32,6 +32,20 @@ import 'package:ddirc/src/ui/mark_spec.dart';
 /// title bar, 256 is the one Explorer shows in a large-icon view.
 const _icoSizes = [16, 24, 32, 48, 64, 128, 256];
 
+/// The notification area, at the four display scalings Windows offers: 16
+/// pixels at 100%, then 125%, 150% and 200%. Windows picks from the file
+/// rather than scaling, so an omitted size is a blurred icon, not a missing
+/// one — which is the kind of fault nobody reports.
+const _trayIcoSizes = [16, 20, 24, 32];
+
+/// How much of a menu-bar template the glyph occupies.
+///
+/// The macOS tray image is the hash alone, with no field behind it, so it has
+/// to be drawn larger than it is inside the app icon or it reads as a speck in
+/// a 22-point slot. Derived from [MarkSpec.inset] rather than typed as a
+/// number, so widening the glyph in the spec cannot silently shrink this.
+const _templateScale = 0.86 / (1 - 2 * MarkSpec.inset);
+
 /// Android's five densities, at 48dp for the legacy icon and 108dp for the
 /// adaptive one.
 const _androidDensities = {
@@ -132,6 +146,22 @@ void main(List<String> args) {
   appleIcons('macos/Runner/Assets.xcassets/AppIcon.appiconset', write, macIcon);
   appleIcons('ios/Runner/Assets.xcassets/AppIcon.appiconset', write, iosIcon);
 
+  // The tray. Bundled as a Flutter asset rather than a platform resource,
+  // because tray_manager is handed a path at runtime and resolves it out of
+  // the asset bundle.
+  //
+  // Windows and Linux get the mark as it appears everywhere else — the tray
+  // icon sits beside the taskbar button and should be the same thing. macOS
+  // gets a template instead: the menu bar recolours what it is given, so an
+  // image that is not black-on-transparent comes out as a smudge on a dark
+  // menu bar and a different smudge on a light one.
+  write(
+    'assets/tray/tray.ico',
+    ico([for (final size in _trayIcoSizes) png(render(size), size, size)]),
+  );
+  write('assets/tray/tray.png', png(render(64), 64, 64));
+  write('assets/tray/tray_template.png', trayTemplate(44));
+
   // For anywhere outside a build: a readme, a store listing, the platforms
   // that do not have a runner yet. The SVG is the one to hand to a designer.
   write('assets/icon/ddirc.png', png(render(512), 512, 512));
@@ -143,6 +173,18 @@ void main(List<String> args) {
   }
   stdout.writeln('${written.length} files');
 }
+
+/// The macOS menu-bar image: the hash alone, in black, on transparency.
+///
+/// Marked as a template when it is handed to the tray, which is what lets the
+/// system invert it for a dark menu bar and dim it when the bar is inactive.
+/// A template's colour is discarded and only its alpha is read, so black here
+/// is a convention rather than a choice of ink.
+Uint8List trayTemplate(int size) => png(
+  render(size, field: false, scale: _templateScale, glyph: 0xFF000000),
+  size,
+  size,
+);
 
 /// One macOS icon: rounded, inside Apple's margin, alpha kept.
 Uint8List macIcon(int size) => png(render(size, scale: _macScale), size, size);
@@ -201,11 +243,15 @@ String _hex(int argb) =>
 /// [scale] is how much of the canvas the mark occupies, centred.
 /// [backdrop] fills the canvas edge to edge first, for iOS, which masks the
 /// corners itself and will not accept an icon with any transparency in it.
+/// [glyph] overrides the hash's colour, for the macOS menu-bar template, which
+/// has to be a single opaque ink on transparency rather than the mark's own
+/// near-white.
 Uint8List render(
   int size, {
   bool field = true,
   double scale = 1,
   int? backdrop,
+  int? glyph,
 }) {
   final pixels = Uint8List(size * size * 4);
   final side = size * scale;
@@ -244,7 +290,14 @@ Uint8List render(
         final ds = _segment(cx, cy, px(x1), px(y1), px(x2), px(y2), ink);
         if (ds < d) d = ds;
       }
-      (r, g, b, a) = _over(MarkSpec.glyphColor, _coverage(d), r, g, b, a);
+      (r, g, b, a) = _over(
+        glyph ?? MarkSpec.glyphColor,
+        _coverage(d),
+        r,
+        g,
+        b,
+        a,
+      );
 
       final i = (y * size + x) * 4;
       pixels[i] = (r * 255).round();

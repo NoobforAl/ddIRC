@@ -15,6 +15,7 @@ import 'src/model/settings.dart';
 import 'src/model/workspace.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/theme.dart';
+import 'src/ui/background.dart';
 import 'src/ui/boot_screen.dart';
 import 'src/ui/window_chrome.dart';
 import 'src/ui/workspace_screen.dart';
@@ -94,6 +95,20 @@ class _DdIrcAppState extends State<DdIrcApp> {
     proxies: widget.proxies,
   );
 
+  /// Owns what happens when the window is closed. Inert off desktop.
+  late final BackgroundPresence _background = BackgroundPresence(
+    settings: widget.settings,
+    workspace: _workspace,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    // Not awaited, and nothing waits on it: this arranges what a later close
+    // will do, and the window cannot be closed before the first frame.
+    unawaited(_background.start());
+  }
+
   /// Bring up the core, then start the connections that were asked for.
   ///
   /// The auto-connects are deliberately not awaited: the splash is waiting on
@@ -109,7 +124,10 @@ class _DdIrcAppState extends State<DdIrcApp> {
 
   @override
   void dispose() {
+    _background.dispose();
     // Closes every live connection, so quitting never leaves a socket behind.
+    // Already done by the time a tray quit reaches here, and idempotent for
+    // exactly that reason.
     _workspace.dispose();
     super.dispose();
   }
