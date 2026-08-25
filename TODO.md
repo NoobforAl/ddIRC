@@ -9,7 +9,8 @@
 - Add animations for every action in the app.
 - ✅ Make the layout responsive.
 - ✅ Create an app icon.
-- Add build configuration for the other platforms: Linux, macOS and iOS.
+- ✅ Add build configuration for the other platforms: Linux, macOS and iOS.
+  (Scaffolded and configured; none of the three has been built yet - no host.)
 - Give the core a reconnect command, so "Retry now" can wake the backoff
   instead of tearing the connection down and losing the scrollback.
 - Let the app reach the dev server without trusting its certificate

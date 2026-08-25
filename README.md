@@ -233,6 +233,38 @@ flutter build windows --debug     # → build/windows/x64/runner/Debug/ddirc.exe
 flutter run -d windows
 ```
 
+### Building for Linux, macOS and iOS
+
+Scaffolded, configured, and **not yet built by anyone** — every one of them
+needs a host we do not have. They are here so that the first person with a Mac
+or a Linux box starts from a project that is already wired up rather than from
+`flutter create`, and so that the things which are easy to get wrong are
+already right. Expect to fix something; do not expect to start from scratch.
+
+```bash
+make build-linux    # on Linux:  needs GTK 3, ninja, clang, pkg-config
+make build-macos    # on macOS:  needs Xcode
+make build-ios      # on macOS:  builds unsigned, for a simulator or a device
+```
+
+The Rust side needs nothing new: `rust_builder` (the `ddirc_bridge` plugin)
+already ships cargokit glue for all five platforms, so the core is compiled by
+the Flutter build exactly as it is on Windows and Android. On macOS and iOS you
+will want `rustup target add` for the architectures you are building for.
+
+What was set beyond the template:
+
+| | |
+|---|---|
+| **macOS** | `com.apple.security.network.client` in **both** entitlement files. This is the one that matters: under the App Sandbox an outgoing connection is refused without it, and it surfaces as a TLS error rather than as a permissions one, so it costs an afternoon to find |
+| **iOS** | Display name, and icons with no alpha channel — an iOS icon with one is rejected on upload |
+| **Linux** | No `GtkHeaderBar`. The app draws its own title strip on every desktop, and a header bar is a *client-side* titlebar that survives undecorating on some window managers, leaving two of them. Default window size matches what `prepareWindow` asks for |
+| all three | The mark, generated into each platform's icon format by `make icons` |
+
+Bundle identifier is `dev.ddirc.ddirc` throughout, matching Android. There is no
+signing configuration and no CI job for these — CI has no macOS runner, and a
+Linux job would be the only one of the three it could ever run.
+
 ### Picking a network to test against
 
 Libera.Chat is the default, but it rejects connections from many VPN exit IPs

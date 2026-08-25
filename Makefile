@@ -25,7 +25,7 @@ DART_SRC := lib
 COMPOSE ?= docker compose -f dev/compose.yaml
 
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test test-integration build codegen icons clean \
+.PHONY: help fix fmt lint test test-integration build build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs
 
 help:
@@ -37,6 +37,7 @@ help:
 	@echo "  make test     run the Dart and Rust test suites (hermetic)"
 	@echo "  make test-integration  end-to-end, needs make dev-server"
 	@echo "  make build    debug build for Windows"
+	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
 	@echo "  make clean    drop build output for both halves"
@@ -81,6 +82,18 @@ test-integration:
 
 build:
 	$(FLUTTER) build windows --debug
+
+## The other desktops and iOS. Each has to run on that host - there is no
+## cross-compiling a Flutter runner - and none of them has been built yet.
+## See the README: they are scaffolded and configured, not proven.
+build-linux:
+	$(FLUTTER) build linux --debug
+
+build-macos:
+	$(FLUTTER) build macos --debug
+
+build-ios:
+	$(FLUTTER) build ios --debug --no-codesign
 
 # Needs `flutter` on PATH: the generator shells out to it by name.
 codegen:

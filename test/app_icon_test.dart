@@ -45,6 +45,23 @@ void main() {
     expect(committed, icons.png(icons.render(192), 192, 192));
   });
 
+  test('the macOS icon set is the current mark', () {
+    final committed = File(
+      'macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png',
+    ).readAsBytesSync();
+    expect(committed, icons.macIcon(512));
+  });
+
+  test('the iOS icon set is the current mark, and has no alpha', () {
+    final committed = File(
+      'ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png',
+    ).readAsBytesSync();
+    expect(committed, icons.iosIcon(1024));
+    // Colour type 2 is RGB. An iOS icon with an alpha channel is rejected on
+    // upload, and the corners are masked by the system anyway.
+    expect(committed[25], 2);
+  });
+
   test('the icon is drawn, not scaled from one master', () {
     // The whole reason for a generator: the 16px icon is drawn at 16px. If it
     // were downscaled from a larger bitmap the strokes would go grey rather
