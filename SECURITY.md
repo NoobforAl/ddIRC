@@ -95,6 +95,28 @@ Off by default. SOCKS5 only, and every property below is a deliberate one.
   server passwords as plain `String`, which is not zeroized on drop. Noted here
   rather than papered over; removing it would mean vendoring the crate.
 
+### Outgoing files
+
+- **Image metadata is removed by rewriting the container, never by
+  re-encoding.** `media/` drops EXIF, XMP, IPTC, text chunks, comments,
+  embedded thumbnails and timestamps from JPEG, PNG, GIF and WebP. The image
+  data is copied across byte-identically, so nothing is lost to a re-compress
+  and no image codec enters the dependency tree.
+- **A file it cannot parse is refused, not passed through.** Reporting a file
+  as cleaned when its format was not understood would be the one failure that
+  matters here, so an unknown or malformed file returns an error and leaves the
+  decision to the caller.
+- **What was removed is reported**, so the UI can say what left the file rather
+  than asking the user to trust that something did.
+- **The parsers cannot panic.** They are handed whatever file the user picked,
+  which includes truncated and mislabelled ones. Every read is bounds-checked,
+  lengths are added with checked arithmetic, and the tests sweep every
+  truncation and every single-byte corruption of a valid file of each format.
+- Deliberately kept: colour profiles, JFIF density, Adobe's colour-transform
+  marker, and GIF looping. These change how an image renders rather than saying
+  anything about a person, and removing them would alter what the recipient
+  sees.
+
 ### Untrusted server data
 
 - **Control codes are stripped in Rust, not Dart.** `text/format.rs` parses mIRC

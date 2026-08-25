@@ -6,17 +6,7 @@ per-platform decision, or an unanswered question.
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
-## 1. Strip metadata before sending — beta
-
-- **Remove EXIF, timestamps, GPS, camera and software fields** from a file
-  before it is sent. On by default.
-
-  Listed apart from the rest of *Sending media* on purpose: it is the one part
-  that does not depend on how the bytes travel, so it can be built and tested
-  while that question is still open. Needs an image crate and per-format
-  handling.
-
-## 2. Keep running in the background
+## 1. Keep running in the background
 
 - **Stay connected with the window closed.** Off by default.
 
@@ -26,7 +16,7 @@ additionally be labelled as such in the UI.
   socket open for an app that is not in front. Worth deciding what it means on
   each before building any of them.
 
-## 3. Built-in Tor — beta
+## 2. Built-in Tor — beta
 
 - **Ship Tor rather than expect it.** Research first: Arti is the Tor Project's
   own Rust implementation, published as the `arti-client` crate, so this would
@@ -42,7 +32,7 @@ additionally be labelled as such in the UI.
   real Tor for exercising it. What is left is bundling it, so that using Tor
   does not first require installing Tor.
 
-## 4. A local IRC server — beta
+## 3. A local IRC server — beta
 
 - **Run an IRC server inside the app**, so a user can host a small network
   without a separate daemon.
@@ -52,7 +42,7 @@ additionally be labelled as such in the UI.
   speaks plaintext would be unreachable from ddIRC itself — the same
   constraint that shaped `dev/`.
 
-## 5. Sending media — beta
+## 4. Sending media — beta
 
 **Blocked on a decision** — see *The problem to solve* at the end of this
 section. The specification below is worth keeping either way; what is
@@ -63,8 +53,9 @@ in-band transfer.
 
 ### Defaults
 
-1. **Strip metadata before sending** — moved out to item 4 above, because it
-   is buildable now and the rest of this is not.
+1. ✅ **Strip metadata before sending** — built, in `media/`. See *Done*. It
+   was separable because it does not depend on how the bytes travel; the rest
+   of this section does.
 2. **Send in chunks, base64 encoded**, with a handshake first and an
    acknowledgement per chunk.
 
@@ -221,6 +212,33 @@ otherwise have to be made again.
   connection wins the race: the first marked profile in saved order takes the
   selection, and if it fails, whichever else arrives first is shown so a launch
   that connected *something* never lands on an empty screen.
+
+### Strip metadata before sending
+
+- ✅ **The stripping itself.** ⛔ **Wiring it to a send path** — blocked with
+  the rest of *Sending media*, because there is nothing to send with yet.
+
+  `media/` removes EXIF, XMP, IPTC/Photoshop blocks, text chunks, comments,
+  embedded thumbnails and timestamps from JPEG, PNG, GIF and WebP, and reports
+  what it took out so the UI can say rather than merely claim.
+
+  Every format is rewritten as a container with the image data copied across
+  untouched, so the pixels come out byte-identical. Decoding and re-encoding
+  would lose quality on every JPEG to delete a text field, and would want an
+  image codec in the dependency tree; this needs neither. Nothing was added to
+  `Cargo.toml`.
+
+  Colour profiles, JFIF density and Adobe's colour-transform marker are kept on
+  purpose. They change how the image *renders* — remove them and the recipient
+  sees different colours from the sender — and they name a colour space rather
+  than a person. GIF's looping declaration is kept for the same reason: an
+  animation that stops after one pass is a changed image, not a cleaned one.
+
+  Verified against files written by real imaging software carrying real GPS,
+  camera and software fields: every one decodes afterwards, with identical
+  pixels, no metadata the decoder can find, and none of the original strings
+  anywhere in the bytes. `tests/media_files.rs` runs it over a directory of
+  your own photographs.
 
 ### `.onion` addresses
 

@@ -270,6 +270,7 @@ unchanged.
 | `conn/ratelimit.rs` | Token buckets for outgoing pacing and incoming flood protection. |
 | `conn/reconnect.rs` | Exponential backoff with equal jitter. |
 | `state/` | Channels, members, privileges; `ISUPPORT` and casemapping. |
+| `media/` | Removing metadata from images before they are sent. No codec: each format is rewritten as a container, pixels copied across untouched. |
 | `text/format.rs` | Parses mIRC formatting into styled spans and strips control codes. |
 
 ## Building
