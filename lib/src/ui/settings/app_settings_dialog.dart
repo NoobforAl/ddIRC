@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../model/log.dart';
 import '../../model/settings.dart';
+import 'proxy_section.dart';
 import 'settings_chrome.dart';
 
 /// Preferences that apply everywhere, on every server.
 ///
-/// Each change takes effect immediately and writes through to disk — there is
-/// no Save button, because there is nothing here that could half-apply.
+/// Each change takes effect immediately and writes through to disk. The one
+/// exception is the proxy, which is a typed address rather than a switch and
+/// so has a state that is neither the old value nor a working new one; it
+/// carries its own buttons and explains why.
 class AppSettingsDialog extends StatelessWidget {
   const AppSettingsDialog({super.key});
 
@@ -119,12 +122,18 @@ class AppSettingsDialog extends StatelessWidget {
           ],
         ),
         const SettingsRule(),
+        const GlobalProxySection(),
+        const SettingsRule(),
         const SettingsSection(
           label: 'Security',
           children: [
             SettingsReadout(
               label: 'Transport',
               value: 'TLS only, certificates verified',
+            ),
+            SettingsReadout(
+              label: 'Proxy fallback',
+              value: 'None — a proxy that cannot be reached fails the connect',
             ),
             SettingsReadout(
               label: 'Message text',

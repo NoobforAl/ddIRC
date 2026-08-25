@@ -36,10 +36,102 @@ pub enum ConfigError {
     IncompleteSaslCredentials,
     #[error("certificate to trust not found: {0}")]
     MissingRootCert(String),
+    #[error("proxy host must not be empty")]
+    EmptyProxyHost,
+    #[error("proxy port must not be 0")]
+    ProxyPortZero,
+    #[error("a SOCKS5 proxy needs both a username and a password, or neither")]
+    IncompleteProxyCredentials,
+    #[error(
+        "proxy {0} must be between 1 and 255 bytes; SOCKS5 length-prefixes it \
+         with a single byte (RFC 1929)"
+    )]
+    ProxyCredentialLength(&'static str),
+}
+
+/// A SOCKS5 proxy to dial through.
+///
+/// SOCKS5 and nothing else. It is what the transport underneath supports, and
+/// it is also the right first choice: unlike an HTTP proxy it carries arbitrary
+/// TCP, and it resolves the destination name at the far end, so a proxy meant
+/// to hide where you are is not undone by a DNS lookup that announces it. Tor's
+/// local listener speaks exactly this.
+///
+/// The proxy carries the connection; it does not terminate it. TLS is
+/// negotiated end to end with the IRC server *through* the tunnel and verified
+/// against the server's own name, so a proxy operator sees a stream of
+/// ciphertext to a host they were told about, and nothing else.
+///
+/// There is no fallback. If a proxy is configured and cannot be reached, the
+/// connection fails. Quietly dialling direct instead would defeat the one thing
+/// a proxy is for, at exactly the moment it mattered most.
+#[derive(Clone, Default)]
+pub struct ProxyConfig {
+    pub host: String,
+    pub port: u16,
+    /// SOCKS5 username/password auth (RFC 1929). Both or neither.
+    ///
+    /// Worth knowing before typing one in: RFC 1929 sends both in the clear to
+    /// the proxy, before any TLS exists. It authenticates you *to the proxy*
+    /// and protects nothing else. Tor accepts any pair here and uses it to put
+    /// the connection on a circuit of its own rather than to check anything.
+    pub username: Option<String>,
+    pub password: Option<Zeroizing<String>>,
+}
+
+impl ProxyConfig {
+    /// The port Tor's SOCKS listener uses by default.
+    ///
+    /// Offered as the form's starting value rather than 1080, SOCKS5's own
+    /// conventional port: someone reaching for a proxy in an IRC client is
+    /// usually reaching for Tor, and anyone with a different proxy already
+    /// knows its port.
+    pub const TOR_SOCKS_PORT: u16 = 9050;
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.host.trim().is_empty() {
+            return Err(ConfigError::EmptyProxyHost);
+        }
+        if self.port == 0 {
+            return Err(ConfigError::ProxyPortZero);
+        }
+        // Half a credential authenticates nobody, and the transport underneath
+        // reacts to a lone username by refusing with a message about byte
+        // lengths, which explains nothing to whoever left a field blank.
+        if self.username.is_some() != self.password.is_some() {
+            return Err(ConfigError::IncompleteProxyCredentials);
+        }
+        // SOCKS5 length-prefixes each with one byte, so 255 is a hard ceiling
+        // and 0 is not a value. Caught here because the alternative is a
+        // handshake that fails for a reason the user never sees.
+        if let Some(username) = &self.username {
+            if username.is_empty() || username.len() > 255 {
+                return Err(ConfigError::ProxyCredentialLength("username"));
+            }
+        }
+        if let Some(password) = &self.password {
+            if password.is_empty() || password.len() > 255 {
+                return Err(ConfigError::ProxyCredentialLength("password"));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for ProxyConfig {
+    /// Redacted, so a stray `{:?}` cannot put the password in a log.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProxyConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 /// How to reach a server. TLS is not configurable: every connection uses it.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -74,6 +166,40 @@ pub struct ServerConfig {
     /// Unreachable from Dart: the FFI layer's own `ServerConfig` has no such
     /// field, so nothing the app can configure ever sets this.
     pub extra_root_cert: Option<String>,
+
+    /// Dial through this proxy instead of connecting directly.
+    ///
+    /// Already resolved by the caller: the app settles its global setting
+    /// against any per-server override before it gets here, so the core is
+    /// handed one answer rather than a policy to interpret.
+    pub proxy: Option<ProxyConfig>,
+}
+
+impl std::fmt::Debug for ServerConfig {
+    /// Written out by hand rather than derived, because three of these fields
+    /// are passwords and the derived version prints them. `Zeroizing` wipes a
+    /// secret when it drops; it does nothing about one already formatted into
+    /// a log line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn shown(secret: &Option<Zeroizing<String>>) -> Option<&str> {
+            secret.as_ref().map(|_| "<redacted>")
+        }
+        f.debug_struct("ServerConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("nickname", &self.nickname)
+            .field("alt_nicks", &self.alt_nicks)
+            .field("username", &self.username)
+            .field("realname", &self.realname)
+            .field("channels", &self.channels)
+            .field("sasl_account", &self.sasl_account)
+            .field("sasl_password", &shown(&self.sasl_password))
+            .field("nickserv_password", &shown(&self.nickserv_password))
+            .field("server_password", &shown(&self.server_password))
+            .field("extra_root_cert", &self.extra_root_cert)
+            .field("proxy", &self.proxy)
+            .finish()
+    }
 }
 
 impl ServerConfig {
@@ -113,6 +239,9 @@ impl ServerConfig {
             if !Path::new(path).is_file() {
                 return Err(ConfigError::MissingRootCert(path.clone()));
             }
+        }
+        if let Some(proxy) = &self.proxy {
+            proxy.validate()?;
         }
         Ok(())
     }
@@ -288,6 +417,148 @@ mod tests {
             ..config()
         };
         assert_eq!(c.validate(), Ok(()));
+    }
+
+    fn proxy() -> ProxyConfig {
+        ProxyConfig {
+            host: "127.0.0.1".to_owned(),
+            port: ProxyConfig::TOR_SOCKS_PORT,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_proxy_is_the_default() {
+        assert!(config().proxy.is_none());
+    }
+
+    #[test]
+    fn a_plain_proxy_passes() {
+        let c = ServerConfig {
+            proxy: Some(proxy()),
+            ..config()
+        };
+        assert_eq!(c.validate(), Ok(()));
+    }
+
+    #[test]
+    fn a_proxy_without_a_host_or_port_is_rejected() {
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                host: "   ".to_owned(),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(c.validate(), Err(ConfigError::EmptyProxyHost));
+
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig { port: 0, ..proxy() }),
+            ..config()
+        };
+        assert_eq!(c.validate(), Err(ConfigError::ProxyPortZero));
+    }
+
+    #[test]
+    fn half_a_proxy_credential_is_rejected() {
+        // The transport underneath answers a lone username with "username
+        // length should between 1 to 255", which names the wrong problem.
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                username: Some("me".to_owned()),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(c.validate(), Err(ConfigError::IncompleteProxyCredentials));
+
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                password: Some(Zeroizing::new("pw".to_owned())),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(c.validate(), Err(ConfigError::IncompleteProxyCredentials));
+
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                username: Some("me".to_owned()),
+                password: Some(Zeroizing::new("pw".to_owned())),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(c.validate(), Ok(()));
+    }
+
+    #[test]
+    fn proxy_credentials_longer_than_socks5_allows_are_rejected() {
+        // One length byte each, so 255 is the ceiling and 256 is not a
+        // borderline case the server might tolerate — it cannot be expressed.
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                username: Some("u".repeat(256)),
+                password: Some(Zeroizing::new("pw".to_owned())),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(
+            c.validate(),
+            Err(ConfigError::ProxyCredentialLength("username"))
+        );
+
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                username: Some("me".to_owned()),
+                password: Some(Zeroizing::new("p".repeat(256))),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(
+            c.validate(),
+            Err(ConfigError::ProxyCredentialLength("password"))
+        );
+
+        // 255 exactly is legal, and a boundary worth pinning in both places.
+        let c = ServerConfig {
+            proxy: Some(ProxyConfig {
+                username: Some("u".repeat(255)),
+                password: Some(Zeroizing::new("p".repeat(255))),
+                ..proxy()
+            }),
+            ..config()
+        };
+        assert_eq!(c.validate(), Ok(()));
+    }
+
+    #[test]
+    fn no_debug_output_contains_a_secret() {
+        // The derived Debug printed all four. Nothing formats a ServerConfig
+        // today, but a debug log is one `{:?}` away from existing.
+        let c = ServerConfig {
+            sasl_account: Some("me".to_owned()),
+            sasl_password: Some(Zeroizing::new("sasl-hunter2".to_owned())),
+            nickserv_password: Some(Zeroizing::new("ns-hunter2".to_owned())),
+            server_password: Some(Zeroizing::new("srv-hunter2".to_owned())),
+            proxy: Some(ProxyConfig {
+                username: Some("proxy-user".to_owned()),
+                password: Some(Zeroizing::new("proxy-hunter2".to_owned())),
+                ..proxy()
+            }),
+            ..config()
+        };
+        let rendered = format!("{c:?}");
+        for secret in ["sasl-hunter2", "ns-hunter2", "srv-hunter2", "proxy-hunter2"] {
+            assert!(!rendered.contains(secret), "{secret} leaked: {rendered}");
+        }
+        // The things that are not secrets must survive, or this is useless
+        // for the debugging it exists for.
+        assert!(rendered.contains("irc.libera.chat"));
+        assert!(rendered.contains("proxy-user"));
+        assert!(rendered.contains("127.0.0.1"));
     }
 
     #[test]

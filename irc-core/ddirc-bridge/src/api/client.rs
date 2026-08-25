@@ -238,3 +238,9 @@ pub fn disconnect(id: u64, reason: Option<String>) -> Result<(), String> {
 pub fn default_tls_port() -> u16 {
     ddirc_core::api::types::ServerConfig::DEFAULT_TLS_PORT
 }
+
+/// The port Tor's SOCKS listener uses, offered as the proxy form's default.
+#[frb(sync)]
+pub fn tor_socks_port() -> u16 {
+    ddirc_core::api::types::ProxyConfig::TOR_SOCKS_PORT
+}

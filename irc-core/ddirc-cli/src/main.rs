@@ -11,7 +11,9 @@
 use std::process::ExitCode;
 
 use ddirc_core::api::events::IrcEvent;
-use ddirc_core::api::types::{AuthOutcome, ChatMessage, ConnectionStatus, ServerConfig, Target};
+use ddirc_core::api::types::{
+    AuthOutcome, ChatMessage, ConnectionStatus, ProxyConfig, ServerConfig, Target,
+};
 use ddirc_core::conn::actor::{self, ClientCommand};
 use ddirc_core::text::format::TextSpan;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -29,11 +31,14 @@ OPTIONS:
     --nick <NICK>          Nickname (required)
     --channel <CHANNEL>    Channel to join; repeatable
     --sasl-account <NAME>  SASL account name
+    --proxy <HOST:PORT>    Dial through a SOCKS5 proxy, e.g. 127.0.0.1:9050
+    --proxy-user <NAME>    SOCKS5 username (needs DDIRC_PROXY_PASSWORD)
 
 ENVIRONMENT:
     DDIRC_SASL_PASSWORD      SASL password (with --sasl-account)
     DDIRC_NICKSERV_PASSWORD  NickServ password, used only if SASL is unavailable
     DDIRC_SERVER_PASSWORD    Server-level PASS
+    DDIRC_PROXY_PASSWORD     SOCKS5 password (with --proxy-user)
 
 COMMANDS (once connected):
     /join #channel     /part [reason]     /nick <new>
@@ -69,8 +74,14 @@ async fn main() -> ExitCode {
     }
 
     println!(
-        "connecting to {}:{} as {} (TLS)",
-        config.host, config.port, config.nickname
+        "connecting to {}:{} as {} (TLS{})",
+        config.host,
+        config.port,
+        config.nickname,
+        match &config.proxy {
+            Some(proxy) => format!(", via SOCKS5 {}:{}", proxy.host, proxy.port),
+            None => String::new(),
+        }
     );
 
     // Track a default target so plain lines can be sent without a command.
@@ -315,6 +326,7 @@ fn parse_args() -> Result<Option<ServerConfig>, String> {
         ..Default::default()
     };
 
+    let mut proxy_user = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
@@ -328,6 +340,8 @@ fn parse_args() -> Result<Option<ServerConfig>, String> {
             "--nick" => config.nickname = value()?,
             "--channel" => config.channels.push(value()?),
             "--sasl-account" => config.sasl_account = Some(value()?),
+            "--proxy" => config.proxy = Some(parse_proxy(&value()?)?),
+            "--proxy-user" => proxy_user = Some(value()?),
             other => return Err(format!("unrecognised argument: {other}")),
         }
     }
@@ -348,7 +362,37 @@ fn parse_args() -> Result<Option<ServerConfig>, String> {
         return Err("DDIRC_SASL_PASSWORD requires --sasl-account".to_owned());
     }
 
+    if let Some(proxy) = &mut config.proxy {
+        proxy.username = proxy_user;
+        proxy.password = secret("DDIRC_PROXY_PASSWORD");
+    } else if proxy_user.is_some() {
+        return Err("--proxy-user requires --proxy".to_owned());
+    }
+    // Left to `validate` to reject a half credential, so the harness and the
+    // app refuse the same configurations for the same stated reasons.
+
     Ok(Some(config))
+}
+
+/// Parse `host:port` for `--proxy`.
+///
+/// One colon only, for the same reason the app's address box splits on one:
+/// a bare IPv6 literal has several, and `[::1]:9050` has none outside the
+/// brackets. The port is required — guessing between 9050 and 1080 on the
+/// user's behalf would be guessing which proxy they meant.
+fn parse_proxy(raw: &str) -> Result<ProxyConfig, String> {
+    let (host, port) = raw
+        .rsplit_once(':')
+        .ok_or_else(|| format!("--proxy needs host:port, got {raw}"))?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let port: u16 = port
+        .parse()
+        .map_err(|_| format!("invalid proxy port: {port}"))?;
+    Ok(ProxyConfig {
+        host: host.to_owned(),
+        port,
+        ..Default::default()
+    })
 }
 
 /// Read a secret from the environment and remove it from our own environment,
@@ -362,6 +406,21 @@ fn secret(name: &str) -> Option<Zeroizing<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_proxy_is_parsed_as_host_and_port() {
+        let proxy = parse_proxy("127.0.0.1:9050").expect("should parse");
+        assert_eq!(proxy.host, "127.0.0.1");
+        assert_eq!(proxy.port, 9050);
+
+        // An IPv6 literal keeps its own colons and loses only the brackets.
+        let proxy = parse_proxy("[::1]:1080").expect("should parse");
+        assert_eq!(proxy.host, "::1");
+        assert_eq!(proxy.port, 1080);
+
+        assert!(parse_proxy("127.0.0.1").is_err());
+        assert!(parse_proxy("127.0.0.1:not-a-port").is_err());
+    }
 
     #[test]
     fn plain_text_goes_to_the_current_channel() {

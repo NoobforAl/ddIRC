@@ -4,6 +4,7 @@ import '../rust/api/client.dart' as core;
 import 'errors.dart';
 import 'log.dart';
 import 'profile.dart';
+import 'proxy.dart';
 import 'session.dart';
 import 'settings.dart';
 
@@ -14,10 +15,18 @@ import 'settings.dart';
 /// bookkeeping the UI needs: which profiles are live, which one is in front,
 /// and how much unread each is holding.
 class Workspace extends ChangeNotifier {
-  Workspace({required this.profiles, required this.settings});
+  Workspace({
+    required this.profiles,
+    required this.settings,
+    required this.proxies,
+  });
 
   final ProfileStore profiles;
   final AppSettings settings;
+
+  /// The app-wide proxy. Read at connect time rather than held, so changing it
+  /// applies to the next connection without needing to touch live ones.
+  final ProxySettings proxies;
 
   final Map<String, SessionModel> _sessions = {};
   final Map<String, String> _failures = {};
@@ -71,7 +80,17 @@ class Workspace extends ChangeNotifier {
       final password = profile.usesSasl
           ? await profiles.passwordFor(profile.id)
           : null;
-      final config = profile.toConfig(saslPassword: password);
+      // Settled here, once, rather than inside the core: the choice between
+      // the app-wide proxy and this server's own is the app's to make, and
+      // the core is better off being handed an answer.
+      final proxy = await resolveProxy(profile, proxies, profiles);
+      final config = profile.toConfig(saslPassword: password, proxy: proxy);
+      if (proxy != null) {
+        AppLog.instance.debug(
+          '[${profile.host}] connecting through SOCKS5 '
+          '${proxy.host}:${proxy.port}',
+        );
+      }
       final id = await core.connect(config: config);
 
       final session = SessionModel(

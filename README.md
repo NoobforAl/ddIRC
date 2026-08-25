@@ -91,10 +91,10 @@ right-click or long-press on any channel in the list.
 
 | Dialog | What it holds |
 |---|---|
-| **App** | Timestamps, 12/24-hour clock, message density, whether joins and parts are shown, whether mIRC colours are rendered, and the two logging switches. Applies to every server; persists. |
+| **App** | Timestamps, 12/24-hour clock, message density, whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
 | **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, authentication mechanism. Plus disconnect. |
-| **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account. Reached from the rail's context menu or the header menu. |
+| **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, and this network's proxy. Reached from the rail's context menu or the header menu. |
 
 Preferences live in `shared_preferences`. **No credential is ever written
 there** — see [SECURITY.md](SECURITY.md).
@@ -102,6 +102,48 @@ there** — see [SECURITY.md](SECURITY.md).
 Invalid input is reported on the field itself: the field turns red, states the
 problem underneath, and shakes. Nothing is reported in a banner somewhere else
 on the screen, and the layout never reflows.
+
+## Proxy
+
+Off. SOCKS5, and nothing else.
+
+There are two settings and they meet in one place. The app has a proxy; each
+network chooses what to do about it:
+
+| Choice | Effect |
+|---|---|
+| **App default** | Follow the app-wide setting. What every network starts as, and what a profile saved before proxies existed reads back as. |
+| **Direct** | Never proxy this network, whatever the app is set to. |
+| **Custom** | This network's own proxy. |
+
+Global-as-default with a per-network override, rather than a global proxy that
+admits no exceptions. One setting covers "put everything through Tor", and the
+override exists because a LAN server or a private bouncer is often reachable
+only directly — a proxy with no exceptions makes one network's requirements
+break every other network with no way to see why. `Direct` is a choice you make
+out loud rather than something an empty field does by accident.
+
+Three things are true of the connection either way:
+
+- **The proxy carries it; it does not terminate it.** TLS is negotiated end to
+  end with the IRC server *through* the tunnel and verified against the
+  server's own name. A proxy operator sees ciphertext to a host they were told
+  about, and nothing else.
+- **The name is resolved at the far end.** SOCKS5 is given the hostname, not an
+  address, so a proxy meant to hide where you are is not undone by a DNS lookup
+  from here that announces it. That is why SOCKS5 rather than an HTTP proxy,
+  and it is what Tor's local listener speaks.
+- **There is no fallback.** A proxy that cannot be reached is a connection that
+  fails. Quietly dialling direct instead would defeat the one thing a proxy is
+  for, at exactly the moment it mattered most.
+
+A username and password are optional and, if given, are stored in the platform
+keychain beside the SASL one — never in app settings. Worth knowing before
+typing one: SOCKS5 sends both to the proxy in the clear, before any TLS exists
+(RFC 1929). They prove who you are to the proxy and protect nothing else. Tor
+accepts any pair and uses it to put the connection on a circuit of its own.
+
+`ddirc-cli --proxy 127.0.0.1:9050` exercises the same path without Flutter.
 
 ## Logs
 
@@ -363,6 +405,18 @@ It exists mostly for the case that used to produce an empty window and no
 explanation: a native core that will not load now gets a sentence, the
 underlying error, and a retry.
 
+**A failure should say which hop broke.** A proxy doubles the number of
+machines that can refuse a connection, and both refusals arrive as the words
+"connection refused". They are fixed in completely different places, so
+`conn/diagnose.rs` is told whether a proxy was in use and answers accordingly:
+an unreachable proxy says nothing was sent to the server at all, a refusal
+relayed through SOCKS5 names both the proxy and the destination, and something
+on the port that is not SOCKS5 says so outright — pointing this at an HTTP
+proxy is the commonest way to get there, and "Invalid response version" gives
+no hint of it. The same instinct removes advice as well as adding it: "check
+the address for a typo" is wrong under a proxy, because the name was never
+ours to resolve.
+
 **An error should name the thing that fixes it.** The `irc` crate's `Display`
 for its most common error is, in full, `an io error occurred` — with the real
 `io::Error` attached as a `#[source]` it never prints. So a mistyped hostname,
@@ -398,6 +452,12 @@ We depend on the published crate and treat vendoring as a **planned escape
 hatch**, not a surprise. IRC is a frozen protocol, so a fork carries no ongoing
 maintenance tax. If we hit the gaps they hit — flood protection, rustls
 behaviour — the fork goes in `irc-core/vendor/irc` and nothing else changes.
+
+The proxy support is the crate's own `proxy` feature, backed by
+`tokio-socks`. We take `tokio-socks` as a direct dependency as well, because
+`conn/diagnose.rs` matches on its error variants and the `irc` crate does not
+re-export the type — matching on Display strings instead would be one upstream
+rewording away from silently losing every proxy diagnosis.
 
 `Cargo.lock` is committed and `cargo audit` runs over the whole tree. See
 [SECURITY.md](SECURITY.md).

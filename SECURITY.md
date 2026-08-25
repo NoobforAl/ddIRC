@@ -40,6 +40,53 @@ in Phase 2 is confined to generated code.
   validation** with an explanation, rather than failing later as an opaque
   handshake error.
 
+### Proxy
+
+Off by default. SOCKS5 only, and every property below is a deliberate one.
+
+- **The proxy carries the connection; it does not terminate it.** The SOCKS5
+  tunnel is opened first and TLS is negotiated end to end with the IRC server
+  through it, verified against the server's own name with the same code path a
+  direct connection takes. The proxy sees ciphertext to a host it was told
+  about. It cannot read the stream and cannot substitute itself for the server.
+- **There is no direct-connection fallback.** A configured proxy that cannot be
+  reached fails the connection. Falling back would defeat the one thing a proxy
+  exists for, at the moment it mattered most, and would do so silently.
+- **The destination name is resolved at the proxy.** SOCKS5 is given the
+  hostname rather than an address, so nothing on this machine looks up where the
+  user is about to connect. This is the reason for SOCKS5 over an HTTP proxy,
+  and it is what makes the setting usable with Tor.
+- **The proxy is resolved in Dart, once, before the config crosses the FFI.**
+  The core is handed one answer — a proxy or none — rather than a policy to
+  interpret, so there is no second place where a per-server override could be
+  read differently from the app-wide setting.
+- **A per-server "Direct" choice is explicit.** It is a selected option, not an
+  empty field, so a network is never exempted from the proxy by accident. The
+  editor says plainly that such a network will still see the user's address.
+- **Proxy credentials live in the platform keychain**, alongside the SASL
+  password and never in `shared_preferences`. On the Rust side they are held in
+  `Zeroizing` and validated to SOCKS5's 1–255 byte range before use. RFC 1929
+  sends them to the proxy in the clear, before any TLS exists; the UI says so
+  where they are typed, because a credential whose exposure is not obvious is
+  one a user will reuse.
+- **Half a credential is rejected at config validation.** A lone username
+  otherwise reaches the transport, which refuses it with a message about byte
+  lengths that names the wrong problem.
+
+### Secrets in memory
+
+- **Passwords are held in `Zeroizing`**, so they are wiped on drop rather than
+  left in freed heap memory. This covers the SASL, NickServ, server and proxy
+  passwords.
+- **`ServerConfig` and `ProxyConfig` implement `Debug` by hand**, redacting
+  every secret. The derived implementation printed all four in full. Nothing
+  formats a config today, but `Zeroizing` wipes a secret when it drops and does
+  nothing about one already written into a log line — and the app now has a
+  debug log.
+- One copy is unavoidable: the `irc` crate's own config takes the proxy and
+  server passwords as plain `String`, which is not zeroized on drop. Noted here
+  rather than papered over; removing it would mean vendoring the crate.
+
 ### Untrusted server data
 
 - **Control codes are stripped in Rust, not Dart.** `text/format.rs` parses mIRC

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../model/profile.dart';
+import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/client.dart' as core;
 import '../../theme.dart';
+import 'proxy_form.dart';
 import 'settings_chrome.dart';
 
 /// What the editor closed with, so the caller knows whether to connect.
@@ -54,11 +56,19 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     _Input.password: TextEditingController(),
   };
 
+  late final ProxyFormController _proxy = ProxyFormController(
+    endpoint: widget.profile?.proxy,
+    hasStoredPassword: widget.profile?.usesProxyAuth ?? false,
+    defaultPort: core.torSocksPort(),
+  );
+
   final Map<_Input, String> _errors = {};
   int _shake = 0;
   bool _busy = false;
   bool _showSasl = false;
   bool _passwordTouched = false;
+  late ProxyMode _proxyMode =
+      widget.profile?.proxyMode ?? ProxyMode.followDefault;
 
   bool get _isNew => widget.profile == null;
 
@@ -66,6 +76,9 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   void initState() {
     super.initState();
     _showSasl = widget.profile?.usesSasl ?? false;
+    _proxy.addListener(() {
+      if (mounted) setState(() {});
+    });
     for (final entry in _fields.entries) {
       entry.value.addListener(() {
         if (!mounted) return;
@@ -82,6 +95,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     for (final c in _fields.values) {
       c.dispose();
     }
+    _proxy.dispose();
     super.dispose();
   }
 
@@ -165,16 +179,30 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         _Input.channels,
       ).split(',').map((c) => c.trim()).where((c) => c.isNotEmpty).toList(),
       saslAccount: _text(_Input.account).isEmpty ? null : _text(_Input.account),
+      proxyMode: _proxyMode,
+      // Kept even when the mode is not Custom, so switching to the app
+      // default and back does not mean typing the address again. Nothing
+      // reads it unless the mode says to.
+      proxy: _proxy.isEmpty ? widget.profile?.proxy : _proxy.build(),
     );
   }
 
   Future<void> _save({required bool thenConnect}) async {
     final errors = _validate();
-    if (errors.isNotEmpty) {
+    // Only checked when this profile actually brings its own proxy: a stale
+    // half-filled form behind "App default" must not block a save.
+    final proxyErrors = _proxyMode == ProxyMode.custom
+        ? _proxy.validate()
+        : const <ProxyField, String>{};
+
+    if (errors.isNotEmpty || proxyErrors.isNotEmpty) {
       setState(() {
         _errors
           ..clear()
           ..addAll(errors);
+        _proxy.errors
+          ..clear()
+          ..addAll(proxyErrors);
         _shake++;
         if (errors.keys.any(
           (f) => f == _Input.account || f == _Input.password,
@@ -192,7 +220,13 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     final password = _passwordTouched ? _fields[_Input.password]!.text : null;
 
     try {
-      await store.save(_build(), password: password);
+      await store.save(
+        _build(),
+        password: password,
+        proxyPassword: _proxyMode == ProxyMode.custom
+            ? _proxy.passwordToSave()
+            : null,
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -297,6 +331,8 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ],
         ),
         const SettingsRule(),
+        _proxySection(t),
+        const SettingsRule(),
         SettingsActions(
           children: [
             if (!_isNew)
@@ -319,6 +355,57 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ],
         ),
         const SizedBox(height: 6),
+      ],
+    );
+  }
+
+  /// Where this network's proxy comes from.
+  ///
+  /// Three choices rather than a switch, because "off" and "not set" are
+  /// different answers here: a server that must never be proxied has to be
+  /// able to say so, or turning on the app-wide proxy would silently take it
+  /// with everything else.
+  Widget _proxySection(Tokens t) {
+    final global = ProxyScope.of(context).active;
+    return SettingsSection(
+      label: 'Proxy',
+      children: [
+        SettingsChoice<ProxyMode>(
+          label: 'Connect through',
+          options: ProxyMode.values,
+          labelFor: (m) => m.label,
+          value: _proxyMode,
+          onChanged: (m) => setState(() {
+            _proxyMode = m;
+            // Errors from a form that is no longer being read would sit there
+            // in red with no way to clear them.
+            if (m != ProxyMode.custom) _proxy.errors.clear();
+          }),
+        ),
+        if (_proxyMode == ProxyMode.followDefault)
+          SettingsReadout(
+            label: 'App default',
+            value: global == null
+                ? 'Not set — this network connects directly'
+                : global.label,
+          ),
+        if (_proxyMode == ProxyMode.direct)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+            child: Text(
+              'This network always connects directly, even when the app-wide '
+              'proxy is on. Worth being deliberate about: if the proxy is '
+              'there to keep your address private, this network will still '
+              'see it.',
+              style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
+            ),
+          ),
+        if (_proxyMode == ProxyMode.custom)
+          ProxyFields(
+            controller: _proxy,
+            shakeTick: _shake,
+            onSubmitted: _busy ? null : () => _save(thenConnect: true),
+          ),
       ],
     );
   }

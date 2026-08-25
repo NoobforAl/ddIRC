@@ -90,3 +90,6 @@ Future<void> disconnect({required BigInt id, String? reason}) =>
 
 /// The default port for IRC over TLS, so Dart does not hardcode it.
 int defaultTlsPort() => RustLib.instance.api.crateApiClientDefaultTlsPort();
+
+/// The port Tor's SOCKS listener uses, offered as the proxy form's default.
+int torSocksPort() => RustLib.instance.api.crateApiClientTorSocksPort();

@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart';
+import 'proxy.dart';
 
 /// A saved server, ready to connect to.
 ///
@@ -22,6 +23,8 @@ class Profile {
     this.altNicks = const [],
     this.channels = const [],
     this.saslAccount,
+    this.proxyMode = ProxyMode.followDefault,
+    this.proxy,
   });
 
   /// Stable across renames, because it keys both the stored password and the
@@ -38,7 +41,20 @@ class Profile {
   final List<String> channels;
   final String? saslAccount;
 
+  /// Where this server's proxy comes from. Defaults to the app-wide setting,
+  /// which is also what a profile saved before proxies existed reads back as.
+  final ProxyMode proxyMode;
+
+  /// This server's own proxy. Only consulted when [proxyMode] is
+  /// [ProxyMode.custom]; kept when it is not, so switching away and back does
+  /// not mean typing the address again.
+  final ProxyEndpoint? proxy;
+
   bool get usesSasl => (saslAccount ?? '').isNotEmpty;
+
+  /// Whether this profile needs its own proxy password in the keychain.
+  bool get usesProxyAuth =>
+      proxyMode == ProxyMode.custom && (proxy?.usesAuth ?? false);
 
   /// The two-letter mark shown on the network rail.
   ///
@@ -65,6 +81,8 @@ class Profile {
     List<String>? altNicks,
     List<String>? channels,
     String? saslAccount,
+    ProxyMode? proxyMode,
+    ProxyEndpoint? proxy,
   }) {
     return Profile(
       id: id,
@@ -75,14 +93,20 @@ class Profile {
       altNicks: altNicks ?? this.altNicks,
       channels: channels ?? this.channels,
       saslAccount: saslAccount ?? this.saslAccount,
+      proxyMode: proxyMode ?? this.proxyMode,
+      proxy: proxy ?? this.proxy,
     );
   }
 
   /// Build the config the core connects with.
   ///
-  /// The password is passed in rather than stored, so it exists only for the
-  /// duration of the connect call — the core zeroizes it after SASL.
-  ServerConfig toConfig({String? saslPassword}) {
+  /// Both secrets are passed in rather than stored, so they exist only for the
+  /// duration of the connect call — the core zeroizes them once used.
+  ///
+  /// `proxy` is already resolved: `resolveProxy` settles this profile's mode
+  /// against the app-wide setting first, so what arrives here is the single
+  /// answer and not a policy for the core to interpret.
+  ServerConfig toConfig({String? saslPassword, ProxyConfig? proxy}) {
     final fallback = altNicks.isEmpty ? ['${nickname}_'] : altNicks;
     return ServerConfig(
       host: host,
@@ -92,6 +116,7 @@ class Profile {
       channels: channels,
       saslAccount: (saslAccount ?? '').isEmpty ? null : saslAccount,
       saslPassword: (saslPassword ?? '').isEmpty ? null : saslPassword,
+      proxy: proxy,
     );
   }
 
@@ -104,6 +129,8 @@ class Profile {
     'altNicks': altNicks,
     'channels': channels,
     'saslAccount': saslAccount,
+    'proxyMode': proxyMode.name,
+    'proxy': proxy?.toJson(),
   };
 
   static Profile? fromJson(Map<String, Object?> json) {
@@ -127,6 +154,10 @@ class Profile {
       saslAccount: json['saslAccount'] is String
           ? json['saslAccount']! as String
           : null,
+      // Absent on every profile saved before proxies existed, which is
+      // exactly the default: follow the app, which is off.
+      proxyMode: ProxyMode.byName(json['proxyMode']),
+      proxy: ProxyEndpoint.fromJson(json['proxy']),
     );
   }
 
@@ -145,6 +176,7 @@ class ProfileStore extends ChangeNotifier {
 
   static const _kProfiles = 'profiles.v1';
   static const _secretPrefix = 'sasl.';
+  static const _proxySecretPrefix = 'proxy.server.';
 
   final SharedPreferences? _prefs;
   final FlutterSecureStorage _secrets;
@@ -198,10 +230,14 @@ class ProfileStore extends ChangeNotifier {
 
   /// Add or replace a profile, optionally rewriting its stored password.
   ///
-  /// `password` distinguishes three cases: null leaves whatever is stored
-  /// alone (so editing a profile does not silently wipe its credential), an
-  /// empty string clears it, and anything else replaces it.
-  Future<void> save(Profile profile, {String? password}) async {
+  /// `password` and `proxyPassword` each distinguish three cases: null leaves
+  /// whatever is stored alone (so editing a profile does not silently wipe a
+  /// credential), an empty string clears it, and anything else replaces it.
+  Future<void> save(
+    Profile profile, {
+    String? password,
+    String? proxyPassword,
+  }) async {
     final index = _profiles.indexWhere((p) => p.id == profile.id);
     if (index == -1) {
       _profiles = [..._profiles, profile];
@@ -211,11 +247,19 @@ class ProfileStore extends ChangeNotifier {
     notifyListeners();
 
     if (password != null) {
-      await _writeSecret(profile.id, password);
+      await _writeSecret(_secretPrefix, profile.id, password);
+    }
+    if (proxyPassword != null) {
+      await _writeSecret(_proxySecretPrefix, profile.id, proxyPassword);
     }
     // A profile with no SASL account cannot use a password; drop any that a
-    // previous configuration left behind rather than keeping an orphan.
-    if (!profile.usesSasl) await _writeSecret(profile.id, '');
+    // previous configuration left behind rather than keeping an orphan. The
+    // same goes for a proxy that no longer authenticates, or is no longer
+    // this profile's own.
+    if (!profile.usesSasl) await _writeSecret(_secretPrefix, profile.id, '');
+    if (!profile.usesProxyAuth) {
+      await _writeSecret(_proxySecretPrefix, profile.id, '');
+    }
 
     await _write();
   }
@@ -223,22 +267,29 @@ class ProfileStore extends ChangeNotifier {
   Future<void> remove(String id) async {
     _profiles = _profiles.where((p) => p.id != id).toList();
     notifyListeners();
-    await _writeSecret(id, '');
+    await _writeSecret(_secretPrefix, id, '');
+    await _writeSecret(_proxySecretPrefix, id, '');
     await _write();
   }
 
-  /// The stored password, or null. Read at connect time and not retained.
-  Future<String?> passwordFor(String id) async {
+  /// The stored SASL password, or null. Read at connect time and not retained.
+  Future<String?> passwordFor(String id) => _readSecret(_secretPrefix, id);
+
+  /// The stored password for this profile's own proxy, or null.
+  Future<String?> proxyPasswordFor(String id) =>
+      _readSecret(_proxySecretPrefix, id);
+
+  Future<String?> _readSecret(String prefix, String id) async {
     try {
-      return await _secrets.read(key: '$_secretPrefix$id');
+      return await _secrets.read(key: '$prefix$id');
     } catch (e) {
       debugPrint('could not read stored credential: $e');
       return null;
     }
   }
 
-  Future<void> _writeSecret(String id, String value) async {
-    final key = '$_secretPrefix$id';
+  Future<void> _writeSecret(String prefix, String id, String value) async {
+    final key = '$prefix$id';
     try {
       if (value.isEmpty) {
         await _secrets.delete(key: key);

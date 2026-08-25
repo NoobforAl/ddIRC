@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'src/model/log.dart';
 import 'src/model/profile.dart';
+import 'src/model/proxy.dart';
 import 'src/model/settings.dart';
 import 'src/model/workspace.dart';
 import 'src/rust/frb_generated.dart';
@@ -33,7 +34,8 @@ Future<void> main() async {
   // never flashes before ours replaces it.
   await prepareWindow(Tokens.forMode(settings.themeMode));
   final profiles = await ProfileStore.load();
-  runApp(DdIrcApp(settings: settings, profiles: profiles));
+  final proxies = await ProxySettings.load();
+  runApp(DdIrcApp(settings: settings, profiles: profiles, proxies: proxies));
 }
 
 /// Keep the log in step with the two switches that control it.
@@ -68,10 +70,16 @@ Future<void> startCore() async {
 }
 
 class DdIrcApp extends StatefulWidget {
-  const DdIrcApp({super.key, required this.settings, required this.profiles});
+  const DdIrcApp({
+    super.key,
+    required this.settings,
+    required this.profiles,
+    required this.proxies,
+  });
 
   final AppSettings settings;
   final ProfileStore profiles;
+  final ProxySettings proxies;
 
   @override
   State<DdIrcApp> createState() => _DdIrcAppState();
@@ -81,6 +89,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
   late final Workspace _workspace = Workspace(
     profiles: widget.profiles,
     settings: widget.settings,
+    proxies: widget.proxies,
   );
 
   @override
@@ -96,28 +105,31 @@ class _DdIrcAppState extends State<DdIrcApp> {
       settings: widget.settings,
       child: ProfileScope(
         store: widget.profiles,
-        child: WorkspaceScope(
-          workspace: _workspace,
-          // The theme is a setting, so the app itself has to listen: nothing
-          // below rebuilds MaterialApp, and `themeMode` is read here.
-          child: ListenableBuilder(
-            listenable: widget.settings,
-            builder: (context, _) => MaterialApp(
-              title: 'ddIRC',
-              debugShowCheckedModeBanner: false,
-              theme: Tokens.themeFor(Tokens.light),
-              darkTheme: Tokens.themeFor(Tokens.dark),
-              themeMode: widget.settings.themeMode,
-              // Wrapping here rather than per screen means every route — and
-              // every dialog on the root navigator — sits under the same frame.
-              builder: (context, child) =>
-                  WindowFrame(child: child ?? const SizedBox.shrink()),
-              // Inside MaterialApp rather than around it, so the splash is
-              // themed and cross-fades into the app. The scopes stay above it,
-              // because dialogs are routes and have to be able to reach them.
-              home: BootScreen(
-                load: startCore,
-                builder: (context) => const WorkspaceScreen(),
+        child: ProxyScope(
+          settings: widget.proxies,
+          child: WorkspaceScope(
+            workspace: _workspace,
+            // The theme is a setting, so the app itself has to listen: nothing
+            // below rebuilds MaterialApp, and `themeMode` is read here.
+            child: ListenableBuilder(
+              listenable: widget.settings,
+              builder: (context, _) => MaterialApp(
+                title: 'ddIRC',
+                debugShowCheckedModeBanner: false,
+                theme: Tokens.themeFor(Tokens.light),
+                darkTheme: Tokens.themeFor(Tokens.dark),
+                themeMode: widget.settings.themeMode,
+                // Wrapping here rather than per screen means every route — and
+                // every dialog on the root navigator — sits under one frame.
+                builder: (context, child) =>
+                    WindowFrame(child: child ?? const SizedBox.shrink()),
+                // Inside MaterialApp rather than around it, so the splash is
+                // themed and cross-fades into the app. The scopes stay above
+                // it, because dialogs are routes and must reach them.
+                home: BootScreen(
+                  load: startCore,
+                  builder: (context) => const WorkspaceScreen(),
+                ),
               ),
             ),
           ),

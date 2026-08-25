@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 use futures_util::StreamExt;
+use irc::client::data::ProxyType;
 use irc::client::prelude::Config as IrcConfig;
 use irc::client::Client;
 use irc::proto::{ChannelMode, Command as Irc, Message, Mode, Response};
@@ -204,9 +205,7 @@ impl Actor {
     /// drops the cause on the floor. See [`diagnose`].
     fn describe(&self, error: &ConnectionError) -> String {
         match error {
-            ConnectionError::Irc(irc) => {
-                diagnose::explain(irc, &self.config.host, self.config.port)
-            }
+            ConnectionError::Irc(irc) => diagnose::explain(irc, &self.config),
             other => diagnose::chain(other),
         }
     }
@@ -424,7 +423,15 @@ impl Actor {
     /// `channels` and `nick_password` are deliberately left unset: the crate
     /// would act on them at end-of-MOTD, and we want to control both ordering
     /// and rate limiting ourselves.
+    ///
+    /// The proxy, when there is one, wraps the socket *below* TLS: the crate
+    /// opens the SOCKS5 tunnel first and then performs the handshake through
+    /// it, against `server`. Verification and SNI are unchanged, so the proxy
+    /// carries ciphertext it cannot read and cannot substitute itself for the
+    /// server. And there is no direct-connection fallback anywhere on this
+    /// path — a proxy that cannot be reached is a connection that fails.
     fn irc_config(&self) -> IrcConfig {
+        let proxy = self.config.proxy.as_ref();
         IrcConfig {
             server: Some(self.config.host.clone()),
             port: Some(self.config.port),
@@ -436,6 +443,18 @@ impl Actor {
             ping_time: Some(60),
             ping_timeout: Some(20),
             cert_path: self.config.extra_root_cert.clone(),
+            proxy_type: Some(match proxy {
+                Some(_) => ProxyType::Socks5,
+                None => ProxyType::None,
+            }),
+            proxy_server: proxy.map(|p| p.host.clone()),
+            proxy_port: proxy.map(|p| p.port),
+            proxy_username: proxy.and_then(|p| p.username.clone()),
+            // The crate's config field is a plain `String`, so this copy is not
+            // zeroized on drop the way ours is. Unavoidable without vendoring
+            // the crate, and the same is already true of the server password we
+            // hand to `PASS`; noted rather than papered over.
+            proxy_password: proxy.and_then(|p| p.password.as_ref().map(|s| s.to_string())),
             ..IrcConfig::default()
         }
     }

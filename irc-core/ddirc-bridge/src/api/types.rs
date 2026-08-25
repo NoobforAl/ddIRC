@@ -152,6 +152,27 @@ pub enum IrcEvent {
     },
 }
 
+/// A SOCKS5 proxy to dial through.
+///
+/// SOCKS5 only, which is what the transport supports and also what Tor's local
+/// listener speaks. The tunnel carries the connection; TLS is still negotiated
+/// end to end with the IRC server through it, so the proxy sees ciphertext to a
+/// host it was told about and nothing more.
+///
+/// Dart resolves the app-wide setting against any per-server override before
+/// building this, so `ServerConfig::proxy` is an answer rather than a policy.
+#[derive(Debug, Clone)]
+pub struct ProxyConfig {
+    pub host: String,
+    pub port: u16,
+    /// SOCKS5 username/password auth (RFC 1929). Both or neither.
+    ///
+    /// Sent to the proxy in the clear, before any TLS exists — it proves who
+    /// you are to the proxy and protects nothing else.
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
 /// How to reach a server.
 ///
 /// TLS is not configurable — every connection uses it. Passwords arrive as
@@ -170,6 +191,9 @@ pub struct ServerConfig {
     pub sasl_password: Option<String>,
     pub nickserv_password: Option<String>,
     pub server_password: Option<String>,
+    /// Dial through this proxy rather than connecting directly. There is no
+    /// fallback: if it is set and unreachable, the connection fails.
+    pub proxy: Option<ProxyConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +400,24 @@ impl From<ServerConfig> for types::ServerConfig {
             // a test-only affordance, and an app-settable one would be a way to
             // talk the client into trusting an attacker's certificate.
             extra_root_cert: None,
+            proxy: config.proxy.map(Into::into),
+        }
+    }
+}
+
+impl From<ProxyConfig> for types::ProxyConfig {
+    fn from(proxy: ProxyConfig) -> Self {
+        Self {
+            host: proxy.host,
+            port: proxy.port,
+            // Empty is the same as absent here. A blank field in the settings
+            // form must not read as a one-character credential, which SOCKS5
+            // would happily encode and the proxy would then reject.
+            username: proxy.username.filter(|v| !v.is_empty()),
+            password: proxy
+                .password
+                .filter(|v| !v.is_empty())
+                .map(zeroize::Zeroizing::new),
         }
     }
 }

@@ -67,7 +67,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -430329336;
+  int get rustContentHash => -1156223057;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -125,6 +125,8 @@ abstract class RustLibApi extends BaseApi {
     required String channel,
     required String topic,
   });
+
+  int crateApiClientTorSocksPort();
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -514,6 +516,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     argNames: ["id", "channel", "topic"],
   );
 
+  @override
+  int crateApiClientTorSocksPort() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_16,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiClientTorSocksPortConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiClientTorSocksPortConstMeta =>
+      const TaskConstMeta(debugName: "tor_socks_port", argNames: []);
+
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -569,6 +593,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ConnectionStatus dco_decode_box_autoadd_connection_status(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_connection_status(raw);
+  }
+
+  @protected
+  ProxyConfig dco_decode_box_autoadd_proxy_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_proxy_config(raw);
   }
 
   @protected
@@ -746,17 +776,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ProxyConfig? dco_decode_opt_box_autoadd_proxy_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_proxy_config(raw);
+  }
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_8(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_8(raw);
   }
 
   @protected
+  ProxyConfig dco_decode_proxy_config(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return ProxyConfig(
+      host: dco_decode_String(arr[0]),
+      port: dco_decode_u_16(arr[1]),
+      username: dco_decode_opt_String(arr[2]),
+      password: dco_decode_opt_String(arr[3]),
+    );
+  }
+
+  @protected
   ServerConfig dco_decode_server_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return ServerConfig(
       host: dco_decode_String(arr[0]),
       port: dco_decode_u_16(arr[1]),
@@ -769,6 +819,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       saslPassword: dco_decode_opt_String(arr[8]),
       nickservPassword: dco_decode_opt_String(arr[9]),
       serverPassword: dco_decode_opt_String(arr[10]),
+      proxy: dco_decode_opt_box_autoadd_proxy_config(arr[11]),
     );
   }
 
@@ -913,6 +964,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_connection_status(deserializer));
+  }
+
+  @protected
+  ProxyConfig sse_decode_box_autoadd_proxy_config(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_proxy_config(deserializer));
   }
 
   @protected
@@ -1142,6 +1201,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ProxyConfig? sse_decode_opt_box_autoadd_proxy_config(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_proxy_config(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1150,6 +1222,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     } else {
       return null;
     }
+  }
+
+  @protected
+  ProxyConfig sse_decode_proxy_config(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_host = sse_decode_String(deserializer);
+    var var_port = sse_decode_u_16(deserializer);
+    var var_username = sse_decode_opt_String(deserializer);
+    var var_password = sse_decode_opt_String(deserializer);
+    return ProxyConfig(
+      host: var_host,
+      port: var_port,
+      username: var_username,
+      password: var_password,
+    );
   }
 
   @protected
@@ -1166,6 +1253,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_saslPassword = sse_decode_opt_String(deserializer);
     var var_nickservPassword = sse_decode_opt_String(deserializer);
     var var_serverPassword = sse_decode_opt_String(deserializer);
+    var var_proxy = sse_decode_opt_box_autoadd_proxy_config(deserializer);
     return ServerConfig(
       host: var_host,
       port: var_port,
@@ -1178,6 +1266,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       saslPassword: var_saslPassword,
       nickservPassword: var_nickservPassword,
       serverPassword: var_serverPassword,
+      proxy: var_proxy,
     );
   }
 
@@ -1341,6 +1430,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_connection_status(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_proxy_config(
+    ProxyConfig self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_proxy_config(self, serializer);
   }
 
   @protected
@@ -1554,6 +1652,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_proxy_config(
+    ProxyConfig? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_proxy_config(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1561,6 +1672,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (self != null) {
       sse_encode_box_autoadd_u_8(self, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_proxy_config(ProxyConfig self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.host, serializer);
+    sse_encode_u_16(self.port, serializer);
+    sse_encode_opt_String(self.username, serializer);
+    sse_encode_opt_String(self.password, serializer);
   }
 
   @protected
@@ -1577,6 +1697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.saslPassword, serializer);
     sse_encode_opt_String(self.nickservPassword, serializer);
     sse_encode_opt_String(self.serverPassword, serializer);
+    sse_encode_opt_box_autoadd_proxy_config(self.proxy, serializer);
   }
 
   @protected

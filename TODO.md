@@ -8,15 +8,40 @@ additionally be labelled as such in the UI.
 
 ## Server options
 
-- **Advanced options, per server.** Proxy, auto-connect, and keep running in
-  the background. All three off by default.
-- **A global proxy setting**, in app settings.
+- ✅ **Proxy, per server**, and ✅ **a global proxy setting** in app settings.
+  Both off by default.
 
-  *Open question:* how the global and per-server proxy settings relate. The
-  usual answer is that global is the default and a server may override it,
-  with an explicit "no proxy" option, but it could equally be that a global
-  proxy applies to everything with no exceptions. This changes the UI, so it
-  is worth deciding before either is built.
+  The open question is settled: global is the default, and a server may
+  override it. Three choices per network — App default, Direct, Custom — rather
+  than a switch, because "off" and "not set" are different answers. A network
+  that must never be proxied has to be able to say so, or turning on the
+  app-wide proxy would sweep it up with everything else. The alternative, a
+  global proxy admitting no exceptions, was rejected: it makes one network's
+  requirements break every other network with no way to see why.
+
+  SOCKS5 only. It is what the transport supports, and it is the right first
+  choice anyway — it carries arbitrary TCP and resolves the destination name at
+  the far end, so a proxy meant to hide where you are is not undone by a DNS
+  lookup from here. Tor's listener speaks exactly this, which is what makes the
+  Tor item below mostly a question of shipping Arti rather than of plumbing.
+
+  TLS is still negotiated end to end with the IRC server through the tunnel, so
+  the proxy carries ciphertext it cannot read. There is no direct-connection
+  fallback: a proxy that cannot be reached fails the connection.
+
+- **Auto-connect, per server.** Not started.
+
+- **Keep running in the background.** Not started. Worth settling first what
+  this means on each platform — a tray icon and a closed window on desktop, a
+  foreground service and its notification on Android, and on iOS most likely
+  nothing, since the OS does not keep a socket open for an app that is not in
+  front.
+
+- **Show the proxy in the main window.** Not started, and the reason to want it
+  is the reason the setting exists: a connection that is silently *not* proxied
+  looks exactly like one that is. Today this is only visible in the two
+  settings dialogs and the debug log. The network rail's entries carry no
+  tooltip yet, which is the cheapest place to put it.
 
 ## Tor — beta
 
@@ -27,6 +52,16 @@ additionally be labelled as such in the UI.
   Worth establishing during the research: whether Arti's embedded mode is
   ready for a shipping client, what it adds to the binary size and startup
   time, and how the licence interacts with app-store distribution.
+
+  Note that half of this already works. Anyone running Tor themselves can point
+  the proxy setting at `127.0.0.1:9050` today, and the form starts on that port
+  for exactly that reason. What is left is bundling it, so that using Tor does
+  not first require installing Tor.
+
+  One thing to settle when it is built: `.onion` addresses. They resolve at the
+  proxy, not here, so the transport already carries them — but the client's own
+  address validation and the TLS certificate check have not been looked at with
+  onion services in mind.
 
 ## A local IRC server — beta
 

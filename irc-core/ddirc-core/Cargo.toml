@@ -14,6 +14,7 @@ irc.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
 futures-util.workspace = true
 thiserror.workspace = true
+tokio-socks.workspace = true
 tracing.workspace = true
 base64 = "0.22"
 rand = "0.8"

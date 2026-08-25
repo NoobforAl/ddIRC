@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -177,6 +177,48 @@ class MemberView {
           away == other.away;
 }
 
+/// A SOCKS5 proxy to dial through.
+///
+/// SOCKS5 only, which is what the transport supports and also what Tor's local
+/// listener speaks. The tunnel carries the connection; TLS is still negotiated
+/// end to end with the IRC server through it, so the proxy sees ciphertext to a
+/// host it was told about and nothing more.
+///
+/// Dart resolves the app-wide setting against any per-server override before
+/// building this, so `ServerConfig::proxy` is an answer rather than a policy.
+class ProxyConfig {
+  final String host;
+  final int port;
+
+  /// SOCKS5 username/password auth (RFC 1929). Both or neither.
+  ///
+  /// Sent to the proxy in the clear, before any TLS exists — it proves who
+  /// you are to the proxy and protects nothing else.
+  final String? username;
+  final String? password;
+
+  const ProxyConfig({
+    required this.host,
+    required this.port,
+    this.username,
+    this.password,
+  });
+
+  @override
+  int get hashCode =>
+      host.hashCode ^ port.hashCode ^ username.hashCode ^ password.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProxyConfig &&
+          runtimeType == other.runtimeType &&
+          host == other.host &&
+          port == other.port &&
+          username == other.username &&
+          password == other.password;
+}
+
 /// How to reach a server.
 ///
 /// TLS is not configurable — every connection uses it. Passwords arrive as
@@ -195,6 +237,10 @@ class ServerConfig {
   final String? nickservPassword;
   final String? serverPassword;
 
+  /// Dial through this proxy rather than connecting directly. There is no
+  /// fallback: if it is set and unreachable, the connection fails.
+  final ProxyConfig? proxy;
+
   const ServerConfig({
     required this.host,
     required this.port,
@@ -207,6 +253,7 @@ class ServerConfig {
     this.saslPassword,
     this.nickservPassword,
     this.serverPassword,
+    this.proxy,
   });
 
   @override
@@ -221,7 +268,8 @@ class ServerConfig {
       saslAccount.hashCode ^
       saslPassword.hashCode ^
       nickservPassword.hashCode ^
-      serverPassword.hashCode;
+      serverPassword.hashCode ^
+      proxy.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -238,7 +286,8 @@ class ServerConfig {
           saslAccount == other.saslAccount &&
           saslPassword == other.saslPassword &&
           nickservPassword == other.nickservPassword &&
-          serverPassword == other.serverPassword;
+          serverPassword == other.serverPassword &&
+          proxy == other.proxy;
 }
 
 /// Styling for a run of message text.
