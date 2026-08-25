@@ -36,6 +36,13 @@ pub enum ConfigError {
     IncompleteSaslCredentials,
     #[error("certificate to trust not found: {0}")]
     MissingRootCert(String),
+    #[error(
+        "'{0}' is an onion address, and onion addresses only exist inside \
+         Tor. Set this network's proxy to a Tor SOCKS5 listener - usually \
+         127.0.0.1:9050 - because without one there is nothing here that can \
+         find it."
+    )]
+    OnionWithoutProxy(String),
     #[error("proxy host must not be empty")]
     EmptyProxyHost,
     #[error("proxy port must not be 0")]
@@ -242,8 +249,34 @@ impl ServerConfig {
         }
         if let Some(proxy) = &self.proxy {
             proxy.validate()?;
+        } else if self.is_onion() {
+            // Caught here for the same reason a plaintext port is: the failure
+            // it prevents is a name-resolution error that names DNS, which is
+            // true and useless. An onion address is not in DNS and never will
+            // be — it is resolved by Tor, at the far end of a SOCKS5 tunnel.
+            //
+            // Only the *absence* of a proxy is checked. Whether the proxy on
+            // the other end is really Tor is not knowable from here, and
+            // guessing would refuse working configurations.
+            return Err(ConfigError::OnionWithoutProxy(self.host.clone()));
         }
         Ok(())
+    }
+
+    /// Whether this is a Tor onion address.
+    ///
+    /// Nothing else about the connection changes if it is: the SOCKS5 tunnel
+    /// carries the name to Tor, which resolves it, and TLS is then negotiated
+    /// and *verified* against that name exactly as for any other host. An
+    /// onion service that wants to be reachable from here needs a certificate
+    /// issued for its own `.onion` name — which is permitted, and is the only
+    /// arrangement that does not require weakening the client.
+    pub fn is_onion(&self) -> bool {
+        self.host
+            .trim()
+            .trim_end_matches('.')
+            .to_ascii_lowercase()
+            .ends_with(".onion")
     }
 
     pub fn username(&self) -> &str {
@@ -424,6 +457,53 @@ mod tests {
             host: "127.0.0.1".to_owned(),
             port: ProxyConfig::TOR_SOCKS_PORT,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_onion_address_without_a_proxy_is_refused() {
+        // Without this the user gets a DNS failure, which is accurate and
+        // explains nothing: an onion address is not in DNS and cannot be.
+        let c = ServerConfig {
+            host: "w5tmaxmtwiud3gsdb2bxelqepos7ymwvndquzfnjjh3zavhfbok2yfqd.onion".to_owned(),
+            ..config()
+        };
+        assert_eq!(
+            c.validate(),
+            Err(ConfigError::OnionWithoutProxy(c.host.clone()))
+        );
+
+        // With one, it is an ordinary host as far as this layer is concerned.
+        let c = ServerConfig {
+            proxy: Some(proxy()),
+            ..c
+        };
+        assert_eq!(c.validate(), Ok(()));
+    }
+
+    #[test]
+    fn onion_addresses_are_recognised_however_they_are_written() {
+        for host in [
+            "abc.onion",
+            "ABC.ONION",
+            // A fully-qualified name with the root dot still names the same
+            // service, and browsers accept it; refusing it here would be a
+            // puzzle rather than a safeguard.
+            "abc.onion.",
+        ] {
+            let c = ServerConfig {
+                host: host.to_owned(),
+                ..config()
+            };
+            assert!(c.is_onion(), "{host} should be an onion address");
+        }
+
+        for host in ["irc.libera.chat", "onion.example.org", "notanonion"] {
+            let c = ServerConfig {
+                host: host.to_owned(),
+                ..config()
+            };
+            assert!(!c.is_onion(), "{host} should not be an onion address");
         }
     }
 

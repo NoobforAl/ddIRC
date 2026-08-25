@@ -83,15 +83,23 @@ services:
   #
   #   docker compose -f dev/compose.yaml logs -f tor
   #
-  # Then point the app's proxy at 127.0.0.1:9050 and connect to a public
-  # network. Not the dev server: Tor will not route to a private address, and
-  # says so with "Rejecting SOCKS request for anonymous connection".
+  # It does two jobs at once. The SOCKS port is for public networks — not the
+  # dev server, since Tor will not route to a private address and says so with
+  # "Rejecting SOCKS request for anonymous connection". Reaching the dev server
+  # over Tor takes the other job: it is also published as an onion service, so
+  # there is a real onion address to test against without borrowing anyone
+  # else's. `make dev-tor` prints it.
   tor:
     build: ./tor
     image: ddirc-dev-tor
     container_name: ddirc-dev-tor
     profiles: ["tor"]
     restart: unless-stopped
+    depends_on:
+      # The onion service forwards to this container by name, so Tor needs it
+      # resolvable before it starts.
+      ircd:
+        condition: service_healthy
     ports:
       - "127.0.0.1:9050:9050"
     volumes:

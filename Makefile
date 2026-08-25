@@ -32,7 +32,7 @@ PROFILES ?= --profile proxy --profile tor
 .DEFAULT_GOAL := help
 .PHONY: help fix fmt lint test test-integration build build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
-        dev-proxy dev-tor dev-tor-logs
+        dev-proxy dev-tor dev-tor-logs dev-onion-cert
 
 help:
 	@echo "ddIRC"
@@ -56,6 +56,7 @@ help:
 	@echo "  make dev-proxy         SOCKS5 on 127.0.0.1:1080, in front of it"
 	@echo "  make dev-tor           real Tor on 127.0.0.1:9050, for public nets"
 	@echo "  make dev-tor-logs      follow Tor's bootstrap"
+	@echo "  make dev-onion-cert    reissue the server cert for its onion name"
 	@echo ""
 	@echo "Override a tool path if it is not on PATH, e.g."
 	@echo "  make fix FLUTTER=/c/src/flutter/bin/flutter"
@@ -168,18 +169,43 @@ dev-proxy: dev-server
 	@echo "Try:  ddirc-cli --server 127.0.0.1 --port 6697 \\"
 	@echo "        --proxy 127.0.0.1:1080 --nick test"
 
-## Real Tor, for exercising the proxy against a public network.
+## Real Tor: a SOCKS port for public networks, and an onion for the local one.
 #
-# Not against the dev server: Tor will not route to a private address. A cold
-# start bootstraps for a minute or so - `make dev-tor-logs` to watch it.
-dev-tor:
-	$(COMPOSE) --profile tor up -d --wait tor
+# Tor will not route to a private address, so the dev server is reached the
+# other way round - published as an onion service. A cold start bootstraps for
+# a minute or so; `make dev-tor-logs` to watch it.
+dev-tor: dev-server
+	@# --build because the torrc is baked into the image: without it an edit
+	@# to dev/tor/ is silently ignored and the container runs the old config.
+	$(COMPOSE) --profile tor up -d --build --wait tor
 	@echo ""
 	@echo "Tor SOCKS5 on 127.0.0.1:9050."
-	@echo "Point it at a public network, not the dev server."
+	@echo "Public networks go through the SOCKS port."
+	@echo "The dev server is also reachable at, over that same port:"
+	@echo ""
+	@# Tor writes the address a moment after it reports healthy, so this
+	@# waits rather than reporting a file that is about to exist.
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+	  addr=$$($(COMPOSE) exec -T tor cat /var/lib/tor/ircd/hostname \
+	          2>/dev/null | tr -d '\r\n'); \
+	  if [ -n "$$addr" ]; then echo "  $$addr"; break; fi; \
+	  sleep 1; \
+	done
+	@echo ""
+	@echo "Its certificate will not cover that name until you run:"
+	@echo "  make dev-onion-cert"
 
 dev-tor-logs:
 	$(COMPOSE) --profile tor logs -f tor
+
+## Reissue the dev server's certificate so it covers its onion address.
+#
+# Needed because the address comes from a key Tor generates on first start, so
+# it cannot be known when the certificate is made. Without it every connection
+# over Tor fails on the name - correctly, since onion addresses are verified
+# like any other host.
+dev-onion-cert:
+	@sh dev/onion-cert.sh
 
 dev-server-logs:
 	$(COMPOSE) logs -f

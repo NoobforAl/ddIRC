@@ -1,26 +1,12 @@
 # TODO
 
-Ordered easiest first. The cost jumps sharply after item 1: everything below
-it carries either a new dependency, a per-platform decision, or an unanswered
-question.
+Ordered easiest first. Everything left carries either a new dependency, a
+per-platform decision, or an unanswered question.
 
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
-## 1. `.onion` addresses — beta
-
-- **Reach onion services.**
-
-  The transport already carries them: SOCKS5 resolves the destination name at
-  the far end, so an onion address travels to the proxy untouched. What has
-  never been looked at is this side — the client's own address validation, and
-  what certificate verification should mean for a name that is itself a public
-  key.
-
-  Small in code, but the certificate question needs answering before any of it
-  is written.
-
-## 2. Strip metadata before sending — beta
+## 1. Strip metadata before sending — beta
 
 - **Remove EXIF, timestamps, GPS, camera and software fields** from a file
   before it is sent. On by default.
@@ -30,7 +16,7 @@ additionally be labelled as such in the UI.
   while that question is still open. Needs an image crate and per-format
   handling.
 
-## 3. Keep running in the background
+## 2. Keep running in the background
 
 - **Stay connected with the window closed.** Off by default.
 
@@ -40,7 +26,7 @@ additionally be labelled as such in the UI.
   socket open for an app that is not in front. Worth deciding what it means on
   each before building any of them.
 
-## 4. Built-in Tor — beta
+## 3. Built-in Tor — beta
 
 - **Ship Tor rather than expect it.** Research first: Arti is the Tor Project's
   own Rust implementation, published as the `arti-client` crate, so this would
@@ -56,7 +42,7 @@ additionally be labelled as such in the UI.
   real Tor for exercising it. What is left is bundling it, so that using Tor
   does not first require installing Tor.
 
-## 5. A local IRC server — beta
+## 4. A local IRC server — beta
 
 - **Run an IRC server inside the app**, so a user can host a small network
   without a separate daemon.
@@ -66,7 +52,7 @@ additionally be labelled as such in the UI.
   speaks plaintext would be unreachable from ddIRC itself — the same
   constraint that shaped `dev/`.
 
-## 6. Sending media — beta
+## 5. Sending media — beta
 
 **Blocked on a decision** — see *The problem to solve* at the end of this
 section. The specification below is worth keeping either way; what is
@@ -235,6 +221,33 @@ otherwise have to be made again.
   connection wins the race: the first marked profile in saved order takes the
   selection, and if it fails, whichever else arrives first is shown so a launch
   that connected *something* never lands on an empty screen.
+
+### `.onion` addresses
+
+- ✅ **Reach onion services**, with certificates verified exactly as anywhere
+  else.
+
+  Almost nothing had to be built. SOCKS5 already resolves the destination name
+  at the far end, so an onion address travels to Tor untouched; TLS is then
+  negotiated and verified against that name like any other host. Proved by
+  registering on a real onion service over real Tor, with no bypass anywhere.
+
+  The open question — what certificate verification should mean for a name
+  that is itself a public key — is answered by not changing anything. Tor
+  authenticates *which service* answered, but it says nothing about the
+  connection above it, and relaxing the check would mean trusting the proxy to
+  be Tor when nothing here can know that it is. An onion service reachable
+  from ddIRC is one holding a certificate for its own `.onion` name, which is
+  permitted and is the only arrangement that does not weaken the client.
+
+  Two things were added, both about saying so: an onion address configured
+  without a proxy is refused at validation, because the alternative is a DNS
+  failure that names DNS — accurate and useless for a name that is not in DNS
+  and never will be. And a certificate failure on an onion address names the
+  fix specific to onions rather than the generic self-signed advice.
+
+  `make dev-tor` publishes the dev server as an onion service; `make
+  dev-onion-cert` issues it a certificate for that address.
 
 ### Proxy
 

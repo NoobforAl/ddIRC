@@ -137,6 +137,25 @@ Three things are true of the connection either way:
   fails. Quietly dialling direct instead would defeat the one thing a proxy is
   for, at exactly the moment it mattered most.
 
+### Onion addresses
+
+A `.onion` address works through the same setting, and needs no special mode:
+SOCKS5 hands the name to Tor, which resolves it, and TLS is then negotiated and
+**verified** against that name exactly as for any other host.
+
+Nothing is relaxed for onion services, and that is deliberate. Tor proves
+*which service* answered — the address is a public key — but it says nothing
+about the connection running inside the tunnel, and skipping the certificate
+check would mean trusting the proxy to be Tor when nothing here can know that
+it is. An onion service reachable from ddIRC is one holding a certificate
+issued for its own `.onion` name, which is permitted and is the only
+arrangement that does not weaken the client.
+
+Two conveniences follow from that: an onion address saved without a proxy is
+refused at validation rather than failing later as a DNS error about a name
+that is not in DNS, and a certificate failure on an onion address names the fix
+specific to onions instead of the generic self-signed advice.
+
 A username and password are optional and, if given, are stored in the platform
 keychain beside the SASL one — never in app settings. Worth knowing before
 typing one: SOCKS5 sends both to the proxy in the clear, before any TLS exists

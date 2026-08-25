@@ -42,7 +42,7 @@ pub fn explain(error: &IrcError, config: &ServerConfig) -> String {
     let proxy = config.proxy.as_ref();
 
     match error {
-        IrcError::Io(io) => explain_io(io, host, port, proxy),
+        IrcError::Io(io) => explain_io(io, host, port, proxy, config.is_onion()),
 
         IrcError::Proxy(socks) => match proxy {
             Some(proxy) => explain_socks(socks, proxy, host, port),
@@ -96,18 +96,35 @@ fn tor_hint(proxy: &ProxyConfig) -> &'static str {
     }
 }
 
-fn explain_io(io: &std::io::Error, host: &str, port: u16, proxy: Option<&ProxyConfig>) -> String {
+fn explain_io(
+    io: &std::io::Error,
+    host: &str,
+    port: u16,
+    proxy: Option<&ProxyConfig>,
+    onion: bool,
+) -> String {
     // Checked before anything else, because it is the same answer either way
     // and the proxy branch below would otherwise swallow it. rustls surfaces a
     // rejected certificate as an `io::Error` during the handshake rather than
     // as the crate's `Tls` variant, so the message written for that variant
     // never fired for the commonest TLS failure there is.
     if let Some(reason) = certificate_problem(io) {
+        // An onion service reaching this point is worth its own sentence. Tor
+        // has already proved which service answered — the address *is* the
+        // key — so it is easy to assume the certificate no longer matters. It
+        // still does here, and the fix is a specific one the general advice
+        // below does not point at.
+        let advice = if onion {
+            "An onion service needs a certificate issued for its own .onion \
+             name; one for the operator's ordinary domain will not do."
+        } else {
+            "If it is a private or self-signed server, nothing here vouches \
+             for it yet."
+        };
         return format!(
             "{host}:{port} presented a certificate this machine does not \
-             trust ({reason}). If it is a private or self-signed server, \
-             nothing here vouches for it yet. ddIRC has no way to skip this \
-             check, by design."
+             trust ({reason}). {advice} ddIRC has no way to skip this check, \
+             by design."
         );
     }
 
@@ -284,20 +301,30 @@ fn explain_socks(error: &SocksError, proxy: &ProxyConfig, host: &str, port: u16)
 /// only in the message, so there is no type left to match on. Unlovely, and
 /// still better than showing "invalid peer certificate: UnknownIssuer" to
 /// someone who wants to know whether they typed the address wrong.
-fn certificate_problem(io: &std::io::Error) -> Option<&'static str> {
-    let text = io.to_string().to_ascii_lowercase();
+fn certificate_problem(io: &std::io::Error) -> Option<String> {
+    let raw = io.to_string();
+    let text = raw.to_ascii_lowercase();
     if !text.contains("certificate") {
         return None;
     }
-    // The three rustls actually produces for a server we will not talk to.
+    // The ones rustls produces for a server we will not talk to.
+    //
+    // These are matched against what it actually emits, which is not uniform:
+    // an untrusted issuer arrives as the enum variant name (`UnknownIssuer`)
+    // while a name mismatch arrives as a sentence ("certificate not valid for
+    // name ..."). Both spellings of the latter are accepted because the crate
+    // has used both across versions and covering the pair costs nothing.
     Some(if text.contains("unknownissuer") {
-        "no trusted authority signed it"
-    } else if text.contains("notvalidforname") {
-        "it is not valid for this hostname"
+        "no trusted authority signed it".to_owned()
+    } else if text.contains("not valid for name") || text.contains("notvalidforname") {
+        "it is not valid for this hostname".to_owned()
     } else if text.contains("expired") {
-        "it has expired"
+        "it has expired".to_owned()
     } else {
-        "it was rejected"
+        // The case we did not recognise, and so the one case where hiding
+        // the detail helps nobody: a message we cannot improve on should at
+        // least carry what it was given, or a bug report has nothing in it.
+        format!("it was rejected — {raw}")
     })
 }
 
@@ -464,14 +491,40 @@ mod tests {
 
     #[test]
     fn certificate_problems_are_told_apart() {
+        // Every string here is one rustls actually produced, copied from a
+        // real failed handshake. An earlier version of this test invented the
+        // format instead, and the matcher passed the test while missing the
+        // case in production — a hostname mismatch fell through to "rejected".
         for (raw, expected) in [
-            ("invalid peer certificate: NotValidForName", "hostname"),
+            (
+                "invalid peer certificate: certificate not valid for name \
+                 \"w5tm.onion\"; certificate is only valid for \
+                 DnsName(\"ergo.test\"), DnsName(\"localhost\")",
+                "not valid for this hostname",
+            ),
+            // The older spelling, still accepted so a crate update either way
+            // does not silently lose the case.
+            (
+                "invalid peer certificate: NotValidForName",
+                "not valid for this hostname",
+            ),
             ("invalid peer certificate: Expired", "expired"),
             ("invalid peer certificate: BadSignature", "rejected"),
         ] {
             let message = explain(&io_error(ErrorKind::InvalidData, raw), &config());
             assert!(message.contains(expected), "{raw} -> {message}");
         }
+    }
+
+    #[test]
+    fn an_unrecognised_certificate_problem_keeps_its_detail() {
+        // The branch that exists because we did not understand the error. If
+        // it drops what it was given, a bug report about it contains nothing.
+        let message = explain(
+            &io_error(ErrorKind::InvalidData, "invalid peer certificate: Whatever"),
+            &config(),
+        );
+        assert!(message.contains("Whatever"), "{message}");
     }
 
     #[test]
@@ -514,6 +567,46 @@ mod tests {
         // open which of the two machines did it.
         let message = explain(&io_error(ErrorKind::UnexpectedEof, raw), &through(9050));
         assert!(message.contains("127.0.0.1:9050"), "{message}");
+    }
+
+    #[test]
+    fn an_onion_certificate_failure_names_the_fix_for_an_onion() {
+        // Reached for real: an onion service in front of a server whose
+        // certificate was issued for its ordinary names. The generic advice —
+        // "if it is a private or self-signed server" — points at the wrong
+        // thing when the address is a key and the name is fixed.
+        let onion = ServerConfig {
+            host: "w5tm.onion".to_owned(),
+            proxy: Some(ProxyConfig {
+                host: "127.0.0.1".to_owned(),
+                port: 9050,
+                ..Default::default()
+            }),
+            ..config()
+        };
+        let message = explain(
+            &io_error(
+                ErrorKind::InvalidData,
+                "invalid peer certificate: certificate not valid for name",
+            ),
+            &onion,
+        );
+        assert!(
+            message.contains("issued for its own .onion name"),
+            "{message}"
+        );
+        assert!(!message.contains("self-signed"), "{message}");
+
+        // And the ordinary advice survives for everything else.
+        let plain = explain(
+            &io_error(
+                ErrorKind::InvalidData,
+                "invalid peer certificate: UnknownIssuer",
+            ),
+            &config(),
+        );
+        assert!(plain.contains("self-signed"), "{plain}");
+        assert!(!plain.contains(".onion"), "{plain}");
     }
 
     #[test]

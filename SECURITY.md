@@ -69,6 +69,14 @@ Off by default. SOCKS5 only, and every property below is a deliberate one.
   sends them to the proxy in the clear, before any TLS exists; the UI says so
   where they are typed, because a credential whose exposure is not obvious is
   one a user will reuse.
+- **Onion addresses are verified like any other host.** No relaxed mode, no
+  exception. Tor authenticates which service answered, but it says nothing
+  about the TLS session inside the tunnel, and relaxing the check would mean
+  trusting the proxy to be Tor when nothing in the client can establish that.
+  An onion service reachable from here is one holding a certificate for its own
+  `.onion` name. An onion address configured without a proxy is refused at
+  validation, since it cannot resolve and the resulting DNS error would explain
+  nothing.
 - **Half a credential is rejected at config validation.** A lone username
   otherwise reaches the transport, which refuses it with a message about byte
   lengths that names the wrong problem.

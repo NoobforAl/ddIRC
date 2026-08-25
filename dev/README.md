@@ -265,7 +265,7 @@ calls it healthy the moment it starts, including when it exits immediately.
 To exercise RFC 1929 authentication, set `PROXY_USER` and `PROXY_PASSWORD` on
 the service and drop `REQUIRE_AUTH` — the commented lines are already there.
 
-### `make dev-tor` — the real thing
+### `make dev-tor` — the real thing, and an onion of your own
 
 Tor will **not** route to a private address, so it cannot reach this server. It
 answers such a request with "Rejecting SOCKS request for anonymous connection",
@@ -281,6 +281,26 @@ ddirc-cli --server irc.oftc.net --port 6697 --proxy 127.0.0.1:9050 --nick test
 Not every network accepts Tor. OFTC does; Libera requires SASL over its onion
 service. A network that refuses exit nodes usually says so in the message it
 closes the connection with.
+
+It does a second job as well: the dev server is published as an onion service,
+so there is a real onion address to test against without borrowing anyone
+else's. `make dev-tor` prints it.
+
+The certificate will not cover that address at first — Tor derives it from a
+key generated on first start, long after the server made its certificate — so
+connecting fails on the name. That failure is correct and worth seeing once:
+ddIRC verifies certificates for onion addresses exactly as for any other host,
+and nothing about Tor changes it. `make dev-onion-cert` reissues the server
+certificate to include the onion name, after which it connects:
+
+```bash
+make dev-tor              # prints the .onion address
+make dev-onion-cert       # reissue the cert to cover it
+SSL_CERT_FILE=dev/ergo/fullchain.pem ddirc-cli   --server <address>.onion --port 6697 --proxy 127.0.0.1:9050 --nick test
+```
+
+Run `make dev-onion-cert` again whenever the address changes, which means
+whenever the Tor volume is discarded by `make dev-server-clean`.
 
 Built from Alpine and its own `tor` package rather than pulled from a
 third-party image: this is the one container here whose entire job is privacy,

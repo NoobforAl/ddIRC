@@ -20,6 +20,20 @@ SocksPolicy reject *
 
 DataDirectory /var/lib/tor
 
+# An onion service in front of the dev server.
+#
+# This is the only way to exercise ddIRC against a real onion address without
+# borrowing someone else's: Tor will not route to a private address, so the
+# server has to be reachable *as* a hidden service rather than through the
+# SOCKS port. The target is the ircd container by name, which is why this
+# service waits for that one.
+#
+# The address is derived from a key pair generated on first start and kept in
+# the volume, so it survives a restart. `make dev-tor` prints it.
+HiddenServiceDir /var/lib/tor/ircd
+HiddenServiceVersion 3
+HiddenServicePort 6697 ircd:6697
+
 # Progress on stdout, so `make dev-tor-logs` shows bootstrap reaching 100% —
 # the thing worth waiting for before pointing a client at it.
 Log notice stdout
