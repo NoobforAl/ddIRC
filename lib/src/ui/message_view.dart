@@ -103,11 +103,13 @@ class _MessageViewState extends State<MessageView> {
       itemBuilder: (context, i) {
         final line = lines[i];
         final fresh =
-            i >= _freshFrom &&
-            DateTime.now().difference(line.at) < _arrival;
+            i >= _freshFrom && DateTime.now().difference(line.at) < _arrival;
 
         if (line.isSystem) {
-          return Arrive(play: fresh, child: _SystemLine(text: line.system!));
+          return Arrive(
+            play: fresh,
+            child: _SystemLine(text: line.system!),
+          );
         }
 
         // Suppress the repeated sender label when the same person speaks
@@ -345,7 +347,8 @@ class _MessageBody extends StatelessWidget {
     var style = base.copyWith(
       fontWeight: s.bold ? FontWeight.w700 : null,
       fontStyle: s.italic ? FontStyle.italic : null,
-      fontFamily: s.monospace ? 'monospace' : null,
+      fontFamily: s.monospace ? Fonts.mono : null,
+      fontFamilyFallback: s.monospace ? Fonts.monoFallback : null,
       color: (!colors || s.fg == null)
           ? base.color
           : MircPalette.resolve(s.fg, on: surface, fallback: base.color!),

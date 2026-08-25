@@ -4,6 +4,90 @@ import 'package:flutter/material.dart';
 
 /// Design tokens.
 ///
+/// The typefaces the app asks for, and what it falls back to.
+///
+/// # Nothing is bundled, on purpose
+///
+/// The obvious move is to ship a font so the app looks the same everywhere.
+/// It would be the wrong one here. This is a client for a protocol people use
+/// in every script there is, and a bundled face covers a few of them: every
+/// message outside its coverage would fall back to a system font anyway, so
+/// the result is not consistency but a mixture — some lines in the shipped
+/// font, some not, in the same conversation.
+///
+/// Using the platform's own UI font avoids that. It has the coverage, it is
+/// what every other application on the machine uses, and it honours whatever
+/// the user has configured for themselves. It also costs nothing: no download,
+/// no licence to track, no megabytes in the bundle.
+///
+/// # [ui] is a safety net, not a choice of face
+///
+/// `fontFamily` is deliberately left unset for ordinary text, so Flutter's
+/// per-platform default wins — Segoe UI on Windows, the San Francisco faces on
+/// Apple platforms, Roboto on Android. Only `fontFamilyFallback` is supplied,
+/// and only to catch glyphs the default lacks. A name that is not installed is
+/// skipped, so one list is safe on every platform.
+///
+/// # [mono] has to name real fonts
+///
+/// There is no platform default for monospace, so it must be asked for by
+/// name. `'monospace'` alone — which is what this code used to say — is an
+/// Android and CSS convention: nothing on Windows, macOS or Linux is called
+/// that, so the request quietly found no font and fell back to the proportional
+/// default. Monospaced text was not monospaced anywhere but Android.
+///
+/// The list below names the real font on each platform and keeps `'monospace'`
+/// last, where it still helps on Android and Linux.
+abstract final class Fonts {
+  /// Ordered coverage net for ordinary text.
+  static const ui = <String>[
+    // Windows.
+    'Segoe UI Variable Text',
+    'Segoe UI',
+    // Apple platforms.
+    'SF Pro Text',
+    '.SF UI Text',
+    // Android, and Flutter's own default.
+    'Roboto',
+    // Linux, in rough order of how likely they are to be installed.
+    'Noto Sans',
+    'DejaVu Sans',
+    'Liberation Sans',
+    // Last resorts for glyphs none of the above carry, emoji especially.
+    'Arial Unicode MS',
+    'Segoe UI Emoji',
+    'Apple Color Emoji',
+    'Noto Color Emoji',
+  ];
+
+  /// The first monospaced face to try.
+  static const mono = 'Cascadia Mono';
+
+  /// The rest, in order. Anything not installed is skipped.
+  static const monoFallback = <String>[
+    // Windows.
+    'Consolas',
+    'Lucida Console',
+    // Apple platforms.
+    'SF Mono',
+    'Menlo',
+    'Monaco',
+    // Linux.
+    'DejaVu Sans Mono',
+    'Ubuntu Mono',
+    'Liberation Mono',
+    'Noto Sans Mono',
+    // Android.
+    'Roboto Mono',
+    'Droid Sans Mono',
+    // Everywhere, eventually.
+    'Courier New',
+    // The generic name, which resolves on Android and Linux and is ignored
+    // elsewhere. Last, so it can never shadow a real font above it.
+    'monospace',
+  ];
+}
+
 /// The palette is deliberately narrow — two surfaces, one rule, two text
 /// weights, one accent, three status colours. Typography and spacing carry the
 /// layout, so there are no gradients, shadows or elevation anywhere in the app,
@@ -128,7 +212,7 @@ class Tokens extends ThemeExtension<Tokens> {
   };
 
   static ThemeData themeFor(Tokens t) {
-    return ThemeData(
+    final base = ThemeData(
       useMaterial3: true,
       brightness: t.brightness,
       scaffoldBackgroundColor: t.bg,
@@ -146,6 +230,16 @@ class Tokens extends ThemeExtension<Tokens> {
       splashFactory: NoSplash.splashFactory,
       highlightColor: Colors.transparent,
       extensions: [t],
+    );
+
+    // The fallback list is added rather than a family being imposed: the
+    // platform's own default is already the right primary face, and this is
+    // only the net beneath it. See [Fonts].
+    return base.copyWith(
+      textTheme: base.textTheme.apply(fontFamilyFallback: Fonts.ui),
+      primaryTextTheme: base.primaryTextTheme.apply(
+        fontFamilyFallback: Fonts.ui,
+      ),
     );
   }
 
