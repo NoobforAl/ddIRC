@@ -23,6 +23,11 @@ MANIFEST := --manifest-path $(RUST)/Cargo.toml
 DART_SRC := lib
 
 COMPOSE ?= docker compose -f dev/compose.yaml
+# The optional services - the SOCKS5 proxy and Tor - sit behind compose
+# profiles so they do not start with the server. Stopping has to name them
+# explicitly, because `docker compose down` on its own walks straight past a
+# profiled container and leaves it running.
+PROFILES ?= --profile proxy --profile tor
 
 .DEFAULT_GOAL := help
 .PHONY: help fix fmt lint test test-integration build build-linux build-macos build-ios codegen icons clean \
@@ -130,13 +135,16 @@ dev-server:
 	@echo ""
 	@cat dev/server.txt
 
+# Every profile, not just the default one: a plain `down` leaves the proxy and
+# Tor containers running, and a Tor daemon nobody remembers starting is exactly
+# the kind of thing that should not outlive the server it was brought up for.
 dev-server-stop:
-	$(COMPOSE) down
+	$(COMPOSE) $(PROFILES) down
 	@rm -f dev/server.txt
 
 ## Also drops the accounts, certificates and generated config in dev/ergo/.
 dev-server-clean:
-	$(COMPOSE) down -v
+	$(COMPOSE) $(PROFILES) down -v
 	rm -rf dev/ergo dev/server.txt
 
 ## A SOCKS5 proxy in front of the dev server, for testing the proxy setting.
