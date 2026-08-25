@@ -26,7 +26,8 @@ COMPOSE ?= docker compose -f dev/compose.yaml
 
 .DEFAULT_GOAL := help
 .PHONY: help fix fmt lint test test-integration build build-linux build-macos build-ios codegen icons clean \
-        dev-server dev-server-stop dev-server-clean dev-server-logs
+        dev-server dev-server-stop dev-server-clean dev-server-logs \
+        dev-proxy dev-tor dev-tor-logs
 
 help:
 	@echo "ddIRC"
@@ -47,6 +48,9 @@ help:
 	@echo "  make dev-server-stop   stop it, keeping accounts and certs"
 	@echo "  make dev-server-clean  stop it and throw the state away"
 	@echo "  make dev-server-logs   follow its log"
+	@echo "  make dev-proxy         SOCKS5 on 127.0.0.1:1080, in front of it"
+	@echo "  make dev-tor           real Tor on 127.0.0.1:9050, for public nets"
+	@echo "  make dev-tor-logs      follow Tor's bootstrap"
 	@echo ""
 	@echo "Override a tool path if it is not on PATH, e.g."
 	@echo "  make fix FLUTTER=/c/src/flutter/bin/flutter"
@@ -134,6 +138,40 @@ dev-server-stop:
 dev-server-clean:
 	$(COMPOSE) down -v
 	rm -rf dev/ergo dev/server.txt
+
+## A SOCKS5 proxy in front of the dev server, for testing the proxy setting.
+#
+# Shares the server's network namespace, so the client asks it for the same
+# 127.0.0.1:6697 it would otherwise dial and the certificate still verifies.
+# Offline and deterministic; this is the one to test against.
+dev-proxy: dev-server
+	$(COMPOSE) --profile proxy up -d socks5
+	@# Not `--wait`: the proxy shares the server's network namespace, so it
+	@# cannot carry a health check of its own and compose calls it healthy the
+	@# moment it starts - including when it exits immediately, which is what a
+	@# misconfigured one does. Probe the port from inside that shared namespace
+	@# instead, so a dead proxy fails here rather than as a puzzling client
+	@# error five minutes later.
+	@sleep 1
+	@$(COMPOSE) exec -T ircd nc -z 127.0.0.1 1080 \
+	  || (echo "socks5 is not listening; try: $(COMPOSE) logs socks5" && exit 1)
+	@echo ""
+	@echo "SOCKS5 on 127.0.0.1:1080, in front of 127.0.0.1:6697."
+	@echo "Try:  ddirc-cli --server 127.0.0.1 --port 6697 \\"
+	@echo "        --proxy 127.0.0.1:1080 --nick test"
+
+## Real Tor, for exercising the proxy against a public network.
+#
+# Not against the dev server: Tor will not route to a private address. A cold
+# start bootstraps for a minute or so - `make dev-tor-logs` to watch it.
+dev-tor:
+	$(COMPOSE) --profile tor up -d --wait tor
+	@echo ""
+	@echo "Tor SOCKS5 on 127.0.0.1:9050."
+	@echo "Point it at a public network, not the dev server."
+
+dev-tor-logs:
+	$(COMPOSE) --profile tor logs -f tor
 
 dev-server-logs:
 	$(COMPOSE) logs -f

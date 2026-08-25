@@ -143,7 +143,11 @@ typing one: SOCKS5 sends both to the proxy in the clear, before any TLS exists
 (RFC 1929). They prove who you are to the proxy and protect nothing else. Tor
 accepts any pair and uses it to put the connection on a circuit of its own.
 
-`ddirc-cli --proxy 127.0.0.1:9050` exercises the same path without Flutter.
+`ddirc-cli --proxy 127.0.0.1:9050` exercises the same path without Flutter, and
+`dev/` carries a fixture for each half of the setting — `make dev-proxy` for a
+plain SOCKS5 proxy in front of the local server, offline and deterministic, and
+`make dev-tor` for the real thing against a public network. See
+[dev/README.md](dev/README.md).
 
 ## Logs
 

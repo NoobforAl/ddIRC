@@ -97,10 +97,43 @@ fn tor_hint(proxy: &ProxyConfig) -> &'static str {
 }
 
 fn explain_io(io: &std::io::Error, host: &str, port: u16, proxy: Option<&ProxyConfig>) -> String {
-    // With a proxy, the tunnel is already open by the time an I/O error can
-    // mean anything: the proxy did the connecting, and reported its own result
-    // as a SOCKS reply. So the advice below — wrong port, mistyped name, a
-    // firewall between here and the server — is about a hop that never
+    // Checked before anything else, because it is the same answer either way
+    // and the proxy branch below would otherwise swallow it. rustls surfaces a
+    // rejected certificate as an `io::Error` during the handshake rather than
+    // as the crate's `Tls` variant, so the message written for that variant
+    // never fired for the commonest TLS failure there is.
+    if let Some(reason) = certificate_problem(io) {
+        return format!(
+            "{host}:{port} presented a certificate this machine does not \
+             trust ({reason}). If it is a private or self-signed server, \
+             nothing here vouches for it yet. ddIRC has no way to skip this \
+             check, by design."
+        );
+    }
+
+    // Also the same answer either way, and also ahead of the proxy branch.
+    // rustls says of this one: "peer closed connection without sending TLS
+    // close_notify: https://docs.rs/rustls/...#unexpected-eof". Shipping a
+    // link to Rust library documentation to someone whose chat window just
+    // went grey is not a message, it is a leak of our own stack — and IRC
+    // servers close sockets abruptly as a matter of routine, so this is one of
+    // the most frequently seen failures there is.
+    if is_abrupt_close(io) {
+        let via = match proxy {
+            Some(proxy) => format!(" (through the proxy at {})", label(proxy)),
+            None => String::new(),
+        };
+        return format!(
+            "{host}:{port} closed the connection abruptly{via}, without \
+             shutting the encrypted session down cleanly. Servers do this when \
+             they restart, when they are full, or when a client is banned."
+        );
+    }
+
+    // With a proxy, the tunnel is already open by the time any other I/O error
+    // can mean anything: the proxy did the connecting, and reported its own
+    // result as a SOCKS reply. So the advice below — wrong port, mistyped
+    // name, a firewall between here and the server — is about a hop that never
     // happened, and saying it would send the user looking in the wrong place.
     if let Some(proxy) = proxy {
         return format!(
@@ -160,6 +193,20 @@ fn explain_socks(error: &SocksError, proxy: &ProxyConfig, host: &str, port: u16)
             "Could not reach the proxy at {at}, so nothing was sent to {host}. \
              Check that the proxy is running and listening on that port.{}",
             tor_hint(proxy)
+        ),
+
+        // Accepted, then hung up mid-handshake. Found while testing against a
+        // container whose port forwarder outlived the process behind it, which
+        // is the general shape of this: something is holding the port open
+        // with nothing serving it. A proxy being restarted looks identical, so
+        // the message has to leave both possibilities open. Without this arm it
+        // fell to the catch-all and read "failed: unexpected end of file",
+        // which describes a socket rather than a thing to go and fix.
+        SocksError::Io(io) if io.kind() == ErrorKind::UnexpectedEof => format!(
+            "The proxy at {at} accepted the connection and then closed it \
+             without answering. Something is listening on that port, but it is \
+             not serving SOCKS5 — a proxy that is starting up or has just \
+             stopped looks like this."
         ),
 
         // Answered, but not in SOCKS5. Pointing this at an HTTP proxy or an
@@ -228,6 +275,39 @@ fn explain_socks(error: &SocksError, proxy: &ProxyConfig, host: &str, port: u16)
         // underlying message never does.
         other => format!("The proxy at {at} failed: {other}"),
     }
+}
+
+/// The certificate complaint inside an I/O error, if that is what it is.
+///
+/// Matched on text for the same reason `is_dns_failure` is: the failure
+/// arrives as an `io::Error` with `ErrorKind::InvalidData` and the real cause
+/// only in the message, so there is no type left to match on. Unlovely, and
+/// still better than showing "invalid peer certificate: UnknownIssuer" to
+/// someone who wants to know whether they typed the address wrong.
+fn certificate_problem(io: &std::io::Error) -> Option<&'static str> {
+    let text = io.to_string().to_ascii_lowercase();
+    if !text.contains("certificate") {
+        return None;
+    }
+    // The three rustls actually produces for a server we will not talk to.
+    Some(if text.contains("unknownissuer") {
+        "no trusted authority signed it"
+    } else if text.contains("notvalidforname") {
+        "it is not valid for this hostname"
+    } else if text.contains("expired") {
+        "it has expired"
+    } else {
+        "it was rejected"
+    })
+}
+
+/// Whether a connection was dropped without a clean TLS shutdown.
+///
+/// Matched on text because rustls reports it as an `io::Error` whose only
+/// distinguishing feature is the message — which is also the message we most
+/// want never to show anyone, since it ends in a documentation URL.
+fn is_abrupt_close(io: &std::io::Error) -> bool {
+    io.to_string().contains("close_notify")
 }
 
 /// Whether an I/O error is a name-resolution failure.
@@ -366,6 +446,77 @@ mod tests {
     }
 
     #[test]
+    fn a_rejected_certificate_is_described_as_one() {
+        // Seen in the app: rustls reports this as an io::Error, so the message
+        // written for the crate's Tls variant never fired and users got
+        // "invalid peer certificate: UnknownIssuer".
+        let message = explain(
+            &io_error(
+                ErrorKind::InvalidData,
+                "invalid peer certificate: UnknownIssuer",
+            ),
+            &config(),
+        );
+        assert!(message.contains("does not trust"), "{message}");
+        assert!(message.contains("no trusted authority"), "{message}");
+        assert!(!message.contains("UnknownIssuer"), "{message}");
+    }
+
+    #[test]
+    fn certificate_problems_are_told_apart() {
+        for (raw, expected) in [
+            ("invalid peer certificate: NotValidForName", "hostname"),
+            ("invalid peer certificate: Expired", "expired"),
+            ("invalid peer certificate: BadSignature", "rejected"),
+        ] {
+            let message = explain(&io_error(ErrorKind::InvalidData, raw), &config());
+            assert!(message.contains(expected), "{raw} -> {message}");
+        }
+    }
+
+    #[test]
+    fn a_certificate_is_the_servers_problem_even_through_a_proxy() {
+        // The proxy branch would otherwise claim this for itself, and blaming
+        // the tunnel for a certificate the server presented sends the user to
+        // the wrong machine entirely.
+        let message = explain(
+            &io_error(
+                ErrorKind::InvalidData,
+                "invalid peer certificate: UnknownIssuer",
+            ),
+            &through(1080),
+        );
+        assert!(message.contains("does not trust"), "{message}");
+        assert!(!message.contains("127.0.0.1:1080"), "{message}");
+    }
+
+    #[test]
+    fn an_abrupt_close_never_shows_a_documentation_link() {
+        // Seen in the app. rustls appends a docs.rs URL to this one, and IRC
+        // servers produce it constantly, so it was the failure most likely to
+        // be read by someone who did not want a tour of our dependencies.
+        let raw = "peer closed connection without sending TLS close_notify: \
+                   https://docs.rs/rustls/latest/rustls/manual/_03_howto/\
+                   index.html#unexpected-eof";
+
+        for config in [config(), through(9050)] {
+            let message = explain(&io_error(ErrorKind::UnexpectedEof, raw), &config);
+            assert!(!message.contains("docs.rs"), "{message}");
+            assert!(!message.contains("close_notify"), "{message}");
+            assert!(
+                message.contains("closed the connection abruptly"),
+                "{message}"
+            );
+            assert!(message.contains("irc.example.org:6697"), "{message}");
+        }
+
+        // Through a proxy it still says which one, because "abruptly" leaves
+        // open which of the two machines did it.
+        let message = explain(&io_error(ErrorKind::UnexpectedEof, raw), &through(9050));
+        assert!(message.contains("127.0.0.1:9050"), "{message}");
+    }
+
+    #[test]
     fn a_ping_timeout_explains_what_dropped_the_connection() {
         let message = explain(&IrcError::PingTimeout, &config());
         assert!(message.contains("stopped responding"));
@@ -456,6 +607,19 @@ mod tests {
             let message = socks(error, &through(1080));
             assert!(message.contains("username and password"), "{message}");
         }
+    }
+
+    #[test]
+    fn a_proxy_that_hangs_up_mid_handshake_says_so() {
+        // Seen for real: a container port forwarder still accepting after the
+        // process behind it stopped. "unexpected end of file" names a socket;
+        // this names something to go and look at.
+        let message = socks(
+            SocksError::Io(io_of(ErrorKind::UnexpectedEof, "unexpected end of file")),
+            &through(1080),
+        );
+        assert!(message.contains("accepted the connection"), "{message}");
+        assert!(!message.contains("unexpected end of file"), "{message}");
     }
 
     #[test]

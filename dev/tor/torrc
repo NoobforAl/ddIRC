@@ -1,0 +1,25 @@
+# Listen on every interface *inside the container*. The published port is bound
+# to 127.0.0.1 on the host (see compose.yaml), so the only thing that can reach
+# this is the host's own loopback.
+SocksPort 0.0.0.0:9050
+
+# Who is allowed to use it, from Tor's point of view inside the container.
+#
+# Loopback is here because Docker's port forwarder rewrites the source address:
+# a connection from the host's 127.0.0.1 arrives at the container as 127.0.0.1
+# too, not as the bridge gateway. Without this line Tor answers every request
+# with "Denying socks connection from untrusted address 127.0.0.1", which from
+# the client looks like a proxy that is up and refuses everything. The private
+# ranges cover the bridge, which is how it arrives in other Docker networking
+# modes.
+SocksPolicy accept 127.0.0.0/8
+SocksPolicy accept 172.16.0.0/12
+SocksPolicy accept 192.168.0.0/16
+SocksPolicy accept 10.0.0.0/8
+SocksPolicy reject *
+
+DataDirectory /var/lib/tor
+
+# Progress on stdout, so `make dev-tor-logs` shows bootstrap reaching 100% —
+# the thing worth waiting for before pointing a client at it.
+Log notice stdout

@@ -11,6 +11,12 @@
 #   make dev-server-stop   stop it, keeping accounts and certs
 #   make dev-server-clean  stop it and throw the state away
 #
+# Two proxies live here too, both behind compose profiles so neither starts
+# with `make dev-server`. They test different halves of the same setting:
+#
+#   make dev-proxy         a plain SOCKS5 proxy in front of this server
+#   make dev-tor           real Tor, for the public networks
+#
 # Bound to loopback only. This server has a self-signed certificate and open
 # account registration; it must never be reachable from anywhere else.
 
@@ -21,6 +27,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:6697:6697"
+      # Published here rather than on the socks5 service, which shares this
+      # container's network namespace and so cannot publish its own.
+      - "127.0.0.1:1080:1080"
     volumes:
       # Config, certificates and the account datastore all live here, readable
       # from the host so tests can find the certificate.
@@ -32,3 +41,72 @@ services:
       timeout: 2s
       retries: 15
       start_period: 2s
+
+  # A plain SOCKS5 proxy sitting in front of the dev server.
+  #
+  # `network_mode: service:ircd` is the whole trick: this container shares the
+  # ircd container's network namespace, so `127.0.0.1:6697` *inside the proxy*
+  # is the dev server. The client can therefore ask the proxy for the same
+  # `127.0.0.1:6697` it would have dialled directly, and the self-signed
+  # certificate — issued for that name — still verifies. No second hostname, no
+  # second certificate, and nothing about the client's TLS path changes.
+  #
+  # Offline and deterministic, which is what makes it the one to test against.
+  # Tor cannot do this job: it will not route to a private address.
+  #
+  #   ddirc-cli --server 127.0.0.1 --port 6697 --proxy 127.0.0.1:1080 --nick x
+  socks5:
+    image: serjs/go-socks5-proxy@sha256:0af522996f402c03ecd985a87997158eabeb28935365e3a384df37eafcf740ea
+    container_name: ddirc-dev-socks5
+    profiles: ["proxy"]
+    restart: unless-stopped
+    network_mode: "service:ircd"
+    depends_on:
+      ircd:
+        condition: service_healthy
+    environment:
+      # The image requires credentials unless told otherwise, and exits on
+      # start when it has none — which compose reports as a healthy service,
+      # because sharing another container's network namespace leaves nothing
+      # here to health-check. `make dev-proxy` probes the port itself for
+      # exactly that reason.
+      REQUIRE_AUTH: "false"
+      # Uncomment both, and drop REQUIRE_AUTH, to exercise RFC 1929 auth:
+      # PROXY_USER: alice
+      # PROXY_PASSWORD: hunter2
+
+  # Real Tor, for the other half: a public network over the real thing.
+  #
+  # Built from Alpine rather than pulled from a third-party image — this is the
+  # one container here whose entire job is privacy. Bootstrapping takes a
+  # minute or so on a cold start; watch for "Bootstrapped 100%":
+  #
+  #   docker compose -f dev/compose.yaml logs -f tor
+  #
+  # Then point the app's proxy at 127.0.0.1:9050 and connect to a public
+  # network. Not the dev server: Tor will not route to a private address, and
+  # says so with "Rejecting SOCKS request for anonymous connection".
+  tor:
+    build: ./tor
+    image: ddirc-dev-tor
+    container_name: ddirc-dev-tor
+    profiles: ["tor"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9050:9050"
+    volumes:
+      # Kept, so a restart reuses the consensus instead of bootstrapping from
+      # nothing again. A named volume rather than a host directory, because a
+      # bind mount arrives owned by root and Tor drops to its own user, which
+      # it then refuses to start without.
+      - tor-state:/var/lib/tor
+    healthcheck:
+      test: ["CMD", "sh", "-c", "nc -z 127.0.0.1 9050"]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+      start_period: 5s
+
+volumes:
+  # Removed by `make dev-server-clean`, along with everything else here.
+  tor-state:

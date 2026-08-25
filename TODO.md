@@ -53,10 +53,11 @@ additionally be labelled as such in the UI.
   ready for a shipping client, what it adds to the binary size and startup
   time, and how the licence interacts with app-store distribution.
 
-  Note that half of this already works. Anyone running Tor themselves can point
-  the proxy setting at `127.0.0.1:9050` today, and the form starts on that port
-  for exactly that reason. What is left is bundling it, so that using Tor does
-  not first require installing Tor.
+  Note that half of this already works, and is tested. Anyone running Tor
+  themselves can point the proxy setting at `127.0.0.1:9050` today — the form
+  starts on that port for exactly that reason — and `make dev-tor` brings up a
+  real Tor for exercising it. What is left is bundling it, so that using Tor
+  does not first require installing Tor.
 
   One thing to settle when it is built: `.onion` addresses. They resolve at the
   proxy, not here, so the transport already carries them — but the client's own

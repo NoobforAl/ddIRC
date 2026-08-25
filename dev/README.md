@@ -229,6 +229,75 @@ Point it at `localhost` port `6697` with TLS on, then either hand it
 take one) or use its own accept-invalid-certificate option. No account is
 needed unless you are testing SASL.
 
+## The two proxies
+
+The proxy setting needs two different things tested, and no single fixture does
+both. Neither starts with `make dev-server`.
+
+| | `make dev-proxy` | `make dev-tor` |
+|---|---|---|
+| What | A plain SOCKS5 proxy | Real Tor |
+| Where | `127.0.0.1:1080` | `127.0.0.1:9050` |
+| Reaches | This dev server | The public internet |
+| Needs the network | No | Yes |
+| Startup | Instant | A minute or so to bootstrap |
+
+### `make dev-proxy` — in front of this server
+
+The one to test against, because it is offline and deterministic.
+
+```bash
+make dev-proxy
+ddirc-cli --server 127.0.0.1 --port 6697 --proxy 127.0.0.1:1080 --nick test
+```
+
+The trick is `network_mode: service:ircd` in `compose.yaml`: the proxy container
+shares the server's network namespace, so `127.0.0.1:6697` *inside the proxy* is
+the dev server. The client can therefore ask for exactly the address it would
+have dialled directly, and the self-signed certificate — issued for that name —
+still verifies. No second hostname, no second certificate, and nothing about the
+client's TLS path changes.
+
+That also means the proxy cannot carry a health check of its own, and compose
+calls it healthy the moment it starts, including when it exits immediately.
+`make dev-proxy` probes the port itself afterwards for that reason.
+
+To exercise RFC 1929 authentication, set `PROXY_USER` and `PROXY_PASSWORD` on
+the service and drop `REQUIRE_AUTH` — the commented lines are already there.
+
+### `make dev-tor` — the real thing
+
+Tor will **not** route to a private address, so it cannot reach this server. It
+answers such a request with "Rejecting SOCKS request for anonymous connection",
+which arrives in the client as a proxy that is running and refuses everything.
+Point it at a public network instead:
+
+```bash
+make dev-tor
+make dev-tor-logs          # wait for "Bootstrapped 100%"
+ddirc-cli --server irc.oftc.net --port 6697 --proxy 127.0.0.1:9050 --nick test
+```
+
+Not every network accepts Tor. OFTC does; Libera requires SASL over its onion
+service. A network that refuses exit nodes usually says so in the message it
+closes the connection with.
+
+Built from Alpine and its own `tor` package rather than pulled from a
+third-party image: this is the one container here whose entire job is privacy,
+and a stranger's Docker Hub tag is a poor foundation for that even in a
+development fixture.
+
+Two things about it are worth knowing, because both looked like client bugs
+before they were understood:
+
+- Its data directory is a **named volume**, not a bind mount. A host directory
+  arrives owned by root, and Tor drops to its own user and then refuses to start
+  without a directory it owns.
+- Its `torrc` accepts `127.0.0.0/8`. Docker's port forwarder rewrites the source
+  address, so a connection from the host's loopback arrives at the container as
+  loopback too rather than as the bridge gateway. Without that line Tor denies
+  every request as coming from an untrusted address.
+
 ## When it will not connect
 
 **A DNS error / "no such host"** — you are almost certainly using the wrong
