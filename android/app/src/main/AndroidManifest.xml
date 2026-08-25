@@ -4,8 +4,20 @@
          network access at all. -->
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- Staying connected while the app is not in front.
+
+         None of these are asked for at launch, and none of them do anything
+         unless "Keep running when the window is closed" is turned on, which
+         it is not by default. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <!-- From Android 13 the notification is a permission of its own. The
+         service runs whether or not it is granted; what is lost by refusing
+         is only being told that it is running. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <application
-        android:label="ddirc"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -30,6 +42,28 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- Keeps the process out of the reaper's queue while ddIRC is not
+             the app in front. It holds nothing: the connections live in the
+             Rust core inside this process, and they last exactly as long as
+             the process does.
+
+             `specialUse` rather than `dataSync`, which is the type that looks
+             like the obvious fit. From Android 15 a `dataSync` service is cut
+             off after six hours in any twenty-four, which for a client whose
+             whole purpose is to still be connected this evening is not a
+             limit but a silent failure. `specialUse` says what this actually
+             is and carries no such clock. The cost is that Google Play asks
+             for the justification below to be defended at review; nothing
+             else about the app changes if it ever has to move back. -->
+        <service
+            android:name=".ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Holds an open IRC connection so messages arrive while the app is in the background. IRC has no push service to delegate this to: the protocol delivers over the same socket the client opened, so the socket has to stay open or the messages are simply not received."/>
+        </service>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

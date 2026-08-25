@@ -3,34 +3,13 @@
 Ordered easiest first. Everything left carries either a new dependency, a
 per-platform decision, or an unanswered question.
 
+Two of the three remaining begin with research or a decision rather than code,
+which is worth knowing before picking one up.
+
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
-## 1. Keep running in the background
-
-Three separate platform integrations rather than one feature, and the question
-of what it *means* on each is now answered rather than open.
-
-- ✅ **Desktop** — built, and off by default. See *Done*.
-
-- **Android** — a foreground service and its permanent notification. Off by
-  default, and the only part of this item left to build.
-
-  The process belongs to the system there, so staying connected is not a
-  matter of keeping a window from closing: it needs a service holding the
-  Flutter engine alive, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`
-  and `POST_NOTIFICATIONS` in the manifest, and a notification the user cannot
-  dismiss. That is Kotlin rather than Dart, which is why it is separate from
-  the desktop half rather than the same switch reaching further.
-
-- ⛔ **iOS** — nothing to build, deliberately.
-
-  The OS will not hold a TCP socket open for an app that is not in front. The
-  honest behaviour is to reconnect on returning to the foreground, and for the
-  switch not to appear at all — which is what it does today. A control that
-  cannot keep its promise is worse than no control.
-
-## 2. Built-in Tor — beta
+## 1. Built-in Tor — beta
 
 - **Ship Tor rather than expect it.** Research first: Arti is the Tor Project's
   own Rust implementation, published as the `arti-client` crate, so this would
@@ -46,7 +25,7 @@ of what it *means* on each is now answered rather than open.
   real Tor for exercising it. What is left is bundling it, so that using Tor
   does not first require installing Tor.
 
-## 3. A local IRC server — beta
+## 2. A local IRC server — beta
 
 - **Run an IRC server inside the app**, so a user can host a small network
   without a separate daemon.
@@ -56,7 +35,7 @@ of what it *means* on each is now answered rather than open.
   speaks plaintext would be unreachable from ddIRC itself — the same
   constraint that shaped `dev/`.
 
-## 4. Sending media — beta
+## 3. Sending media — beta
 
 **Blocked on a decision** — see *The problem to solve* at the end of this
 section. The specification below is worth keeping either way; what is
@@ -160,10 +139,15 @@ choice. What changes is what carries the bytes.
 Kept here rather than deleted, because each one records a decision that would
 otherwise have to be made again.
 
-### Keep running in the background — the desktop half
+### Keep running in the background
 
-- ✅ **Closing the window can hide it instead of quitting.** Off by default,
-  on Windows, Linux and macOS.
+- ✅ **Stay connected while the app is not the thing in front.** Off by
+  default, on Windows, Linux, macOS and Android. ⛔ **Not on iOS**, on purpose.
+
+  Three platform integrations wearing one checkbox, and the question of what it
+  *means* on each turned out to matter more than the code.
+
+#### Desktop: a window that hides, and a way back
 
   There was nothing to keep alive. The connections live in the Rust core, on
   its own threads, inside this process — hiding a window does not stop a
@@ -203,6 +187,53 @@ otherwise have to be made again.
   same `MarkSpec` as everything else, so they cannot drift from the taskbar
   icon beside them; macOS gets a menu-bar template rather than the colour mark,
   since the menu bar recolours what it is given.
+
+#### Android: permission to go on existing
+
+  Nothing here holds a connection either. What differs is that the process is
+  not ours to keep: an app the user is not looking at is a cached process, and
+  a cached process is the first thing killed when memory runs short. So the
+  thing to arrange is not a window that refuses to close but permission to
+  exist, which is what a foreground service is — and the price Android charges
+  is a notification.
+
+  Worth paying openly. An app holding a socket open while nobody is looking at
+  it *should* be visible, and the notification does the tray icon's job: it
+  says the app is running, says how many networks are connected in the same
+  sentence the tooltip uses, and carries the same Quit.
+
+  **A swipe from Recents still closes it, and the setting says so.** That
+  gesture means "close this", so the service honours it rather than outliving
+  it. Surviving it would mean caching the Flutter engine outside the activity,
+  and an app the user cannot dismiss is not the feature that was asked for.
+
+  `specialUse` rather than `dataSync`, which is the type that looks like the
+  obvious fit. From Android 15 a `dataSync` service is cut off after six hours
+  in any twenty-four, which for a client whose purpose is to still be connected
+  this evening is not a limit but a silent failure. The manifest carries the
+  justification Google Play asks for at review; moving back is one string if it
+  is ever refused.
+
+  The notification permission is asked for and its answer ignored, deliberately.
+  From Android 13 it can be refused, and refusing it costs being *told* the app
+  is running — not the running itself. That is the user's call, and not a reason
+  to withhold the thing they just switched on.
+
+  **No new dependency.** The notification, the channel and the permission are
+  framework APIs behind version guards. The status-bar icon is the same
+  silhouette macOS gets, for the same reason: Android keeps only its alpha.
+
+  Built and inspected, not run — there is no Android device here. The APK
+  compiles, the Rust core cross-compiles for every ABI, and the merged manifest
+  carries the three permissions and the service. Everything above the channel
+  is covered by tests; what has not happened is a phone.
+
+#### iOS: nothing, and that is the answer
+
+  The OS will not hold a TCP socket open for an app that is not in front. The
+  honest behaviour is to reconnect on returning to the foreground, and for the
+  switch not to appear at all — which is what it does. A control that cannot
+  keep its promise is worse than no control.
 
 ### Logging
 

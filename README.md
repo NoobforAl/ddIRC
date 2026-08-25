@@ -80,10 +80,45 @@ Closing is always intercepted, whichever way the setting is set. That is what
 lets a plain close send a `QUIT` first, so everyone in the channel sees you
 leave now rather than time out two minutes later.
 
-Desktop only, and the switch is absent — not disabled — elsewhere. Android
-needs a foreground service that has not been built yet; iOS will not hold a
-socket open for an app that is not in front, so the switch would be a promise
-the platform refuses to keep.
+### The same promise on Android
+
+The switch is there too, worded for the platform: *Stay connected in the
+background*, and the app keeps its connections while you are in another app.
+
+What it does underneath is not the same thing at all. Nothing on Android holds
+a connection either — the Rust core does, as everywhere else — but the process
+is not ours to keep. An app you are not looking at is a cached process, and a
+cached process is the first thing killed when memory runs short. So on Android
+the thing that has to be arranged is not a window that refuses to close but
+permission to go on existing, which is what a foreground service is, and the
+price Android charges for it is a notification.
+
+That price is worth paying openly. An app holding a socket open while you are
+not looking at it *should* be visible, and the notification does the same job
+the tray icon does on desktop: it says the app is running, it says how many
+networks are connected, and it carries the same Quit.
+
+**Swiping the app away from Recents still closes it**, and the switch says so.
+That gesture means "close this", so the service honours it rather than
+outliving it. Surviving it would mean caching the Flutter engine outside the
+activity, and an app you cannot dismiss is not the feature anyone asked for.
+
+The service is declared `specialUse` rather than `dataSync`, which is the type
+that looks like the obvious fit. From Android 15 a `dataSync` service is cut
+off after six hours in any twenty-four — for a client whose whole purpose is to
+still be connected this evening, that is not a limit but a silent failure.
+`AndroidManifest.xml` carries the justification Google Play asks for at review.
+
+No new dependency for any of this: the notification and the permission are
+plain framework APIs behind version guards, and the channel between Dart and
+`MainActivity.kt` has five methods on it.
+
+### iOS gets nothing, deliberately
+
+The switch is absent there — not disabled. iOS will not hold a TCP socket open
+for an app that is not in front, so the switch would be a promise the platform
+refuses to keep, and a control that cannot keep its promise is worse than no
+control.
 
 ## The mark
 
@@ -96,8 +131,9 @@ and a corner radius, every value a fraction of the side. Two things read it.
 `AppMark` paints it on the splash and the empty screen, and
 `tool/make_icons.dart` rasterises it into every launcher icon — the Windows
 `.ico` at seven sizes, Android's legacy and adaptive icons at five densities,
-the tray icons under `assets/tray/`, and a PNG and SVG under `assets/icon/` for
-anywhere outside a build.
+the tray icons under `assets/tray/`, Android's notification icon at five
+densities, and a PNG and SVG under `assets/icon/` for anywhere outside a
+build.
 
 The tray is the one place the mark ships as a Flutter asset, because a tray is
 a native control and takes a file rather than a widget. Windows and Linux get
@@ -106,6 +142,10 @@ button and should be the same thing. macOS gets a *template* — the hash alone,
 one ink on transparency — because the menu bar recolours what it is given, and
 an image that is not a template comes out as a smudge on a dark bar and a
 different smudge on a light one.
+
+Android's status bar wants exactly the same silhouette, for exactly the same
+reason: it keeps only the alpha channel and tints the rest. So the notification
+icon *is* the macOS template, drawn at Android's densities.
 
 ```bash
 make icons     # redraw them all; the output is committed
@@ -123,7 +163,7 @@ right-click or long-press on any channel in the list.
 
 | Dialog | What it holds |
 |---|---|
-| **App** | Theme, timestamps, 12/24-hour clock, message density, whether closing the window quits or hides to the tray (desktop only), whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
+| **App** | Theme, timestamps, 12/24-hour clock, message density, whether to keep running in the background (not on iOS), whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
 | **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, route (direct or through which proxy), authentication mechanism. Plus disconnect. |
 | **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, whether to connect at launch, and this network's proxy. Reached from the rail's context menu or the header menu. |
@@ -514,6 +554,11 @@ to `window_manager`, which was already here. It exists because hiding a window
 without a way back is not a feature; nothing else in the tree needed a native
 tray, and writing one for three platforms to avoid one pinned package would
 have been the worse trade.
+
+The Android foreground service added **nothing**. A notification, a channel and
+a permission are three framework APIs behind version guards, which is less code
+than reading a plugin's changelog — and one fewer thing between the app and a
+permission it has to justify to a store.
 
 The proxy support is the crate's own `proxy` feature, backed by
 `tokio-socks`. We take `tokio-socks` as a direct dependency as well, because

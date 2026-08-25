@@ -1,18 +1,18 @@
-// Tests for keeping the app running with its window closed.
+// Tests for staying connected while the app is not the thing in front.
 //
-// None of this drives a real tray or a real window: both are native controls
-// with no test double, and a widget test has neither. What is tested is the
-// part that carries a decision — which platforms the feature is offered on,
-// what closing the window does, what the icon says it is doing, and that the
-// way back in and the way out both exist. The plumbing around those is a
-// handful of calls into two plugins.
+// Two platforms that share a promise and no mechanism at all. On desktop it is
+// a window that hides and a tray icon that brings it back; on Android it is a
+// foreground service and the notification Android charges for it. Neither
+// mechanism exists in a widget test — there is no tray, no window and no
+// Android — so what is tested is everything that decides: which platforms are
+// offered it, what closing does, what the user is told, and, on Android, the
+// exact conversation held with the host.
 //
-// The one thing here that is not a decision is [Workspace.closeAll] being safe
-// to call twice, and it earns its place: quitting closes the connections and
-// then tears the window down, and the teardown runs the widget tree's dispose
-// on the way out. Get that wrong and quitting throws on the way to the exit,
-// which is the worst place to find out.
+// The Android half is testable in a way the desktop half is not, because it
+// speaks over a MethodChannel and a MethodChannel can be listened to. So it is
+// tested properly: the calls, their order, and their arguments.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,6 +22,8 @@ import 'package:ddirc/src/model/proxy.dart';
 import 'package:ddirc/src/model/settings.dart';
 import 'package:ddirc/src/model/workspace.dart';
 import 'package:ddirc/src/ui/background.dart';
+import 'package:ddirc/src/ui/background_android.dart';
+import 'package:ddirc/src/ui/background_desktop.dart';
 
 /// The keychain, which a test host does not have.
 const _keychain = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
@@ -39,7 +41,14 @@ void main() {
 
   tearDown(() {
     binding.defaultBinaryMessenger.setMockMethodCallHandler(_keychain, null);
+    debugDefaultTargetPlatformOverride = null;
   });
+
+  Future<Workspace> workspace() async => Workspace(
+    profiles: await ProfileStore.load(),
+    settings: await AppSettings.load(),
+    proxies: await ProxySettings.load(),
+  );
 
   group('which platforms it is offered on', () {
     test('the three desktops, where hiding a window keeps a process', () {
@@ -52,25 +61,81 @@ void main() {
       }
     });
 
-    test('neither phone, and for two different reasons', () {
-      // Android could do this and does not yet — it needs a foreground service
-      // that has not been built. iOS cannot: it will not hold a socket open
-      // for an app that is not in front. Both are excluded, because a switch
-      // that does nothing is worse than no switch.
-      expect(runsInBackgroundOn(TargetPlatform.android), isFalse);
+    test('and Android, where the process has to ask to stay', () {
+      expect(runsInBackgroundOn(TargetPlatform.android), isTrue);
+    });
+
+    test('never iOS, which would make it a promise it cannot keep', () {
+      // The OS will not hold a TCP socket open for an app that is not in
+      // front. A switch offering it would be a lie with a toggle on it.
       expect(runsInBackgroundOn(TargetPlatform.iOS), isFalse);
     });
   });
 
+  group('the right mechanism is chosen for the platform', () {
+    Future<BackgroundKeeper> keeperOn(TargetPlatform platform) async {
+      debugDefaultTargetPlatformOverride = platform;
+      return backgroundKeeperFor(
+        settings: await AppSettings.load(),
+        workspace: await workspace(),
+      );
+    }
+
+    test('a tray and a window on desktop', () async {
+      for (final platform in [
+        TargetPlatform.windows,
+        TargetPlatform.linux,
+        TargetPlatform.macOS,
+      ]) {
+        expect(
+          await keeperOn(platform),
+          isA<BackgroundPresence>(),
+          reason: '$platform',
+        );
+      }
+    });
+
+    test('a foreground service on Android', () async {
+      expect(await keeperOn(TargetPlatform.android), isA<ForegroundService>());
+    });
+
+    test('nothing at all on iOS, and it still answers', () async {
+      // A real object rather than a null, so nothing above has to remember
+      // that this is sometimes absent.
+      final keeper = await keeperOn(TargetPlatform.iOS);
+      expect(keeper, isA<NoBackgroundKeeper>());
+      await expectLater(keeper.start(), completes);
+      expect(keeper.dispose, returnsNormally);
+    });
+  });
+
   group('the setting', () {
-    test('is off, because closing a window means closing it', () async {
-      final settings = await AppSettings.load();
-      expect(settings.runInBackground, isFalse);
+    test('is off, because this is not what closing normally means', () async {
+      expect((await AppSettings.load()).runInBackground, isFalse);
     });
 
     test('persists once turned on', () async {
       (await AppSettings.load()).runInBackground = true;
       expect((await AppSettings.load()).runInBackground, isTrue);
+    });
+  });
+
+  group('what the setting promises', () {
+    test('says what you will see, which differs by platform', () {
+      final android = backgroundSettingDescription(TargetPlatform.android);
+      final desktop = backgroundSettingDescription(TargetPlatform.windows);
+      expect(android, isNot(desktop));
+      expect(android, contains('notification'));
+      expect(desktop, contains('tray'));
+    });
+
+    test('Android says what still ends it', () async {
+      // The service deliberately does not survive a swipe from Recents, so
+      // the switch has to say so rather than let it be discovered.
+      expect(
+        backgroundSettingDescription(TargetPlatform.android),
+        contains('Recents'),
+      );
     });
   });
 
@@ -103,7 +168,30 @@ void main() {
     });
   });
 
-  group('the tray', () {
+  group('what it says while it is out of sight', () {
+    test('says whether it is connected, not just that it is running', () {
+      expect(connectionSummary(0), 'not connected');
+      expect(connectionSummary(1), '1 network connected');
+      expect(connectionSummary(3), '3 networks connected');
+    });
+
+    test('the tray and the notification say the same thing', () {
+      // One sentence for both, because it answers the same question in both
+      // places and two wordings that drifted would be two things to keep true.
+      for (final count in [0, 1, 4]) {
+        expect(trayTooltip(count), contains(connectionSummary(count)));
+      }
+    });
+
+    test('only the tray repeats the app name', () {
+      // A tooltip stands alone; the notification carries the name in its
+      // title already and would only be talking to itself.
+      expect(trayTooltip(2), startsWith('ddIRC'));
+      expect(connectionSummary(2), isNot(contains('ddIRC')));
+    });
+  });
+
+  group('the tray menu', () {
     test('offers a way back in and a way out, and nothing else', () {
       final keys = backgroundMenu().items!
           .where((i) => i.key != null)
@@ -122,32 +210,187 @@ void main() {
         expect(item.label, isNotEmpty);
       }
     });
+  });
 
-    test('says whether it is connected, not just that it is running', () {
-      // The question the icon exists to answer.
-      expect(trayTooltip(0), contains('not connected'));
-      expect(trayTooltip(1), contains('1 network connected'));
-      expect(trayTooltip(3), contains('3 networks connected'));
+  group('the Android service', () {
+    late List<MethodCall> calls;
+    late MethodChannel channel;
+    late AppSettings settings;
+    late Workspace space;
+    late ForegroundService service;
+
+    /// What the host answers. Overridden per test where it matters.
+    late Future<Object?> Function(MethodCall) answer;
+
+    setUp(() async {
+      calls = [];
+      answer = (_) async => null;
+      channel = const MethodChannel('dev.ddirc/background.test');
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) {
+        calls.add(call);
+        return answer(call);
+      });
+      settings = await AppSettings.load();
+      space = await workspace();
+      service = ForegroundService(
+        settings: settings,
+        workspace: space,
+        channel: channel,
+      );
     });
 
-    test('names the app, so a tray full of icons can be told apart', () {
-      for (final count in [0, 1, 5]) {
-        expect(trayTooltip(count), startsWith('ddIRC'));
-      }
+    tearDown(() {
+      service.dispose();
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    });
+
+    List<String> methods() => [for (final c in calls) c.method];
+
+    test('starts nothing while the setting is off', () async {
+      await service.start();
+      expect(methods(), isEmpty);
+      expect(service.serviceIsRunning, isFalse);
+    });
+
+    test('starts the service when the setting is turned on', () async {
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+
+      expect(methods(), contains('start'));
+      expect(service.serviceIsRunning, isTrue);
+      final start = calls.firstWhere((c) => c.method == 'start');
+      // The notification says what it is doing from the first frame it
+      // exists, rather than being blank until something changes.
+      expect(start.arguments['status'], connectionSummary(0));
+    });
+
+    test('asks about the notification before starting, not after', () async {
+      answer = (call) async =>
+          call.method == 'notificationsAllowed' ? false : null;
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+
+      expect(
+        methods().indexOf('notificationsAllowed'),
+        lessThan(methods().indexOf('start')),
+      );
+      expect(methods(), contains('requestNotifications'));
+    });
+
+    test('does not ask again when it is already allowed', () async {
+      answer = (call) async =>
+          call.method == 'notificationsAllowed' ? true : null;
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+
+      expect(methods(), isNot(contains('requestNotifications')));
+      expect(methods(), contains('start'));
+    });
+
+    test('starts anyway when the notification is refused', () async {
+      // Refusing the notification costs being told it is running. It does not
+      // cost the thing the user just switched on.
+      answer = (call) async => switch (call.method) {
+        'notificationsAllowed' => false,
+        'requestNotifications' => false,
+        _ => null,
+      };
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+
+      expect(methods(), contains('start'));
+      expect(service.serviceIsRunning, isTrue);
+    });
+
+    test('stops the service when the setting is turned off', () async {
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+      calls.clear();
+
+      settings.runInBackground = false;
+      await pumpEventQueue();
+
+      expect(methods(), ['stop']);
+      expect(service.serviceIsRunning, isFalse);
+    });
+
+    test('a host that fails does not bring the app down', () async {
+      answer = (_) async => throw PlatformException(code: 'nope');
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+      // The setting not working is not worth an exception reaching the user,
+      // and must never be worth losing a connection that is already up.
+      expect(methods(), contains('start'));
+    });
+
+    test(
+      'quitting closes the connections before stopping the service',
+      () async {
+        await service.start();
+        settings.runInBackground = true;
+        await pumpEventQueue();
+        calls.clear();
+
+        await service.quit();
+
+        // Servers are told first, so everyone in the channel sees a quit now
+        // rather than a ping timeout in two minutes' time.
+        expect(space.sessions, isEmpty);
+        expect(methods(), contains('stop'));
+        expect(service.serviceIsRunning, isFalse);
+      },
+    );
+
+    test('quitting twice is not twice as much quitting', () async {
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+      calls.clear();
+
+      await service.quit();
+      await service.quit();
+
+      expect(methods().where((m) => m == 'stop'), hasLength(1));
+    });
+
+    test('the notification button reaches the same quit', () async {
+      await service.start();
+      settings.runInBackground = true;
+      await pumpEventQueue();
+      calls.clear();
+
+      // What MainActivity sends when Quit is pressed, or the task is swiped
+      // away from Recents.
+      await binding.defaultBinaryMessenger.handlePlatformMessage(
+        channel.name,
+        channel.codec.encodeMethodCall(const MethodCall('quit')),
+        (_) {},
+      );
+      await pumpEventQueue();
+
+      expect(space.sessions, isEmpty);
+      expect(methods(), contains('stop'));
     });
   });
 
-  group('closing down', () {
-    Future<Workspace> workspace() async => Workspace(
-      profiles: await ProfileStore.load(),
-      settings: await AppSettings.load(),
-      proxies: await ProxySettings.load(),
-    );
+  test('the grace period is short enough not to read as a hang', () {
+    // A bounded courtesy. Long enough for a QUIT already handed to the core to
+    // reach the wire, short enough that quitting still feels immediate.
+    expect(quitGrace, greaterThan(Duration.zero));
+    expect(quitGrace, lessThan(const Duration(milliseconds: 500)));
+  });
 
+  group('closing down', () {
     test('can be done twice without throwing', () async {
-      // Quitting from the tray closes the connections, then destroys the
-      // window — and the teardown runs the widget tree's dispose, which closes
-      // them again. Disposing a ChangeNotifier twice throws; this must not.
+      // Quitting closes the connections, then tears the app down — and the
+      // teardown runs the widget tree's dispose, which closes them again.
+      // Disposing a ChangeNotifier twice throws; this must not.
       final w = await workspace();
       w.closeAll();
       w.closeAll();
@@ -171,12 +414,5 @@ void main() {
         expect(() => w.dispose(), returnsNormally);
       },
     );
-  });
-
-  test('the grace period is short enough not to read as a hang', () {
-    // A bounded courtesy. Long enough for a QUIT already handed to the core to
-    // reach the wire, short enough that quitting still feels immediate.
-    expect(quitGrace, greaterThan(Duration.zero));
-    expect(quitGrace, lessThan(const Duration(milliseconds: 500)));
   });
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../model/log.dart';
@@ -5,6 +6,17 @@ import '../../model/settings.dart';
 import '../background.dart';
 import 'proxy_section.dart';
 import 'settings_chrome.dart';
+
+/// The section heading, which is not "Window" on a phone.
+String get _backgroundSectionLabel =>
+    defaultTargetPlatform == TargetPlatform.android ? 'Background' : 'Window';
+
+/// Named for the gesture that triggers it, which differs by platform: a
+/// desktop user closes a window, a phone user simply goes somewhere else.
+String get _backgroundSwitchLabel =>
+    defaultTargetPlatform == TargetPlatform.android
+    ? 'Stay connected in the background'
+    : 'Keep running when the window is closed';
 
 /// Preferences that apply everywhere, on every server.
 ///
@@ -49,23 +61,24 @@ class AppSettingsDialog extends StatelessWidget {
             ),
           ],
         ),
-        // Absent on Android and iOS rather than shown and disabled. On
-        // Android this needs a foreground service that does not exist yet; on
-        // iOS the OS will not hold a socket open for an app that is not in
-        // front, so the switch would be a promise the platform refuses to
-        // keep. A control for neither is better than a control that lies.
+        // Absent on iOS rather than shown and disabled: the OS will not hold
+        // a socket open for an app that is not in front, so the switch would
+        // be a promise the platform refuses to keep, and a control that
+        // cannot keep its promise is worse than no control.
+        //
+        // The label and the description both change with the platform,
+        // because "the window" is not a thing on a phone and what ends it is
+        // not the same gesture.
         if (keepsRunningInBackground) ...[
           const SettingsRule(),
           SettingsSection(
-            label: 'Window',
+            label: _backgroundSectionLabel,
             children: [
               SettingsSwitch(
-                label: 'Keep running when the window is closed',
-                description:
-                    'Closing the window hides it to the tray instead of '
-                    'quitting, so the connections stay up and nothing is '
-                    'missed while it is away. The tray icon brings it back, '
-                    'and is also how you quit for real.',
+                label: _backgroundSwitchLabel,
+                description: backgroundSettingDescription(
+                  defaultTargetPlatform,
+                ),
                 value: settings.runInBackground,
                 onChanged: (v) => settings.runInBackground = v,
               ),

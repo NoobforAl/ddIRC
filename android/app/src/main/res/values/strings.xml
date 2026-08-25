@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Text the Android side owns.
+
+  The notification is built in Kotlin, not Dart, so its words live here rather
+  than beside the rest of the app's copy. Only the status line inside it comes
+  from Dart, because that is the one part that changes.
+-->
+<resources>
+    <string name="app_name">ddIRC</string>
+
+    <!-- The notification's own button. -->
+    <string name="quit">Quit</string>
+
+    <!-- Shown in Android's own notification settings, where the user can
+         silence or hide this. Named for what it is about rather than for the
+         mechanism: nobody is looking for "foreground service". -->
+    <string name="connection_channel_name">Connection</string>
+    <string name="connection_channel_description">Shown while ddIRC stays connected in the background. Android requires it, and it is how you can tell the app is still running.</string>
+</resources>

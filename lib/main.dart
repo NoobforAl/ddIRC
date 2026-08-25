@@ -95,8 +95,10 @@ class _DdIrcAppState extends State<DdIrcApp> {
     proxies: widget.proxies,
   );
 
-  /// Owns what happens when the window is closed. Inert off desktop.
-  late final BackgroundPresence _background = BackgroundPresence(
+  /// Owns staying connected while the app is not the thing in front — a tray
+  /// icon and a hidden window on desktop, a foreground service on Android,
+  /// and nothing at all on iOS, which will not hold a socket open anyway.
+  late final BackgroundKeeper _background = backgroundKeeperFor(
     settings: widget.settings,
     workspace: _workspace,
   );
@@ -105,7 +107,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
   void initState() {
     super.initState();
     // Not awaited, and nothing waits on it: this arranges what a later close
-    // will do, and the window cannot be closed before the first frame.
+    // will do, and nothing can be closed before the first frame.
     unawaited(_background.start());
   }
 

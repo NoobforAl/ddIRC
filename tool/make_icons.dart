@@ -38,6 +38,12 @@ const _icoSizes = [16, 24, 32, 48, 64, 128, 256];
 /// one — which is the kind of fault nobody reports.
 const _trayIcoSizes = [16, 20, 24, 32];
 
+/// The base size of an Android notification icon, in dp.
+///
+/// Android draws the small icon at 24dp and uses only its alpha channel, so
+/// this is the same silhouette the macOS menu bar gets, at Android's densities.
+const _notificationDp = 24;
+
 /// How much of a menu-bar template the glyph occupies.
 ///
 /// The macOS tray image is the hash alone, with no field behind it, so it has
@@ -108,6 +114,20 @@ void main(List<String> args) {
         adaptive,
         adaptive,
       ),
+    );
+  }
+
+  // The status-bar icon for the foreground-service notification.
+  //
+  // A silhouette, not the mark: Android throws away every channel but alpha
+  // and tints what is left, so a coloured icon arrives as a solid blob. This
+  // is the same shape the macOS menu bar is given, for the same reason.
+  for (final MapEntry(key: density, value: factor)
+      in _androidDensities.entries) {
+    final size = _notificationDp * factor;
+    write(
+      'android/app/src/main/res/drawable-$density/ic_notification.png',
+      trayTemplate(size),
     );
   }
 
