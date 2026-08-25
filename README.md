@@ -51,6 +51,36 @@ Everything is scoped per network: `#chat` on one server is a different
 conversation, with its own notification level, from `#chat` on another.
 Disconnecting one leaves the rest connected.
 
+### Browse networks
+
+A new install has nothing saved, and the form it used to open on asked for a
+hostname and a port — a question only somebody who already uses IRC can
+answer. **Browse networks**, in the rail and on the empty screen, answers it:
+ten networks that are still running, each with the channels worth starting in.
+Search matches names, addresses and channels, so typing `debian` finds OFTC
+without the user having to know that is where Debian went.
+
+The list is in `lib/src/model/directory.dart`. Two rules decided what is on
+it. Every entry is reachable over **TLS on a published round-robin hostname**,
+because the app makes no unencrypted connections and an entry it cannot
+connect to is worse than no entry — that is why QuakeNet and GameSurge, both
+alive and both large, are absent. And every entry was checked against its own
+operators' current connection documentation, because the interesting half of
+this list is which networks outlived the ones beside them.
+
+Where connecting without knowing something would waste an afternoon, the entry
+says so, in the picker and again in the editor: EFnet runs no services at all,
+OFTC takes a client certificate rather than a SASL password, and IRCnet's TLS
+is not on the address every guide gives you.
+
+Picking a network does not save or connect anything. It fills in the profile
+editor, which is still where a network is created — the nickname is asked for
+and the proxy is reviewed exactly as they are for a server typed in by hand.
+The suggested channels also appear as toggles under the **Channels** field
+whenever the address matches a known network, typed or picked, and they write
+into that field rather than into a selection of their own, so there is never a
+tick that disagrees with the text beside it.
+
 Profiles are stored in `shared_preferences`; **SASL passwords are not**. Those
 go to the platform keychain via `flutter_secure_storage` — Android Keystore,
 DPAPI on Windows — are read only at connect time, and are zeroized by the core
@@ -276,6 +306,74 @@ backstop rather than the defence, since the core strips secrets before they
 ever become events. Write failures are swallowed — a full disk must not
 interrupt a conversation over a diagnostic.
 
+## The local server
+
+**Beta, and not reachable from the app yet** — the crate is built and tested,
+but it has no FFI and no settings switch. What follows is what it does and why
+it is shaped this way.
+
+It is an IRC server that runs inside ddIRC, so there is somewhere to talk that
+needs no daemon installed, no account made, and nobody's permission. A scratch
+network, a place to develop against without Docker, and a target that is there
+when nothing else is.
+
+### Loopback only, on purpose
+
+It binds `127.0.0.1` and `::1` and nothing else, and that is a decision rather
+than a first step.
+
+Reaching it from another machine would mean handing that machine's client a
+trust anchor, because the certificate is issued locally and no public authority
+will ever vouch for it. Handing someone a certificate to install is exactly the
+control this codebase refuses to build — see *Dependency posture* and the note
+on `extra_root_cert` below. A local server is not a good enough reason to open
+that door.
+
+The duller half of the reason is just as real: a server other people can reach
+needs a routable address, a way through NAT, and a free port. An app cannot
+arrange those.
+
+There is a real answer for *reachable from elsewhere*, and it is not a bigger
+listener — publish it as an onion service, where the address is the key and NAT
+stops mattering. That waits on shipping Tor, which is its own roadmap item.
+
+### It issues its own certificate, and that is not a bypass
+
+The client requires TLS on every connection and has no way to skip
+verification, so a plaintext local server would be unreachable from the app it
+lives inside. It speaks real TLS instead, with a certificate the client really
+verifies.
+
+That is safe here for a reason that does not generalise: **the app is both
+ends**. It issues the certificate and is the only thing that will ever be shown
+it. No certificate from outside the machine enters the trust store, the anchor
+covers one loopback address the app itself chose, and the private key is
+generated locally and never sent anywhere. `extra_root_cert` stays absent from
+the Dart-visible type, so there is still no control anyone can be talked into
+using.
+
+The CA is persisted, because a trust anchor that changed every launch would be
+one the app had to be told about again every launch. The leaf is minted in
+memory at each start and written nowhere, so the key that actually terminates
+connections lives exactly as long as the server does.
+
+### What it speaks
+
+Registration with `CAP` negotiation, `ISUPPORT`, a MOTD, `JOIN`/`PART`,
+`PRIVMSG`/`NOTICE`, `NAMES`, `TOPIC`, nick changes, `PING`/`PONG` and `QUIT`.
+Channels get an operator — whoever created them — so the `PREFIX=(o)@` it
+advertises means something.
+
+Inside, one owner and no locks: a reader and a writer task per connection, and
+a single task holding all the state. A server is almost entirely cross-client
+work — a join touches everyone in the channel, a rename everyone who shares one
+— and doing that under per-client locks is how deadlocks and half-applied state
+get in. It also means the protocol is testable without a socket, which is most
+of why the tests are quick.
+
+**The MOTD says it is beta.** A MOTD is the one thing every client shows on
+arrival, and whoever connected may not be whoever switched it on.
+
 ## Why Rust, not C
 
 The original design called for a C core wrapping `libircclient`. That turned out
@@ -323,6 +421,7 @@ ddIRC/
 ├─ irc-core/          # the Cargo workspace
 │  ├─ ddirc-core/     # the reusable core — no Flutter awareness
 │  ├─ ddirc-cli/      # terminal harness; the Phase 1 acceptance gate
+│  ├─ ddirc-server/   # the local IRC server: loopback only, TLS only
 │  └─ ddirc-bridge/   # ddirc_bridge — the frb binding crate
 └─ pubspec.yaml
 ```
@@ -344,6 +443,17 @@ unchanged.
 | `state/` | Channels, members, privileges; `ISUPPORT` and casemapping. |
 | `media/` | Removing metadata from images before they are sent. No codec: each format is rewritten as a container, pixels copied across untouched. |
 | `text/format.rs` | Parses mIRC formatting into styled spans and strips control codes. |
+
+`ddirc-server` is a separate crate rather than a module here, because it is the
+other half of the protocol and wants dependencies the client half does not —
+and because nothing that ships in the app should be able to reach it by
+accident.
+
+| Module | Responsibility |
+|---|---|
+| `identity.rs` | Issues the CA and mints a leaf per run. Holds the whole argument for why generating a certificate is safe where trusting a supplied one is not. |
+| `state.rs` | Every command, every reply, and all the state. No sockets, no TLS, no timing — which is what makes it testable directly. |
+| `session.rs` | One accepted connection: the TLS handshake, framing, and the reader and writer around it. |
 
 ## Building
 
@@ -555,6 +665,19 @@ without a way back is not a feature; nothing else in the tree needed a native
 tray, and writing one for three platforms to avoid one pinned package would
 have been the worse trade.
 
+The local server added **two crates**, `yasna` and `time`, both pulled in by
+`rcgen`. Everything else it needs was already here: `irc-proto` is what the
+`irc` client crate is built on, so the server parses and writes exactly what
+the client does instead of carrying a second implementation to keep in step,
+and `rustls` and `tokio-rustls` arrive with `tls-rust`.
+
+`rcgen` is the judgement call. X.509 could have been hand-rolled the way
+`media/` hand-rolls its containers, and the reason it was not is that the
+calculus differs: a container written slightly wrong shows up as a file that
+will not open, whereas a certificate written slightly wrong is fed to a
+verifier that has to accept it *and* has to go on refusing what it should
+refuse. That is not the place to save a dependency.
+
 The Android foreground service added **nothing**. A notification, a channel and
 a permission are three framework APIs behind version guards, which is less code
 than reading a plugin's changelog — and one fewer thing between the app and a
@@ -585,6 +708,14 @@ Live-network testing proved the TLS handshake, registration, `ISUPPORT` parsing,
 error surfacing, and reconnect path against Libera.Chat. It is deliberately not
 part of the test suite: it needs unfiltered egress and a cooperative server, so
 it cannot be a regression asset.
+
+The local server carries **24 of its own**, none of them ignored. Most drive
+the protocol state directly; four start the real server and connect the real
+client to it over real TLS, including a guard asserting that the same
+connection is **refused** without the trust anchor — so if verification is ever
+weakened, the suite says so instead of quietly proving nothing. These need
+neither Docker nor a network, which means the client's own connection path is
+now covered by an ordinary `cargo test` for the first time.
 
 ### A local server to test against
 

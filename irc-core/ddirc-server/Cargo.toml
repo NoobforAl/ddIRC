@@ -1,0 +1,36 @@
+[package]
+name = "ddirc-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A small IRC server that runs inside ddIRC, on loopback, over TLS."
+
+[dependencies]
+# The wire format is already in the tree: the `irc` client crate is built on
+# `irc-proto`, so the server parses and writes exactly what the client does.
+# A second, hand-written parser would be a second thing to keep in step, and
+# the first disagreement between them would look like a protocol bug.
+irc-proto = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }
+tokio-util = { workspace = true, features = ["codec"] }
+# Only for the buffer bound in `session.rs`; already in the tree under the
+# framing this crate reuses.
+bytes = "1"
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+# "sink" is not on by default everywhere in this tree, and without it
+# `Framed::split` — the whole reason the reader and writer can be separate
+# tasks — is not in scope.
+futures-util = { workspace = true, features = ["sink"] }
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "test-util"] }
+# The real client, so the round-trip tests prove the thing that actually
+# matters: that a server issuing its own certificate is reachable from a client
+# that verifies certificates and has no bypass. Not a cycle — `ddirc-core` does
+# not depend on this crate.
+ddirc-core = { path = "../ddirc-core" }

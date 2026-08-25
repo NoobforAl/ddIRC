@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ddirc-core", "ddirc-cli", "ddirc-bridge"]
+members = ["ddirc-core", "ddirc-cli", "ddirc-bridge", "ddirc-server"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,6 +17,25 @@ thiserror = "2"
 # "proxy" feature but does not re-export it, and its Display strings on their
 # own do not say what to do about a proxy that will not carry a connection.
 tokio-socks = "0.5.1"
+# The local server's half of the protocol. Already in the tree underneath the
+# `irc` client crate, so depending on it directly adds nothing to the build.
+irc-proto = { version = "1.1.0", default-features = false, features = ["tokio"] }
+tokio-util = "0.7"
+# rustls and tokio-rustls arrive with the `irc` crate's "tls-rust" feature, so
+# the server side of TLS costs nothing new.
+#
+# The crypto provider must be the one the rest of the tree already uses, and it
+# is aws-lc-rs — tokio-rustls turns it on by default, and `irc` takes
+# tokio-rustls with its defaults. Naming a different one here would not give
+# this crate a second provider; Cargo unifies features, so it would switch
+# *both* on across the whole build, and rustls 0.23 answers "both" with a panic
+# at the first handshake rather than an error at build time. The client would
+# stop connecting to anything, for a change made only to the server.
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26" }
+# The one genuinely new dependency, and the only part of the local server that
+# was not already here. See `identity.rs` for why it is not hand-rolled.
+rcgen = "0.14"
 tracing = "0.1"
 flutter_rust_bridge = "=2.13.0"
 zeroize = { version = "1", features = ["derive"] }

@@ -3,37 +3,174 @@
 Ordered easiest first. Everything left carries either a new dependency, a
 per-platform decision, or an unanswered question.
 
-Two of the three remaining begin with research or a decision rather than code,
-which is worth knowing before picking one up.
+Both of those opening questions have now been answered — see items 1 and 2 —
+so what is left is code, plus one judgement call about a large dependency.
 
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
 ## 1. Built-in Tor — beta
 
-- **Ship Tor rather than expect it.** Research first: Arti is the Tor Project's
-  own Rust implementation, published as the `arti-client` crate, so this would
-  be a dependency rather than a bundled `tor` binary.
+- **Ship Tor rather than expect it.** ✅ **The research is done**; the decision
+  to adopt is deliberately not made. The numbers below are measured rather than
+  estimated.
 
-  Worth establishing during the research: whether Arti's embedded mode is
-  ready for a shipping client, what it adds to the binary size and startup
-  time, and how the licence interacts with app-store distribution.
+  Half of this already works, and is tested. Anyone running Tor themselves can
+  point the proxy setting at `127.0.0.1:9050` today — the form starts on that
+  port for exactly that reason — and `make dev-tor` brings up a real Tor for
+  exercising it. What is left is bundling it, so that using Tor does not first
+  require installing Tor.
 
-  Note that half of this already works, and is tested. Anyone running Tor
-  themselves can point the proxy setting at `127.0.0.1:9050` today — the form
-  starts on that port for exactly that reason — and `make dev-tor` brings up a
-  real Tor for exercising it. What is left is bundling it, so that using Tor
-  does not first require installing Tor.
+### What the research found
+
+Measured against `arti-client` **0.45.0**, built for `x86_64-pc-windows-msvc`
+with `opt-level = "z"`, LTO, `panic = "abort"` and stripping — the most
+favourable settings available, not a debug build.
+
+| | |
+|---|---|
+| **Binary size** | **+3.83 MB** against an identical binary carrying only tokio (0.21 MB to 4.04 MB) |
+| **Dependency tree** | **507 crates**, 36 of them `tor-*` |
+| **MSRV** | **1.91** — this workspace pins **1.82**, so adopting it moves that |
+| **Licence** | `MIT OR Apache-2.0` throughout, with nothing copyleft anywhere in the tree. The obligation is attribution, which the app stores are content with |
+| **Bootstrap time** | **Not established.** See below |
+
+Three integration costs that only appeared by building it, and would otherwise
+have been found the hard way:
+
+- **It does not link out of the box.** `arti-client` pulls `rusqlite` for its
+  directory cache, which by default expects a system `sqlite3` — on Windows
+  that surfaces as `LNK1181: cannot open input file 'sqlite3.lib'`. The answer
+  is the `static-sqlite` feature, which compiles SQLite from source and so
+  wants a C toolchain on *every* target, the Android and iOS ABIs included.
+- **It collides with our TLS.** Arti's `rustls` feature selects the `ring`
+  crypto provider; this tree is on `aws-lc-rs`, because `irc` takes
+  `tokio-rustls` with its defaults. Cargo unifies features, so enabling arti's
+  would turn *both* on, and rustls 0.23 answers "both" with a panic at the
+  first handshake rather than an error at build time — the client would stop
+  connecting to anything at all. One line fixes it, by installing a process
+  default provider at startup, but it has to be known about first.
+- **`zstd-sys` and `ring` bring their own C and assembly**, which is the same
+  cross-compilation surface a second time.
+
+### The question still open
+
+**Whether embedded Arti actually works is unanswered**, and this machine could
+not settle it. It reaches the Tor network — two completed channel handshakes
+with real relays, and a circuit built — and then never obtained a consensus, in
+runs of 5 and 25 minutes. Raw TCP to three of the four directory authorities
+succeeds from here, so a restricted egress path is the likelier explanation
+than an Arti fault, but that is not proof either way.
+
+**Nothing should adopt a 507-crate dependency on the strength of a bootstrap
+that has never been seen to finish.** The next step is one timed run on an
+unrestricted network. If it bootstraps in tens of seconds the case is strong;
+if it takes minutes, a client that reconnects at launch has a problem worth
+designing around, and the external proxy that already works looks better.
+
+### If it is adopted
+
+The seam already exists, which is why none of this is urgent. `resolveProxy` in
+`lib/src/model/proxy.dart` decides exactly one thing — which `ProxyConfig` a
+profile connects through. Built-in Tor is a fourth arm on that switch,
+resolving to whatever loopback port the embedded SOCKS listener bound. Nothing
+underneath it has to change.
 
 ## 2. A local IRC server — beta
 
-- **Run an IRC server inside the app**, so a user can host a small network
-  without a separate daemon.
+- **Run an IRC server inside the app.** ✅ **The scope question is settled and
+  the server is built**, in `irc-core/ddirc-server/`. ⛔ **Not reachable from
+  the app yet** — it has no FFI and no settings switch. See *What is left*.
 
-  Undecided: whether it listens beyond loopback, and if so what its TLS story
-  is. The client requires TLS with no bypass, so a local server that only
-  speaks plaintext would be unreachable from ddIRC itself — the same
-  constraint that shaped `dev/`.
+### The scope question, answered: loopback only
+
+Not a first step but a decision, for a reason that outlives the first version.
+
+Reaching this server from *another machine* means that machine's client has to
+be handed a trust anchor, because the certificate is issued locally and no
+public authority will ever vouch for it. Handing someone a certificate to
+install is precisely the control this codebase has refused to build:
+`extra_root_cert` is deliberately absent from the FFI type so that nothing a
+user can be talked into typing becomes a trusted root. A local server is not a
+good enough reason to open that door, and opening it for this would open it for
+everything after it.
+
+The duller half of the answer is just as real. A server other people can reach
+needs a routable address, a way through NAT, and a port nobody else has taken.
+An app cannot arrange any of those, and pretending otherwise ships a feature
+that works on the developer's machine.
+
+**There is a real answer for "reachable from elsewhere", and it is not a bigger
+listener**: publish it as an onion service, where the address is the key, NAT
+stops mattering, and Tor authenticates which service answered. That depends on
+item 1 — and `arti-client` carries an `onion-service-service` feature for
+exactly this. So the order the two want doing in is Tor first, this second.
+
+### The TLS story, answered: it issues its own, and that is not a bypass
+
+The client sets `use_tls` unconditionally and has no bypass, so a plaintext
+local server would be unreachable from the app it lives inside. It therefore
+speaks real TLS, which the client really verifies.
+
+What makes generating a certificate safe here, when trusting a supplied one
+would not be, is that **the app is both ends of the connection**: it issues the
+certificate and is the only thing that will ever be shown it. No certificate
+from outside the machine enters the trust store, the anchor is scoped to one
+loopback address the app itself chose, and the private key never leaves the
+machine.
+
+The shape is a **persisted CA and an ephemeral leaf**. The CA is written to the
+app's own private data directory, because the client's trust anchor has to
+survive a restart; the leaf is minted in memory at every start and written
+nowhere, so the key that actually terminates connections lives exactly as long
+as the server does.
+
+### What was built
+
+- Loopback only — `127.0.0.1` and `::1`, on the same port, so `localhost` works
+  whichever way it resolves. An ephemeral port by default, since nothing needs
+  the number in advance and a fixed one is a port something else may already be
+  holding.
+- Registration with `CAP` negotiation, `ISUPPORT`, a MOTD, `JOIN`/`PART`,
+  `PRIVMSG`/`NOTICE`, `NAMES`, `TOPIC`, nick changes, `PING`/`PONG` and `QUIT`.
+- One owner and no locks: a reader and a writer task per connection, and a
+  single task holding all the state. A server is almost entirely cross-client
+  operations — a join touches everyone in the channel, a rename everyone who
+  shares one — and doing that under per-client locks is how deadlocks and
+  half-applied state get in.
+- **The MOTD says it is beta**, because a MOTD is the one thing every client
+  shows on arrival, and whoever connected may not be whoever started it.
+
+**Two new crates, both pulled in by `rcgen`** — `yasna` and `time`. Everything
+else was already here: `irc-proto` is what the client itself is built on, so
+the server parses and writes exactly what the client does rather than carrying
+a second implementation to keep in step, and `rustls` and `tokio-rustls` arrive
+with the `irc` crate's `tls-rust`.
+
+`rcgen` is the one judgement call. X.509 could have been hand-rolled the way
+`media/` hand-rolls its containers, but the calculus is different: a container
+that is subtly wrong shows up as a file that will not open, whereas a
+certificate that is subtly wrong is fed to a verifier that has to accept it
+*and* has to keep refusing what it should refuse.
+
+**24 tests, none of them ignored.** The protocol ones drive the state directly
+with no socket in sight; four more start the real server and connect the real
+client to it over real TLS — including the guard that the same connection is
+*refused* without the anchor, so that if verification is ever weakened the
+suite says so instead of quietly proving nothing. Unlike `dev_server.rs` these
+need neither Docker nor a network, which means the client's own connection path
+is now exercised by an ordinary `cargo test`.
+
+### What is left
+
+1. **The FFI.** `ddirc-bridge` has to start and stop it, and hand back the port
+   and the anchor path. `extra_root_cert` stays off the Dart-visible type: the
+   bridge fills it in for this one profile, the way `dev_root_cert()` already
+   does for the dev server in debug builds.
+2. **The settings switch, carrying a beta label**, and a profile pointed at the
+   server so it can be reached without anyone typing an address.
+3. A `BetaBadge` in the settings vocabulary, since item 1 will want the same one
+   and two of them would drift.
 
 ## 3. Sending media — beta
 
