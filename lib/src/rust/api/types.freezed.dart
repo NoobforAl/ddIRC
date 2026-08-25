@@ -308,6 +308,419 @@ String toString() {
 
 
 /// @nodoc
+mixin _$CleanOutcome {
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'CleanOutcome()';
+}
+
+
+}
+
+/// @nodoc
+class $CleanOutcomeCopyWith<$Res>  {
+$CleanOutcomeCopyWith(CleanOutcome _, $Res Function(CleanOutcome) __);
+}
+
+
+/// Adds pattern-matching-related methods to [CleanOutcome].
+extension CleanOutcomePatterns on CleanOutcome {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( CleanOutcome_Cleaned value)?  cleaned,TResult Function( CleanOutcome_AlreadyClean value)?  alreadyClean,TResult Function( CleanOutcome_NotAnImage value)?  notAnImage,TResult Function( CleanOutcome_Malformed value)?  malformed,required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case CleanOutcome_Cleaned() when cleaned != null:
+return cleaned(_that);case CleanOutcome_AlreadyClean() when alreadyClean != null:
+return alreadyClean(_that);case CleanOutcome_NotAnImage() when notAnImage != null:
+return notAnImage(_that);case CleanOutcome_Malformed() when malformed != null:
+return malformed(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( CleanOutcome_Cleaned value)  cleaned,required TResult Function( CleanOutcome_AlreadyClean value)  alreadyClean,required TResult Function( CleanOutcome_NotAnImage value)  notAnImage,required TResult Function( CleanOutcome_Malformed value)  malformed,}){
+final _that = this;
+switch (_that) {
+case CleanOutcome_Cleaned():
+return cleaned(_that);case CleanOutcome_AlreadyClean():
+return alreadyClean(_that);case CleanOutcome_NotAnImage():
+return notAnImage(_that);case CleanOutcome_Malformed():
+return malformed(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( CleanOutcome_Cleaned value)?  cleaned,TResult? Function( CleanOutcome_AlreadyClean value)?  alreadyClean,TResult? Function( CleanOutcome_NotAnImage value)?  notAnImage,TResult? Function( CleanOutcome_Malformed value)?  malformed,}){
+final _that = this;
+switch (_that) {
+case CleanOutcome_Cleaned() when cleaned != null:
+return cleaned(_that);case CleanOutcome_AlreadyClean() when alreadyClean != null:
+return alreadyClean(_that);case CleanOutcome_NotAnImage() when notAnImage != null:
+return notAnImage(_that);case CleanOutcome_Malformed() when malformed != null:
+return malformed(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( Uint8List bytes,  String kind,  List<RemovedItem> removed)?  cleaned,TResult Function( String kind)?  alreadyClean,TResult Function()?  notAnImage,TResult Function( String detail)?  malformed,required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case CleanOutcome_Cleaned() when cleaned != null:
+return cleaned(_that.bytes,_that.kind,_that.removed);case CleanOutcome_AlreadyClean() when alreadyClean != null:
+return alreadyClean(_that.kind);case CleanOutcome_NotAnImage() when notAnImage != null:
+return notAnImage();case CleanOutcome_Malformed() when malformed != null:
+return malformed(_that.detail);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( Uint8List bytes,  String kind,  List<RemovedItem> removed)  cleaned,required TResult Function( String kind)  alreadyClean,required TResult Function()  notAnImage,required TResult Function( String detail)  malformed,}) {final _that = this;
+switch (_that) {
+case CleanOutcome_Cleaned():
+return cleaned(_that.bytes,_that.kind,_that.removed);case CleanOutcome_AlreadyClean():
+return alreadyClean(_that.kind);case CleanOutcome_NotAnImage():
+return notAnImage();case CleanOutcome_Malformed():
+return malformed(_that.detail);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( Uint8List bytes,  String kind,  List<RemovedItem> removed)?  cleaned,TResult? Function( String kind)?  alreadyClean,TResult? Function()?  notAnImage,TResult? Function( String detail)?  malformed,}) {final _that = this;
+switch (_that) {
+case CleanOutcome_Cleaned() when cleaned != null:
+return cleaned(_that.bytes,_that.kind,_that.removed);case CleanOutcome_AlreadyClean() when alreadyClean != null:
+return alreadyClean(_that.kind);case CleanOutcome_NotAnImage() when notAnImage != null:
+return notAnImage();case CleanOutcome_Malformed() when malformed != null:
+return malformed(_that.detail);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+
+
+class CleanOutcome_Cleaned extends CleanOutcome {
+  const CleanOutcome_Cleaned({required this.bytes, required this.kind, required final  List<RemovedItem> removed}): _removed = removed,super._();
+  
+
+ final  Uint8List bytes;
+/// `"JPEG"`, `"PNG"`, `"GIF"` or `"WebP"`.
+ final  String kind;
+ final  List<RemovedItem> _removed;
+ List<RemovedItem> get removed {
+  if (_removed is EqualUnmodifiableListView) return _removed;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_removed);
+}
+
+
+/// Create a copy of CleanOutcome
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CleanOutcome_CleanedCopyWith<CleanOutcome_Cleaned> get copyWith => _$CleanOutcome_CleanedCopyWithImpl<CleanOutcome_Cleaned>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_Cleaned&&const DeepCollectionEquality().equals(other.bytes, bytes)&&(identical(other.kind, kind) || other.kind == kind)&&const DeepCollectionEquality().equals(other._removed, _removed));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(bytes),kind,const DeepCollectionEquality().hash(_removed));
+
+@override
+String toString() {
+  return 'CleanOutcome.cleaned(bytes: $bytes, kind: $kind, removed: $removed)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CleanOutcome_CleanedCopyWith<$Res> implements $CleanOutcomeCopyWith<$Res> {
+  factory $CleanOutcome_CleanedCopyWith(CleanOutcome_Cleaned value, $Res Function(CleanOutcome_Cleaned) _then) = _$CleanOutcome_CleanedCopyWithImpl;
+@useResult
+$Res call({
+ Uint8List bytes, String kind, List<RemovedItem> removed
+});
+
+
+
+
+}
+/// @nodoc
+class _$CleanOutcome_CleanedCopyWithImpl<$Res>
+    implements $CleanOutcome_CleanedCopyWith<$Res> {
+  _$CleanOutcome_CleanedCopyWithImpl(this._self, this._then);
+
+  final CleanOutcome_Cleaned _self;
+  final $Res Function(CleanOutcome_Cleaned) _then;
+
+/// Create a copy of CleanOutcome
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? bytes = null,Object? kind = null,Object? removed = null,}) {
+  return _then(CleanOutcome_Cleaned(
+bytes: null == bytes ? _self.bytes : bytes // ignore: cast_nullable_to_non_nullable
+as Uint8List,kind: null == kind ? _self.kind : kind // ignore: cast_nullable_to_non_nullable
+as String,removed: null == removed ? _self._removed : removed // ignore: cast_nullable_to_non_nullable
+as List<RemovedItem>,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class CleanOutcome_AlreadyClean extends CleanOutcome {
+  const CleanOutcome_AlreadyClean({required this.kind}): super._();
+  
+
+ final  String kind;
+
+/// Create a copy of CleanOutcome
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CleanOutcome_AlreadyCleanCopyWith<CleanOutcome_AlreadyClean> get copyWith => _$CleanOutcome_AlreadyCleanCopyWithImpl<CleanOutcome_AlreadyClean>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_AlreadyClean&&(identical(other.kind, kind) || other.kind == kind));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,kind);
+
+@override
+String toString() {
+  return 'CleanOutcome.alreadyClean(kind: $kind)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CleanOutcome_AlreadyCleanCopyWith<$Res> implements $CleanOutcomeCopyWith<$Res> {
+  factory $CleanOutcome_AlreadyCleanCopyWith(CleanOutcome_AlreadyClean value, $Res Function(CleanOutcome_AlreadyClean) _then) = _$CleanOutcome_AlreadyCleanCopyWithImpl;
+@useResult
+$Res call({
+ String kind
+});
+
+
+
+
+}
+/// @nodoc
+class _$CleanOutcome_AlreadyCleanCopyWithImpl<$Res>
+    implements $CleanOutcome_AlreadyCleanCopyWith<$Res> {
+  _$CleanOutcome_AlreadyCleanCopyWithImpl(this._self, this._then);
+
+  final CleanOutcome_AlreadyClean _self;
+  final $Res Function(CleanOutcome_AlreadyClean) _then;
+
+/// Create a copy of CleanOutcome
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? kind = null,}) {
+  return _then(CleanOutcome_AlreadyClean(
+kind: null == kind ? _self.kind : kind // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class CleanOutcome_NotAnImage extends CleanOutcome {
+  const CleanOutcome_NotAnImage(): super._();
+  
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_NotAnImage);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+  return 'CleanOutcome.notAnImage()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class CleanOutcome_Malformed extends CleanOutcome {
+  const CleanOutcome_Malformed({required this.detail}): super._();
+  
+
+ final  String detail;
+
+/// Create a copy of CleanOutcome
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CleanOutcome_MalformedCopyWith<CleanOutcome_Malformed> get copyWith => _$CleanOutcome_MalformedCopyWithImpl<CleanOutcome_Malformed>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_Malformed&&(identical(other.detail, detail) || other.detail == detail));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,detail);
+
+@override
+String toString() {
+  return 'CleanOutcome.malformed(detail: $detail)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CleanOutcome_MalformedCopyWith<$Res> implements $CleanOutcomeCopyWith<$Res> {
+  factory $CleanOutcome_MalformedCopyWith(CleanOutcome_Malformed value, $Res Function(CleanOutcome_Malformed) _then) = _$CleanOutcome_MalformedCopyWithImpl;
+@useResult
+$Res call({
+ String detail
+});
+
+
+
+
+}
+/// @nodoc
+class _$CleanOutcome_MalformedCopyWithImpl<$Res>
+    implements $CleanOutcome_MalformedCopyWith<$Res> {
+  _$CleanOutcome_MalformedCopyWithImpl(this._self, this._then);
+
+  final CleanOutcome_Malformed _self;
+  final $Res Function(CleanOutcome_Malformed) _then;
+
+/// Create a copy of CleanOutcome
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? detail = null,}) {
+  return _then(CleanOutcome_Malformed(
+detail: null == detail ? _self.detail : detail // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
 mixin _$ConnectionStatus {
 
 

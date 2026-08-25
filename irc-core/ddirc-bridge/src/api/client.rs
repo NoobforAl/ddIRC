@@ -18,7 +18,7 @@ use flutter_rust_bridge::frb;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-use crate::api::types::{IrcEvent, ServerConfig};
+use crate::api::types::{CleanOutcome, IrcEvent, ServerConfig};
 use crate::frb_generated::StreamSink;
 
 /// The runtime the connection actors live on.
@@ -231,6 +231,24 @@ pub fn disconnect(id: u64, reason: Option<String>) -> Result<(), String> {
         .handle
         .try_send(ClientCommand::Disconnect { reason });
     Ok(())
+}
+
+/// Remove everything an image carries beyond the picture.
+///
+/// EXIF, XMP, IPTC, text chunks, comments, embedded thumbnails and timestamps,
+/// from JPEG, PNG, GIF and WebP. The container is rewritten and the image data
+/// copied across untouched, so the pixels are byte-identical — nothing is lost
+/// to a re-compress.
+///
+/// Not a `Result`: a file that is not an image is not a failure, only a file
+/// nothing was removed from, and the caller may still want to send it. See
+/// [`CleanOutcome`].
+///
+/// Synchronous, and on a worker thread rather than the UI isolate, because it
+/// walks the whole file. A large photograph is a few milliseconds; a 128 MB
+/// file is not, and blocking the interface for it would be visible.
+pub fn clean_media(bytes: Vec<u8>) -> CleanOutcome {
+    ddirc_core::media::strip(&bytes).into()
 }
 
 /// The default port for IRC over TLS, so Dart does not hardcode it.

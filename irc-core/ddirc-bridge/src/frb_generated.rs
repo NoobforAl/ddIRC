@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1156223057;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1543871273;
 
 // Section: executor
 
@@ -47,6 +47,39 @@ flutter_rust_bridge::frb_generated_default_handler!();
 
 // Section: wire_funcs
 
+fn wire__crate__api__client__clean_media_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "clean_media",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_bytes = <Vec<u8>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Ok::<_, ()>(crate::api::client::clean_media(api_bytes))?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__client__connect_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -567,6 +600,40 @@ impl SseDecode for crate::api::types::ChatMessage {
     }
 }
 
+impl SseDecode for crate::api::types::CleanOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut tag_ = <i32>::sse_decode(deserializer);
+        match tag_ {
+            0 => {
+                let mut var_bytes = <Vec<u8>>::sse_decode(deserializer);
+                let mut var_kind = <String>::sse_decode(deserializer);
+                let mut var_removed =
+                    <Vec<crate::api::types::RemovedItem>>::sse_decode(deserializer);
+                return crate::api::types::CleanOutcome::Cleaned {
+                    bytes: var_bytes,
+                    kind: var_kind,
+                    removed: var_removed,
+                };
+            }
+            1 => {
+                let mut var_kind = <String>::sse_decode(deserializer);
+                return crate::api::types::CleanOutcome::AlreadyClean { kind: var_kind };
+            }
+            2 => {
+                return crate::api::types::CleanOutcome::NotAnImage;
+            }
+            3 => {
+                let mut var_detail = <String>::sse_decode(deserializer);
+                return crate::api::types::CleanOutcome::Malformed { detail: var_detail };
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+
 impl SseDecode for crate::api::types::ConnectionStatus {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -767,6 +834,18 @@ impl SseDecode for Vec<u8> {
     }
 }
 
+impl SseDecode for Vec<crate::api::types::RemovedItem> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::types::RemovedItem>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::types::TextSpan> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -838,6 +917,18 @@ impl SseDecode for crate::api::types::ProxyConfig {
             port: var_port,
             username: var_username,
             password: var_password,
+        };
+    }
+}
+
+impl SseDecode for crate::api::types::RemovedItem {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_what = <String>::sse_decode(deserializer);
+        let mut var_bytes = <u64>::sse_decode(deserializer);
+        return crate::api::types::RemovedItem {
+            what: var_what,
+            bytes: var_bytes,
         };
     }
 }
@@ -979,17 +1070,18 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        1 => wire__crate__api__client__connect_impl(port, ptr, rust_vec_len, data_len),
-        3 => wire__crate__api__client__disconnect_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__crate__api__client__event_stream_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__init_app_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__client__join_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__client__part_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__client__reconnect_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__client__send_action_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__client__send_message_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__client__set_nick_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__client__set_topic_impl(port, ptr, rust_vec_len, data_len),
+        1 => wire__crate__api__client__clean_media_impl(port, ptr, rust_vec_len, data_len),
+        2 => wire__crate__api__client__connect_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__client__disconnect_impl(port, ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__client__event_stream_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__init_app_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__client__join_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__client__part_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__client__reconnect_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__client__send_action_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__client__send_message_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__client__set_nick_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__client__set_topic_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1002,8 +1094,8 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        2 => wire__crate__api__client__default_tls_port_impl(ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__client__tor_socks_port_impl(ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__client__default_tls_port_impl(ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__client__tor_socks_port_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1060,6 +1152,45 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::ChatMessage>
     for crate::api::types::ChatMessage
 {
     fn into_into_dart(self) -> crate::api::types::ChatMessage {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::types::CleanOutcome {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            crate::api::types::CleanOutcome::Cleaned {
+                bytes,
+                kind,
+                removed,
+            } => [
+                0.into_dart(),
+                bytes.into_into_dart().into_dart(),
+                kind.into_into_dart().into_dart(),
+                removed.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::types::CleanOutcome::AlreadyClean { kind } => {
+                [1.into_dart(), kind.into_into_dart().into_dart()].into_dart()
+            }
+            crate::api::types::CleanOutcome::NotAnImage => [2.into_dart()].into_dart(),
+            crate::api::types::CleanOutcome::Malformed { detail } => {
+                [3.into_dart(), detail.into_into_dart().into_dart()].into_dart()
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::types::CleanOutcome
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::types::CleanOutcome>
+    for crate::api::types::CleanOutcome
+{
+    fn into_into_dart(self) -> crate::api::types::CleanOutcome {
         self
     }
 }
@@ -1269,6 +1400,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::ProxyConfig>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::types::RemovedItem {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.what.into_into_dart().into_dart(),
+            self.bytes.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::types::RemovedItem
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::types::RemovedItem>
+    for crate::api::types::RemovedItem
+{
+    fn into_into_dart(self) -> crate::api::types::RemovedItem {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::types::ServerConfig {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -1426,6 +1578,38 @@ impl SseEncode for crate::api::types::ChatMessage {
         <bool>::sse_encode(self.is_mention, serializer);
         <bool>::sse_encode(self.is_action, serializer);
         <bool>::sse_encode(self.is_notice, serializer);
+    }
+}
+
+impl SseEncode for crate::api::types::CleanOutcome {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        match self {
+            crate::api::types::CleanOutcome::Cleaned {
+                bytes,
+                kind,
+                removed,
+            } => {
+                <i32>::sse_encode(0, serializer);
+                <Vec<u8>>::sse_encode(bytes, serializer);
+                <String>::sse_encode(kind, serializer);
+                <Vec<crate::api::types::RemovedItem>>::sse_encode(removed, serializer);
+            }
+            crate::api::types::CleanOutcome::AlreadyClean { kind } => {
+                <i32>::sse_encode(1, serializer);
+                <String>::sse_encode(kind, serializer);
+            }
+            crate::api::types::CleanOutcome::NotAnImage => {
+                <i32>::sse_encode(2, serializer);
+            }
+            crate::api::types::CleanOutcome::Malformed { detail } => {
+                <i32>::sse_encode(3, serializer);
+                <String>::sse_encode(detail, serializer);
+            }
+            _ => {
+                unimplemented!("");
+            }
+        }
     }
 }
 
@@ -1603,6 +1787,16 @@ impl SseEncode for Vec<u8> {
     }
 }
 
+impl SseEncode for Vec<crate::api::types::RemovedItem> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::types::RemovedItem>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::types::TextSpan> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1659,6 +1853,14 @@ impl SseEncode for crate::api::types::ProxyConfig {
         <u16>::sse_encode(self.port, serializer);
         <Option<String>>::sse_encode(self.username, serializer);
         <Option<String>>::sse_encode(self.password, serializer);
+    }
+}
+
+impl SseEncode for crate::api::types::RemovedItem {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.what, serializer);
+        <u64>::sse_encode(self.bytes, serializer);
     }
 }
 

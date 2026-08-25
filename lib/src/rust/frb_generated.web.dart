@@ -58,6 +58,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ChatMessage dco_decode_chat_message(dynamic raw);
 
   @protected
+  CleanOutcome dco_decode_clean_outcome(dynamic raw);
+
+  @protected
   ConnectionStatus dco_decode_connection_status(dynamic raw);
 
   @protected
@@ -70,7 +73,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MemberView> dco_decode_list_member_view(dynamic raw);
 
   @protected
+  List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<RemovedItem> dco_decode_list_removed_item(dynamic raw);
 
   @protected
   List<TextSpan> dco_decode_list_text_span(dynamic raw);
@@ -89,6 +98,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProxyConfig dco_decode_proxy_config(dynamic raw);
+
+  @protected
+  RemovedItem dco_decode_removed_item(dynamic raw);
 
   @protected
   ServerConfig dco_decode_server_config(dynamic raw);
@@ -160,6 +172,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ChatMessage sse_decode_chat_message(SseDeserializer deserializer);
 
   @protected
+  CleanOutcome sse_decode_clean_outcome(SseDeserializer deserializer);
+
+  @protected
   ConnectionStatus sse_decode_connection_status(SseDeserializer deserializer);
 
   @protected
@@ -172,7 +187,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MemberView> sse_decode_list_member_view(SseDeserializer deserializer);
 
   @protected
+  List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<RemovedItem> sse_decode_list_removed_item(SseDeserializer deserializer);
 
   @protected
   List<TextSpan> sse_decode_list_text_span(SseDeserializer deserializer);
@@ -193,6 +214,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProxyConfig sse_decode_proxy_config(SseDeserializer deserializer);
+
+  @protected
+  RemovedItem sse_decode_removed_item(SseDeserializer deserializer);
 
   @protected
   ServerConfig sse_decode_server_config(SseDeserializer deserializer);
@@ -282,6 +306,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_chat_message(ChatMessage self, SseSerializer serializer);
 
   @protected
+  void sse_encode_clean_outcome(CleanOutcome self, SseSerializer serializer);
+
+  @protected
   void sse_encode_connection_status(
     ConnectionStatus self,
     SseSerializer serializer,
@@ -300,8 +327,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_removed_item(
+    List<RemovedItem> self,
     SseSerializer serializer,
   );
 
@@ -325,6 +361,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_proxy_config(ProxyConfig self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_removed_item(RemovedItem self, SseSerializer serializer);
 
   @protected
   void sse_encode_server_config(ServerConfig self, SseSerializer serializer);

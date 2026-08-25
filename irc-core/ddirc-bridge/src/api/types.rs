@@ -6,6 +6,7 @@
 //! tuned for Dart ergonomics without disturbing the core.
 
 use ddirc_core::api::{events, types};
+use ddirc_core::media;
 use ddirc_core::text::format;
 
 /// Styling for a run of message text.
@@ -419,5 +420,152 @@ impl From<ProxyConfig> for types::ProxyConfig {
                 .filter(|v| !v.is_empty())
                 .map(zeroize::Zeroizing::new),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Removing metadata from an outgoing file.
+// ---------------------------------------------------------------------------
+
+/// One thing taken out of a file.
+#[derive(Debug, Clone)]
+pub struct RemovedItem {
+    /// What it was: `"EXIF"`, `"XMP"`, `"comment"`, and so on.
+    pub what: String,
+    pub bytes: u64,
+}
+
+/// What happened when a file was cleaned.
+///
+/// Four outcomes rather than a `Result`, because the caller has a different
+/// decision to make in each: only one of them produces new bytes, and only one
+/// of them is a reason to stop.
+#[derive(Debug, Clone)]
+pub enum CleanOutcome {
+    /// Metadata was found and removed. `bytes` is the file to send.
+    Cleaned {
+        bytes: Vec<u8>,
+        /// `"JPEG"`, `"PNG"`, `"GIF"` or `"WebP"`.
+        kind: String,
+        removed: Vec<RemovedItem>,
+    },
+    /// A supported image that had nothing to remove — a screenshot, usually.
+    ///
+    /// Deliberately not `Cleaned` with an empty list: the honest thing to tell
+    /// someone is "there was nothing in it", not "it has been cleaned", which
+    /// sounds like work was done and invites trust in the wrong place. The
+    /// original bytes are unchanged, so none are sent back across the bridge.
+    AlreadyClean { kind: String },
+    /// Not an image this can rewrite. Not an error: the caller may still want
+    /// to send it, and now knows it was not cleaned.
+    NotAnImage,
+    /// A supported format that did not parse. Worth separating from
+    /// `NotAnImage`, because this one probably means a damaged file.
+    Malformed { detail: String },
+}
+
+/// Remove everything an image carries beyond the picture.
+///
+/// Rewrites the container; the image data is copied across untouched, so the
+/// pixels are byte-identical and nothing is lost to a re-compress.
+impl From<Result<media::Stripped, media::StripError>> for CleanOutcome {
+    fn from(result: Result<media::Stripped, media::StripError>) -> Self {
+        match result {
+            Ok(stripped) if stripped.was_already_clean() => Self::AlreadyClean {
+                kind: stripped.kind.as_str().to_owned(),
+            },
+            Ok(stripped) => Self::Cleaned {
+                kind: stripped.kind.as_str().to_owned(),
+                removed: stripped
+                    .removed
+                    .iter()
+                    .map(|r| RemovedItem {
+                        what: r.what.to_owned(),
+                        bytes: r.bytes as u64,
+                    })
+                    .collect(),
+                bytes: stripped.bytes,
+            },
+            Err(media::StripError::Unsupported | media::StripError::Empty) => Self::NotAnImage,
+            Err(e) => Self::Malformed {
+                detail: e.to_string(),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-pixel PNG carrying a text chunk, built by hand.
+    fn png(with_text: bool) -> Vec<u8> {
+        fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+            let mut out = (data.len() as u32).to_be_bytes().to_vec();
+            out.extend_from_slice(kind);
+            out.extend_from_slice(data);
+            out.extend_from_slice(&[0; 4]);
+            out
+        }
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        out.extend_from_slice(&chunk(b"IHDR", &[0; 13]));
+        if with_text {
+            out.extend_from_slice(&chunk(b"tEXt", b"Software\0Private Editor"));
+        }
+        out.extend_from_slice(&chunk(b"IDAT", b"px"));
+        out.extend_from_slice(&chunk(b"IEND", b""));
+        out
+    }
+
+    #[test]
+    fn a_file_with_metadata_comes_back_cleaned_and_says_what_went() {
+        let outcome = CleanOutcome::from(media::strip(&png(true)));
+        let CleanOutcome::Cleaned {
+            bytes,
+            kind,
+            removed,
+        } = outcome
+        else {
+            panic!("expected Cleaned, got {outcome:?}");
+        };
+        assert_eq!(kind, "PNG");
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].what, "text");
+        assert!(removed[0].bytes > 0);
+        assert!(!bytes.windows(7).any(|w| w == b"Private"));
+    }
+
+    #[test]
+    fn a_file_with_nothing_in_it_is_not_reported_as_cleaned() {
+        // "Cleaned, removed nothing" sounds like work was done. "There was
+        // nothing in it" is what actually happened, and the two invite very
+        // different amounts of trust.
+        let outcome = CleanOutcome::from(media::strip(&png(false)));
+        assert!(
+            matches!(outcome, CleanOutcome::AlreadyClean { ref kind } if kind == "PNG"),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn something_that_is_not_an_image_is_not_an_error() {
+        // The caller may still want to send it. It just has to know that
+        // nothing was removed from it.
+        for not_an_image in [&b"%PDF-1.7"[..], &b""[..], &b"hello"[..]] {
+            let outcome = CleanOutcome::from(media::strip(not_an_image));
+            assert!(matches!(outcome, CleanOutcome::NotAnImage), "{outcome:?}");
+        }
+    }
+
+    #[test]
+    fn a_damaged_image_is_told_apart_from_a_non_image() {
+        // This one probably means a truncated download rather than a file
+        // picked by mistake, and the user can act on the difference.
+        let truncated = &png(true)[..20];
+        let outcome = CleanOutcome::from(media::strip(truncated));
+        assert!(
+            matches!(outcome, CleanOutcome::Malformed { .. }),
+            "{outcome:?}"
+        );
     }
 }

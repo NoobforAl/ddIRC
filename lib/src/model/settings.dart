@@ -54,6 +54,7 @@ class AppSettings extends ChangeNotifier {
   static const _kColors = 'ui.mircColors';
   static const _kChatLog = 'log.chat';
   static const _kDebugLog = 'log.debug';
+  static const _kStripMetadata = 'send.stripMetadata';
   static const _kNotifyPrefix = 'notify.';
 
   final SharedPreferences? _prefs;
@@ -68,6 +69,14 @@ class AppSettings extends ChangeNotifier {
   /// anyone who is not chasing a bug.
   bool _saveChatLogs = false;
   bool _saveDebugLogs = false;
+
+  /// On, unlike everything else here that touches privacy.
+  ///
+  /// The other switches decide whether to *keep* something the user already
+  /// has. This one decides whether to hand a stranger the coordinates of the
+  /// room a photograph was taken in, and a default that has to be found before
+  /// it protects anyone is not a protection.
+  bool _stripImageMetadata = true;
   Density _density = Density.comfortable;
   ThemeMode _themeMode = ThemeMode.dark;
   final Map<String, NotifyLevel> _notify = {};
@@ -98,6 +107,7 @@ class AppSettings extends ChangeNotifier {
     _renderColors = prefs.getBool(_kColors) ?? _renderColors;
     _saveChatLogs = prefs.getBool(_kChatLog) ?? _saveChatLogs;
     _saveDebugLogs = prefs.getBool(_kDebugLog) ?? _saveDebugLogs;
+    _stripImageMetadata = prefs.getBool(_kStripMetadata) ?? _stripImageMetadata;
     _density = Density.values.firstWhere(
       (d) => d.name == prefs.getString(_kDensity),
       orElse: () => _density,
@@ -122,6 +132,7 @@ class AppSettings extends ChangeNotifier {
   bool get renderColors => _renderColors;
   bool get saveChatLogs => _saveChatLogs;
   bool get saveDebugLogs => _saveDebugLogs;
+  bool get stripImageMetadata => _stripImageMetadata;
   Density get density => _density;
   ThemeMode get themeMode => _themeMode;
 
@@ -147,6 +158,10 @@ class AppSettings extends ChangeNotifier {
 
   set saveDebugLogs(bool value) => _set(_kDebugLog, value, () {
     _saveDebugLogs = value;
+  });
+
+  set stripImageMetadata(bool value) => _set(_kStripMetadata, value, () {
+    _stripImageMetadata = value;
   });
 
   set density(Density value) => _set(_kDensity, value.name, () {

@@ -215,8 +215,23 @@ otherwise have to be made again.
 
 ### Strip metadata before sending
 
-- ✅ **The stripping itself.** ⛔ **Wiring it to a send path** — blocked with
-  the rest of *Sending media*, because there is nothing to send with yet.
+- ✅ **The stripping, and everything up to the send path.** ⛔ **The send path
+  itself** — blocked with the rest of *Sending media*.
+
+  Reachable from the app now: `clean_media` across the FFI, `MediaCleaner` in
+  Dart, and a setting that is **on by default** — the only privacy switch here
+  that is, because the others decide whether to keep something the user already
+  has and this one decides whether a stranger gets the coordinates of a room.
+
+  Four outcomes rather than a boolean, because the caller has a different
+  decision in each: cleaned, already clean, not an image, damaged. A file
+  nothing could be removed from is sent anyway and says so — refusing to send a
+  document because it is not a JPEG would answer a question nobody asked — but
+  it is flagged, because that is the case where the protection quietly did not
+  apply.
+
+  No settings switch yet, deliberately. A control that says "before sending"
+  in an app that cannot send images would promise something that is not there.
 
   `media/` removes EXIF, XMP, IPTC/Photoshop blocks, text chunks, comments,
   embedded thumbnails and timestamps from JPEG, PNG, GIF and WebP, and reports

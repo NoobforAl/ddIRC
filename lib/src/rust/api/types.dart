@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -74,6 +74,38 @@ class ChatMessage {
           isMention == other.isMention &&
           isAction == other.isAction &&
           isNotice == other.isNotice;
+}
+
+@freezed
+sealed class CleanOutcome with _$CleanOutcome {
+  const CleanOutcome._();
+
+  /// Metadata was found and removed. `bytes` is the file to send.
+  const factory CleanOutcome.cleaned({
+    required Uint8List bytes,
+
+    /// `"JPEG"`, `"PNG"`, `"GIF"` or `"WebP"`.
+    required String kind,
+    required List<RemovedItem> removed,
+  }) = CleanOutcome_Cleaned;
+
+  /// A supported image that had nothing to remove — a screenshot, usually.
+  ///
+  /// Deliberately not `Cleaned` with an empty list: the honest thing to tell
+  /// someone is "there was nothing in it", not "it has been cleaned", which
+  /// sounds like work was done and invites trust in the wrong place. The
+  /// original bytes are unchanged, so none are sent back across the bridge.
+  const factory CleanOutcome.alreadyClean({required String kind}) =
+      CleanOutcome_AlreadyClean;
+
+  /// Not an image this can rewrite. Not an error: the caller may still want
+  /// to send it, and now knows it was not cleaned.
+  const factory CleanOutcome.notAnImage() = CleanOutcome_NotAnImage;
+
+  /// A supported format that did not parse. Worth separating from
+  /// `NotAnImage`, because this one probably means a damaged file.
+  const factory CleanOutcome.malformed({required String detail}) =
+      CleanOutcome_Malformed;
 }
 
 @freezed
@@ -217,6 +249,26 @@ class ProxyConfig {
           port == other.port &&
           username == other.username &&
           password == other.password;
+}
+
+/// One thing taken out of a file.
+class RemovedItem {
+  /// What it was: `"EXIF"`, `"XMP"`, `"comment"`, and so on.
+  final String what;
+  final BigInt bytes;
+
+  const RemovedItem({required this.what, required this.bytes});
+
+  @override
+  int get hashCode => what.hashCode ^ bytes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RemovedItem &&
+          runtimeType == other.runtimeType &&
+          what == other.what &&
+          bytes == other.bytes;
 }
 
 /// How to reach a server.
