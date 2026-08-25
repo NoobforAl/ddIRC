@@ -99,7 +99,7 @@ you straight in. Passwords have a minimum length; short ones come back as
 
 ### From ddIRC itself
 
-**It will not connect out of the box, and that is deliberate.**
+**A release build will not connect, and that is deliberate.**
 
 The client verifies certificates and has no "trust this one" setting. The
 `extra_root_cert` field exists only on the core's `ServerConfig`; the FFI
@@ -108,7 +108,11 @@ ever reaches it. A self-signed server is refused, which is the whole point —
 a "just skip verification for testing" switch would be a
 verification-skipping path sitting in the shipped client.
 
-Three ways round it, cheapest first.
+A **debug** build has one narrow exception, described in option 2 below. It
+adds a root; it does not skip verification, and it does not exist in a release
+binary at all.
+
+Four ways round it, cheapest first.
 
 **1. Test the UI against a real network.** For looking at the interface —
 unread badges, the connecting pulse, the channel list, mIRC colours — any
@@ -121,10 +125,48 @@ irc.libera.chat:6697
 It costs nothing and touches no trust settings. If you are testing the
 *interface* rather than the connection, stop here.
 
-**2. Launch the app with `SSL_CERT_FILE` pointing at the certificate.** This is
-the one to use for the dev server. `rustls-native-certs` reads that variable in
-place of the platform's store, so the trust change lives and dies with the
-process — nothing is installed, and a normal launch is unaffected.
+**2. Set `DDIRC_DEV_CA` — debug builds only.** This is the one to use for the
+dev server. The bridge reads it in `connect` and passes it as
+`extra_root_cert`, which **adds** this certificate to the platform's roots for
+that connection.
+
+```powershell
+$env:DDIRC_DEV_CA = "$PWD\dev\ergo\fullchain.pem"
+.\build\windows\x64\runner\Debug\ddirc.exe
+```
+
+```bash
+DDIRC_DEV_CA="$PWD/dev/ergo/fullchain.pem" \
+  ./build/windows/x64/runner/Debug/ddirc.exe
+```
+
+Then add a network with address `localhost` and port `6697` — **address only,
+no port in that box**; the port has its own field. The app prints
+`ddIRC [debug]: trusting extra root certificate from …` on stderr when it
+takes effect, so this is never silently on.
+
+Because it *adds* a root rather than replacing the set, Libera and the dev
+server both work in the same run — which is the practical advantage over
+option 3.
+
+The whole path is behind `#[cfg(debug_assertions)]`, so it is compiled out of
+a release build rather than merely unreachable in one. If you want to confirm
+that rather than take it on faith:
+
+```bash
+cargo build --release --manifest-path irc-core/Cargo.toml -p ddirc_bridge
+grep -c DDIRC_DEV_CA irc-core/target/release/ddirc_bridge.dll   # 0
+grep -c DDIRC_DEV_CA irc-core/target/debug/ddirc_bridge.dll     # 1
+```
+
+A path that is set but missing is *not* quietly ignored: `validate` refuses it
+by name, because silently falling back to the platform roots looks exactly
+like the dev server being broken.
+
+**3. Launch the app with `SSL_CERT_FILE` pointing at the certificate.** Works
+in a release build too. `rustls-native-certs` reads that variable in place of
+the platform's store, so the trust change lives and dies with the process —
+nothing is installed, and a normal launch is unaffected.
 
 ```powershell
 $env:SSL_CERT_FILE = "$PWD\dev\ergo\fullchain.pem"
@@ -145,7 +187,7 @@ different, smaller list of roots. Note the flip side — while the variable is
 set the app trusts *only* that certificate, so a public network will not
 connect in the same run.
 
-**3. Trust the certificate on this machine.** The core builds its trust store
+**4. Trust the certificate on this machine.** The core builds its trust store
 from `webpki-roots` plus the platform's own store, so once Windows trusts this
 certificate, ddIRC connects to `localhost:6697` with verification fully on.
 Nothing in the client is weakened; the operating system simply now agrees that

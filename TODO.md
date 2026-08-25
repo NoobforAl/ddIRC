@@ -13,7 +13,8 @@
 - ✅ Create an app icon.
 - ✅ Add build configuration for the other platforms: Linux, macOS and iOS.
   (Scaffolded and configured; none of the three has been built yet - no host.)
-- Give the core a reconnect command, so "Retry now" can wake the backoff
+- ✅ Give the core a reconnect command, so "Retry now" can wake the backoff
   instead of tearing the connection down and losing the scrollback.
-- Let the app reach the dev server without trusting its certificate
-  machine-wide (today: launch with SSL_CERT_FILE set; see dev/README.md).
+- ✅ Let the app reach the dev server without trusting its certificate
+  machine-wide. (DDIRC_DEV_CA, debug builds only — it *adds* a root rather
+  than skipping verification, and is compiled out of release. See dev/README.md.)

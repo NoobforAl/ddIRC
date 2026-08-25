@@ -918,8 +918,10 @@ class _RetryNowState extends State<_RetryNow>
   }
 
   void _tap() {
-    // The icon turns on press. Reconnecting tears the session down and builds
-    // a new one, so without this the only feedback is the screen blinking.
+    // The icon turns on press, and now it is the *only* acknowledgement: the
+    // core wakes the connection it was already counting down on, so the
+    // scrollback stays exactly where it was and nothing else on screen moves
+    // until the status line changes to "connecting".
     if (!context.motion.disabled) _turn.forward(from: 0);
     widget.onTap();
   }

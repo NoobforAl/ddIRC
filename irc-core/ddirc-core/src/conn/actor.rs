@@ -63,6 +63,19 @@ pub enum ClientCommand {
         channel: String,
         topic: String,
     },
+    /// Stop waiting out the backoff and attempt the next connection now.
+    ///
+    /// Only meaningful while reconnecting; ignored at any other time, which is
+    /// what makes it safe to fire from a button the user may hit just as the
+    /// connection comes back on its own.
+    ///
+    /// Deliberately *not* a reset of the backoff. The delay measures how
+    /// unhealthy the server has been, and an impatient click does not make it
+    /// healthier — skipping the remaining wait is what was asked for, and
+    /// pretending the earlier failures never happened is not. When the attempt
+    /// does succeed the backoff resets on registration anyway, so nothing is
+    /// lost by keeping it.
+    Reconnect,
     /// Disconnect and stop reconnecting.
     Disconnect {
         reason: Option<String>,
@@ -227,15 +240,24 @@ impl Actor {
                 Some(reason),
             );
 
-            // Stay responsive to a disconnect request while waiting.
-            tokio::select! {
-                () = sleep(delay) => {}
-                command = commands.recv() => {
-                    match command {
+            // Stay responsive while waiting out the backoff. Exactly two
+            // things end the wait early: giving up, and being told to hurry.
+            //
+            // The loop matters. Without it any other command — a message typed
+            // while offline — fell out of the `select!` and dropped straight
+            // into the next connection attempt, skipping the rest of the delay
+            // that the backoff exists to impose.
+            let wake = sleep(delay);
+            tokio::pin!(wake);
+            loop {
+                tokio::select! {
+                    () = &mut wake => break,
+                    command = commands.recv() => match command {
                         Some(ClientCommand::Disconnect { .. }) | None => {
                             self.status(ConnectionStatus::Disconnected, None);
                             return;
                         }
+                        Some(ClientCommand::Reconnect) => break,
                         // Commands issued while offline have nowhere to go.
                         Some(_) => {}
                     }
@@ -443,6 +465,10 @@ impl Actor {
                 let bounded = truncate(flattened.trim(), limits::MAX_TOPIC);
                 outgoing.push_back(Irc::TOPIC(channel, Some(bounded)));
             }
+            // Nothing to hurry: the connection this arrived on is up. The
+            // button that sends this is only offered while reconnecting, so
+            // getting here at all means it raced the connection coming back.
+            ClientCommand::Reconnect => {}
             // Handled before reaching the queue.
             ClientCommand::Disconnect { .. } => {}
         }
@@ -805,6 +831,8 @@ fn is_error_numeric(response: Response) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[test]
@@ -845,6 +873,153 @@ mod tests {
         assert!(lines.len() >= 2);
         // Reassembling must reproduce the original exactly.
         assert_eq!(lines.concat(), "世".repeat(500));
+    }
+
+    // ---------------------------------------------------------------------
+    // The reconnect command.
+    //
+    // These drive the real `run` loop against a closed loopback port, so the
+    // first attempt is refused immediately and the actor lands in its backoff
+    // wait — which is the state the whole feature is about. No DNS, no socket
+    // that stays open, and nothing that depends on the network.
+    // ---------------------------------------------------------------------
+
+    /// A port with nothing on it, so connecting is refused rather than hanging.
+    ///
+    /// Bound and dropped rather than picked out of the air: a hardcoded port is
+    /// a test that fails on whichever machine happens to be using it.
+    fn closed_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind a free port");
+        let port = listener.local_addr().expect("read the bound port").port();
+        drop(listener);
+        port
+    }
+
+    fn failing_actor() -> (ConnectionHandle, mpsc::Receiver<IrcEvent>) {
+        spawn(ServerConfig {
+            host: "127.0.0.1".to_owned(),
+            port: closed_port(),
+            nickname: "ddirc".to_owned(),
+            ..Default::default()
+        })
+    }
+
+    /// Wait for the actor to reach its backoff wait, returning the delay it
+    /// announced.
+    async fn wait_for_backoff(rx: &mut mpsc::Receiver<IrcEvent>) -> u64 {
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(10), rx.recv())
+                .await
+                .expect("the actor should reach backoff")
+                .expect("the actor should still be running");
+            if let IrcEvent::Status {
+                status: ConnectionStatus::Reconnecting { retry_in_secs, .. },
+                ..
+            } = event
+            {
+                return retry_in_secs;
+            }
+        }
+    }
+
+    /// Whether another connection attempt begins within `window`.
+    async fn attempts_again(rx: &mut mpsc::Receiver<IrcEvent>, window: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            match tokio::time::timeout(remaining, rx.recv()).await {
+                Err(_) => return false,
+                Ok(None) => return false,
+                Ok(Some(IrcEvent::Status {
+                    status: ConnectionStatus::Connecting,
+                    ..
+                })) => return true,
+                Ok(Some(_)) => {}
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_cuts_the_wait_short() {
+        let (handle, mut rx) = failing_actor();
+        let delay = wait_for_backoff(&mut rx).await;
+        assert!(delay >= 1, "the backoff should be at least a second");
+
+        handle
+            .send(ClientCommand::Reconnect)
+            .await
+            .expect("the actor should still be listening");
+
+        // Far inside the announced delay: if this passes, the wait was woken
+        // rather than merely having elapsed.
+        assert!(
+            attempts_again(&mut rx, Duration::from_millis(400)).await,
+            "reconnect should start the next attempt immediately"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_command_does_not_cut_the_wait_short() {
+        // The regression this pairs with: every command used to fall out of
+        // the select and drop straight into the next attempt, so typing a
+        // message while offline skipped the backoff entirely.
+        let (handle, mut rx) = failing_actor();
+        let delay = wait_for_backoff(&mut rx).await;
+        assert!(delay >= 1);
+
+        handle
+            .send(ClientCommand::SendMessage {
+                target: "#somewhere".to_owned(),
+                text: "anyone there?".to_owned(),
+            })
+            .await
+            .expect("the actor should still be listening");
+
+        assert!(
+            !attempts_again(&mut rx, Duration::from_millis(400)).await,
+            "a message sent while offline must not trigger a reconnect"
+        );
+    }
+
+    #[tokio::test]
+    async fn disconnect_still_ends_the_wait() {
+        // The loop added around the select must not trap the actor in it.
+        let (handle, mut rx) = failing_actor();
+        wait_for_backoff(&mut rx).await;
+
+        handle
+            .send(ClientCommand::Disconnect { reason: None })
+            .await
+            .expect("the actor should still be listening");
+
+        let ended = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(event) = rx.recv().await {
+                if matches!(
+                    event,
+                    IrcEvent::Status {
+                        status: ConnectionStatus::Disconnected,
+                        ..
+                    }
+                ) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+        assert_eq!(ended, Ok(true), "disconnect should stop the actor");
+    }
+
+    #[test]
+    fn reconnect_puts_nothing_on_the_wire() {
+        // It is an instruction to the actor, not a protocol command. Reaching
+        // `queue` at all means it raced the connection coming back up.
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        actor.queue(&mut outgoing, ClientCommand::Reconnect);
+        assert!(outgoing.is_empty());
     }
 
     // ---------------------------------------------------------------------

@@ -207,6 +207,13 @@ class SessionModel extends ChangeNotifier {
     _subscription = core.eventStream(id: connectionId).listen(_onEvent);
   }
 
+  /// Stop waiting out the reconnect backoff and try again now.
+  ///
+  /// The connection, and with it the scrollback, survives — this wakes the
+  /// actor that is already counting down rather than replacing it. Harmless at
+  /// any other moment: the core ignores it unless it is actually waiting.
+  Future<void> retryNow() => core.reconnect(id: connectionId);
+
   @override
   void dispose() {
     _subscription?.cancel();

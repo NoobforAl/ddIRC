@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connections`, `runtime`, `send`, `with_connection`
+// These functions are ignored because they are not marked as `pub`: `connections`, `dev_root_cert`, `runtime`, `send`, `with_connection`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Connection`
 
 /// Open a connection and return its id.
@@ -71,6 +71,15 @@ Future<void> setTopic({
   channel: channel,
   topic: topic,
 );
+
+/// Stop waiting out the reconnect backoff and try again now.
+///
+/// Does nothing unless the connection is actually waiting, so it is safe to
+/// call from a button the user may press at the moment the connection returns
+/// on its own. The connection, its id and its scrollback all survive — this
+/// wakes the existing actor rather than replacing it.
+Future<void> reconnect({required BigInt id}) =>
+    RustLib.instance.api.crateApiClientReconnect(id: id);
 
 /// Disconnect and release the connection.
 ///

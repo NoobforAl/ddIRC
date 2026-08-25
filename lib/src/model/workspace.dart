@@ -110,19 +110,23 @@ class Workspace extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Tear a connection down and dial it again from scratch.
+  /// Stop waiting out the backoff and try again now.
   ///
-  /// The core reconnects on its own with a backoff that grows to minutes, and
-  /// there is no command to tell it to hurry. So "retry now" is honestly
-  /// implemented: drop the connection the user is tired of waiting on, and
-  /// make a fresh one whose first attempt is immediate.
+  /// This used to tear the connection down and build a new one, because the
+  /// core had no way to be told to hurry. That worked, but it threw the
+  /// scrollback away every time — the user pressed retry and lost the
+  /// conversation they were retrying to get back to.
   ///
-  /// The scrollback goes with it, which is the cost of not having a
-  /// wake-the-backoff command in the core. Worth it: a user pressing retry has
-  /// already decided the current attempt is not working.
+  /// The core now takes a reconnect command, so the actor counting down is
+  /// woken in place and everything it holds survives. A profile with no live
+  /// session still falls back to dialling from scratch: there is no actor to
+  /// wake, which is the case after a fatal error stopped the connection for
+  /// good.
   Future<String?> reconnect(Profile profile) async {
-    disconnect(profile.id);
-    return connect(profile);
+    final session = _sessions[profile.id];
+    if (session == null) return connect(profile);
+    await session.retryNow();
+    return null;
   }
 
   /// Called when a profile is deleted: its connection must not outlive it.

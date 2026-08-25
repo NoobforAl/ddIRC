@@ -64,13 +64,51 @@ fn with_connection<T>(
     f(connection)
 }
 
+/// An extra trust root for talking to the dev server, in debug builds only.
+///
+/// The dev server in `dev/` is real ergo with a real, self-signed certificate,
+/// and nothing on the machine trusts it. Until now the only way to reach it
+/// from the app was to launch the whole thing with `SSL_CERT_FILE` set, which
+/// is awkward enough that it mostly did not happen.
+///
+/// This *adds* a root; it does not skip verification. That distinction is the
+/// entire point. A bypass would mean the debug build no longer exercises the
+/// code path the release build takes, so a certificate bug would survive every
+/// day of local testing and surface only in production — and a bypass is one
+/// stray `cfg` from being the thing that ships. Adding a root leaves the
+/// handshake, the chain building and the hostname check all running exactly as
+/// they do in release; the dev server is trusted because its certificate now
+/// genuinely verifies, not because nothing was checked.
+///
+/// Three things must be true for it to apply: a debug build (this function
+/// does not exist otherwise — it is `cfg`'d out, not merely unreachable),
+/// `DDIRC_DEV_CA` set on purpose, and the file present. A path that is set but
+/// missing is left in place so `validate` refuses it by name, because a typo
+/// that silently reverted to the platform roots would look exactly like the
+/// dev server being broken.
+#[cfg(debug_assertions)]
+fn dev_root_cert() -> Option<String> {
+    let path = std::env::var("DDIRC_DEV_CA")
+        .ok()
+        .filter(|p| !p.is_empty())?;
+    // On stderr rather than swallowed: weakened trust, however narrowly,
+    // should never be something you have to go looking for.
+    eprintln!("ddIRC [debug]: trusting extra root certificate from {path}");
+    Some(path)
+}
+
 /// Open a connection and return its id.
 ///
 /// The configuration is validated up front, so a bad host, a plaintext port, or
 /// half-supplied SASL credentials fail here with a clear message rather than as
 /// an opaque error later.
 pub fn connect(config: ServerConfig) -> Result<u64, String> {
-    let config: ddirc_core::api::types::ServerConfig = config.into();
+    #[allow(unused_mut)]
+    let mut config: ddirc_core::api::types::ServerConfig = config.into();
+    #[cfg(debug_assertions)]
+    {
+        config.extra_root_cert = dev_root_cert();
+    }
     config.validate().map_err(|e| e.to_string())?;
 
     // `actor::spawn` calls `tokio::spawn`, which needs a runtime in scope.
@@ -162,6 +200,16 @@ pub fn set_nick(id: u64, nick: String) -> Result<(), String> {
 /// Set a channel topic. An empty string clears it.
 pub fn set_topic(id: u64, channel: String, topic: String) -> Result<(), String> {
     send(id, ClientCommand::SetTopic { channel, topic })
+}
+
+/// Stop waiting out the reconnect backoff and try again now.
+///
+/// Does nothing unless the connection is actually waiting, so it is safe to
+/// call from a button the user may press at the moment the connection returns
+/// on its own. The connection, its id and its scrollback all survive — this
+/// wakes the existing actor rather than replacing it.
+pub fn reconnect(id: u64) -> Result<(), String> {
+    send(id, ClientCommand::Reconnect)
 }
 
 /// Disconnect and release the connection.
