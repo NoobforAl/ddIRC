@@ -6,7 +6,9 @@
 - ✅ Add GitHub CI to run the lint checks.
 - ✅ Add the test suite to CI.
 - ✅ Add app settings to the home page.
-- Add animations for every action in the app.
+- ✅ Add animations for every action in the app.
+  (Member *departures* are still instant — animating one means holding a
+  row the model no longer has, which is a much bigger change than it looks.)
 - ✅ Make the layout responsive.
 - ✅ Create an app icon.
 - ✅ Add build configuration for the other platforms: Linux, macOS and iOS.

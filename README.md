@@ -327,6 +327,17 @@ It exists mostly for the case that used to produce an empty window and no
 explanation: a native core that will not load now gets a sentence, the
 underlying error, and a retry.
 
+**A new message moves pixels, never layout.** `Arrive` fades and lifts a row
+into place with a `Transform`, which costs no layout at all. That is not a
+performance choice. The scrollback jumps to `maxScrollExtent` whenever a
+message lands and you are already at the bottom, so an entry animation that
+grew the row would move that target while the jump was being computed and
+strand the newest line half off the screen. Two conditions have to agree
+before a row animates — it has to be past the end of what was on screen last
+build, *and* it has to have happened in the last second. The index alone
+replays the tail every time you scroll back to it; the timestamp alone makes a
+channel you join mid-conversation flash its whole backlog at once.
+
 ## Dependency posture
 
 The `irc` crate (577★, 407k downloads) is the de-facto standard for Rust, but

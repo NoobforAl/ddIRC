@@ -2,12 +2,18 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'motion.dart';
+
 /// Nudges its child sideways whenever [tick] changes.
 ///
 /// A field that is wrong should say so where the user is looking — at the
 /// field — rather than in a note somewhere else on the screen. The motion is a
-/// damped oscillation over a fifth of a second: enough to catch the eye,
-/// short enough that it never delays a retry.
+/// damped oscillation over [Motion.slow]: enough to catch the eye, short
+/// enough that it never delays a retry.
+///
+/// With "reduce motion" on it does not shake at all. That leaves the red
+/// border and the message under the field carrying the news on their own,
+/// which is the point — a shake is an amplifier, never the only signal.
 class Shake extends StatefulWidget {
   const Shake({super.key, required this.tick, required this.child});
 
@@ -23,15 +29,20 @@ class _ShakeState extends State<Shake> with SingleTickerProviderStateMixin {
   static const _amplitude = 7.0;
   static const _cycles = 3;
 
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 220),
-  );
+  late final AnimationController _controller = AnimationController(vsync: this);
 
   @override
   void didUpdateWidget(Shake old) {
     super.didUpdateWidget(old);
-    if (widget.tick != old.tick) _controller.forward(from: 0);
+    if (widget.tick == old.tick) return;
+    // Read at the moment of the shake rather than once at construction, so a
+    // change to the accessibility setting takes effect on the next error
+    // instead of on the next restart.
+    final m = context.motion;
+    if (m.disabled) return;
+    _controller
+      ..duration = m.slow
+      ..forward(from: 0);
   }
 
   @override

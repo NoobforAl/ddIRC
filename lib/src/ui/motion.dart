@@ -206,6 +206,84 @@ class Appear extends StatelessWidget {
   }
 }
 
+/// Fades and lifts its child into place once, on the frame it first appears.
+///
+/// For rows arriving in a list that is already on screen — a message, a nick
+/// joining. Unlike [Appear] this never animates out: the caller is a
+/// `ListView.builder`, whose rows are disposed the moment they leave, so
+/// there is nothing left to animate away with.
+///
+/// The offset is a [Transform], not padding or a size, and that is the whole
+/// trick. A scrollback auto-scrolls to `maxScrollExtent` when a message lands,
+/// and an entry animation that changed the row's height would move that target
+/// while the jump was being calculated, landing short and leaving the newest
+/// line half off the bottom. A transform costs no layout, so the row occupies
+/// its final box immediately and only the pixels travel.
+///
+/// [play] is the caller's judgement about whether this row is *new*. Rows
+/// scrolled back into view, or a whole conversation swapped in at once, pass
+/// false and appear at rest — two hundred lines fading in at once is a flash,
+/// not an animation.
+class Arrive extends StatefulWidget {
+  const Arrive({super.key, required this.play, required this.child});
+
+  final bool play;
+  final Widget child;
+
+  @override
+  State<Arrive> createState() => _ArriveState();
+}
+
+class _ArriveState extends State<Arrive> with SingleTickerProviderStateMixin {
+  /// Small enough to read as the line settling rather than as it flying in.
+  static const _lift = 6.0;
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    value: 1,
+  );
+
+  bool _decided = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Once, and only on the first build. A row that rebuilds — because the
+    // theme changed, or a sibling was inserted above it — has already arrived.
+    if (_decided) return;
+    _decided = true;
+    final m = context.motion;
+    if (!widget.play || m.disabled) return;
+    _controller
+      ..duration = m.normal
+      ..forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      child: widget.child,
+      builder: (context, child) {
+        final t = Motion.curve.transform(_controller.value);
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, (1 - t) * _lift),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// A rotating arc, for work under way with no knowable duration.
 ///
 /// Hand-drawn rather than Material's `CircularProgressIndicator`, which

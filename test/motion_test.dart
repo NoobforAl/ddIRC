@@ -156,4 +156,64 @@ void main() {
       expect(opacityOf(tester), 1);
     });
   });
+
+  group('Arrive', () {
+    double opacityOf(WidgetTester tester) => tester
+        .widget<Opacity>(
+          find.descendant(
+            of: find.byType(Arrive),
+            matching: find.byType(Opacity),
+          ),
+        )
+        .opacity;
+
+    testWidgets('lifts a new row into place', (tester) async {
+      await tester.pumpWidget(
+        _host(child: const Arrive(play: true, child: _bar)),
+      );
+      expect(opacityOf(tester), 0);
+
+      await tester.pump(const Duration(milliseconds: 60));
+      final midway = opacityOf(tester);
+      expect(midway, greaterThan(0));
+      expect(midway, lessThan(1));
+
+      await tester.pumpAndSettle();
+      expect(opacityOf(tester), 1);
+    });
+
+    testWidgets('never moves the layout it sits in', (tester) async {
+      // The reason the offset is a transform. A scrollback jumps to
+      // maxScrollExtent when a message lands, and a row that grew into place
+      // would move that target mid-jump and strand the newest line off the
+      // bottom of the viewport.
+      await tester.pumpWidget(
+        _host(child: const Arrive(play: true, child: _bar)),
+      );
+      expect(tester.getSize(find.byType(Arrive)).height, _barHeight);
+
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(tester.getSize(find.byType(Arrive)).height, _barHeight);
+
+      await tester.pumpAndSettle();
+      expect(tester.getSize(find.byType(Arrive)).height, _barHeight);
+    });
+
+    testWidgets('shows a row that was already there at rest', (tester) async {
+      await tester.pumpWidget(
+        _host(child: const Arrive(play: false, child: _bar)),
+      );
+      expect(opacityOf(tester), 1);
+    });
+
+    testWidgets('is instant when the platform asks for reduced motion', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(reduceMotion: true, child: const Arrive(play: true, child: _bar)),
+      );
+      await tester.pumpAndSettle();
+      expect(opacityOf(tester), 1);
+    });
+  });
 }

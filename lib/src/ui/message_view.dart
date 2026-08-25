@@ -5,6 +5,7 @@ import '../model/settings.dart';
 import '../rust/api/types.dart' as rust;
 import '../theme.dart';
 import 'layout.dart';
+import 'motion.dart';
 
 /// The scrollback for one conversation.
 class MessageView extends StatefulWidget {
@@ -23,6 +24,17 @@ class _MessageViewState extends State<MessageView> {
   /// yanked away every time someone speaks.
   bool _pinnedToBottom = true;
   int _lastCount = 0;
+
+  /// Which rows are new enough to animate in, and under what filter that was
+  /// decided. Two conditions have to agree before a line fades in: it has to
+  /// sit past the end of what was on screen last build, *and* it has to have
+  /// happened just now. Either alone gets it wrong — the index alone replays
+  /// the tail every time it is scrolled back to, and the timestamp alone makes
+  /// a channel joined mid-conversation flash its whole backlog at once.
+  static const _arrival = Duration(seconds: 1);
+  int _seen = -1;
+  bool _showedSystem = true;
+  int _freshFrom = 0;
 
   @override
   void initState() {
@@ -65,6 +77,16 @@ class _MessageViewState extends State<MessageView> {
       _scrollIfPinned();
     }
 
+    if (_seen < 0 || settings.showSystemMessages != _showedSystem) {
+      // First build, or the filter just moved every index: nothing here
+      // arrived, it was already here.
+      _freshFrom = lines.length;
+    } else if (lines.length > _seen) {
+      _freshFrom = _seen;
+    }
+    _seen = lines.length;
+    _showedSystem = settings.showSystemMessages;
+
     if (lines.isEmpty) {
       return Center(
         child: Text(
@@ -80,7 +102,13 @@ class _MessageViewState extends State<MessageView> {
       itemCount: lines.length,
       itemBuilder: (context, i) {
         final line = lines[i];
-        if (line.isSystem) return _SystemLine(text: line.system!);
+        final fresh =
+            i >= _freshFrom &&
+            DateTime.now().difference(line.at) < _arrival;
+
+        if (line.isSystem) {
+          return Arrive(play: fresh, child: _SystemLine(text: line.system!));
+        }
 
         // Suppress the repeated sender label when the same person speaks
         // again within a couple of minutes — the run reads as one utterance
@@ -93,10 +121,13 @@ class _MessageViewState extends State<MessageView> {
             previous.message!.isSelf == line.message!.isSelf &&
             line.at.difference(previous.at).inMinutes < 2;
 
-        return _MessageLine(
-          line: line,
-          showSender: !grouped,
-          settings: settings,
+        return Arrive(
+          play: fresh,
+          child: _MessageLine(
+            line: line,
+            showSender: !grouped,
+            settings: settings,
+          ),
         );
       },
     );
