@@ -4,6 +4,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/client.dart';
+import 'api/server.dart';
 import 'api/tor.dart';
 import 'api/types.dart';
 import 'dart:async';
@@ -46,6 +47,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ConnectionStatus dco_decode_box_autoadd_connection_status(dynamic raw);
+
+  @protected
+  LocalServerInfo dco_decode_box_autoadd_local_server_info(dynamic raw);
 
   @protected
   ProxyConfig dco_decode_box_autoadd_proxy_config(dynamic raw);
@@ -93,10 +97,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<TextSpan> dco_decode_list_text_span(dynamic raw);
 
   @protected
+  LocalServerInfo dco_decode_local_server_info(dynamic raw);
+
+  @protected
   MemberView dco_decode_member_view(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  LocalServerInfo? dco_decode_opt_box_autoadd_local_server_info(dynamic raw);
 
   @protected
   ProxyConfig? dco_decode_opt_box_autoadd_proxy_config(dynamic raw);
@@ -177,6 +187,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  LocalServerInfo sse_decode_box_autoadd_local_server_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   ProxyConfig sse_decode_box_autoadd_proxy_config(SseDeserializer deserializer);
 
   @protected
@@ -224,10 +239,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<TextSpan> sse_decode_list_text_span(SseDeserializer deserializer);
 
   @protected
+  LocalServerInfo sse_decode_local_server_info(SseDeserializer deserializer);
+
+  @protected
   MemberView sse_decode_member_view(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  LocalServerInfo? sse_decode_opt_box_autoadd_local_server_info(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ProxyConfig? sse_decode_opt_box_autoadd_proxy_config(
@@ -325,6 +348,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_local_server_info(
+    LocalServerInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_proxy_config(
     ProxyConfig self,
     SseSerializer serializer,
@@ -388,10 +417,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_text_span(List<TextSpan> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_local_server_info(
+    LocalServerInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_member_view(MemberView self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_local_server_info(
+    LocalServerInfo? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_proxy_config(

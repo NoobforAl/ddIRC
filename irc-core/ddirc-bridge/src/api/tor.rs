@@ -85,10 +85,7 @@ pub fn tor_start(data_dir: String) -> Result<u16, String> {
 /// nothing should quietly fall back to a direct route it was never given
 /// permission to take.
 pub fn tor_stop() {
-    let taken = service()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
+    let taken = service().lock().unwrap_or_else(|e| e.into_inner()).take();
     if let Some(service) = taken {
         runtime().block_on(service.stop());
     }

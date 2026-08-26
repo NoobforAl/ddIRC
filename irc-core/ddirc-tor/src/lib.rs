@@ -298,7 +298,10 @@ mod tests {
 
         // The listener is really listening, whatever Tor is doing behind it.
         let probe = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, tor.port())).await;
-        assert!(probe.is_ok(), "nothing was accepting on the port: {probe:?}");
+        assert!(
+            probe.is_ok(),
+            "nothing was accepting on the port: {probe:?}"
+        );
 
         tor.stop().await;
         let _ = std::fs::remove_dir_all(&dir);

@@ -69,7 +69,11 @@ async fn bootstrap(tor: &TorService) -> Duration {
     loop {
         let status = tor.status();
         if status.summary != last {
-            println!("[{:>6.1}s] {}", started.elapsed().as_secs_f32(), status.summary);
+            println!(
+                "[{:>6.1}s] {}",
+                started.elapsed().as_secs_f32(),
+                status.summary
+            );
             last = status.summary.clone();
         }
         if let Some(blocked) = &status.blocked {
@@ -101,7 +105,9 @@ async fn bootstrap(tor: &TorService) -> Duration {
 async fn tor_bootstraps_and_says_how_long_it_took() {
     logging();
     let dir = TempDir::new("bootstrap");
-    let tor = TorService::start(&dir.0).await.expect("Tor would not start");
+    let tor = TorService::start(&dir.0)
+        .await
+        .expect("Tor would not start");
     println!("SOCKS5 on 127.0.0.1:{}", tor.port());
 
     let took = bootstrap(&tor).await;
@@ -130,7 +136,9 @@ const CHANNELS: [&str; 2] = ["#oftc", "#debian"];
 async fn the_client_registers_through_the_bundled_tor() {
     logging();
     let dir = TempDir::new("register");
-    let tor = TorService::start(&dir.0).await.expect("Tor would not start");
+    let tor = TorService::start(&dir.0)
+        .await
+        .expect("Tor would not start");
     let took = bootstrap(&tor).await;
     println!("bootstrapped in {:.1}s, dialling", took.as_secs_f32());
 
@@ -201,7 +209,9 @@ async fn the_client_registers_through_the_bundled_tor() {
                 println!("joined {channel}");
                 joined.push(channel);
             }
-            IrcEvent::MemberList { channel, members } if !rosters.iter().any(|(c, _)| *c == channel) => {
+            IrcEvent::MemberList { channel, members }
+                if !rosters.iter().any(|(c, _)| *c == channel) =>
+            {
                 println!("{channel}: {} people", members.len());
                 assert!(
                     !members.is_empty(),

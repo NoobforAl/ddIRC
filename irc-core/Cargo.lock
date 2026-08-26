@@ -967,6 +967,7 @@ name = "ddirc_bridge"
 version = "0.1.0"
 dependencies = [
  "ddirc-core",
+ "ddirc-server",
  "ddirc-tor",
  "flutter_rust_bridge",
  "tokio",

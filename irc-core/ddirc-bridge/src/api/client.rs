@@ -103,11 +103,18 @@ fn dev_root_cert() -> Option<String> {
 /// half-supplied SASL credentials fail here with a clear message rather than as
 /// an opaque error later.
 pub fn connect(config: ServerConfig) -> Result<u64, String> {
-    #[allow(unused_mut)]
     let mut config: ddirc_core::api::types::ServerConfig = config.into();
     #[cfg(debug_assertions)]
     {
         config.extra_root_cert = dev_root_cert();
+    }
+    // The local server, if this connection is to it. In release builds too,
+    // unlike the dev-server anchor above — but it is the narrower grant of the
+    // two: the path was written by this process, and it applies only to the
+    // loopback port this process bound a moment ago. Checked second so it wins
+    // over `DDIRC_DEV_CA`, which is about a different server entirely.
+    if let Some(anchor) = crate::api::server::anchor_for(&config.host, config.port) {
+        config.extra_root_cert = Some(anchor);
     }
     config.validate().map_err(|e| e.to_string())?;
 

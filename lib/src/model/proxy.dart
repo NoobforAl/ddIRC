@@ -94,6 +94,19 @@ class ProxyUnavailable implements Exception {
   String toString() => message;
 }
 
+/// Whether this host is this machine.
+///
+/// Deliberately a short list of literals rather than a parse of every form
+/// loopback can take. It is used to decide that a connection needs no proxy,
+/// and the cost of the two mistakes is not symmetric: a host wrongly called
+/// loopback would connect in the clear, while one wrongly not called loopback
+/// merely fails to connect through a proxy that cannot reach it. So the test
+/// errs towards saying no.
+bool isLoopback(String host) => switch (host.toLowerCase()) {
+  '127.0.0.1' || '::1' || '[::1]' || 'localhost' => true,
+  _ => false,
+};
+
 /// A SOCKS5 proxy, as configured. The password is not here — it lives in the
 /// platform keychain, exactly like the SASL one.
 @immutable
@@ -342,6 +355,16 @@ Future<core.ProxyConfig?> resolveProxy(
   ProxySettings settings,
   ProfileStore profiles,
 ) async {
+  // A server on this machine, before anything else.
+  //
+  // Not a hole in the rule below, because there is nothing here for the rule
+  // to protect: a loopback connection never reaches a network, so there is no
+  // address for anyone to learn and nobody in between to learn it. Sending it
+  // through Tor would not conceal anything — it would leave the machine, ask
+  // an exit relay for `127.0.0.1`, and reach that relay's own loopback or
+  // nothing at all. The app's own IRC server is exactly this case.
+  if (isLoopback(profile.host)) return null;
+
   // Built-in Tor first, and without consulting the profile at all.
   //
   // This is the whole of the override, and it is one branch on purpose: every

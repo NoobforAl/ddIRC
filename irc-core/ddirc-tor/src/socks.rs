@@ -91,7 +91,10 @@ async fn handle(
     let mut prefs = StreamPrefs::new();
     prefs.isolate_every_stream();
 
-    let stream = match client.connect_with_prefs((host.as_str(), port), &prefs).await {
+    let stream = match client
+        .connect_with_prefs((host.as_str(), port), &prefs)
+        .await
+    {
         Ok(stream) => stream,
         Err(e) => {
             tracing::debug!("tor: could not reach {host}:{port}: {e}");

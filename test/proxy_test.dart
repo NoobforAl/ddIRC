@@ -179,6 +179,35 @@ void main() {
       );
     });
 
+    test('leaves a server on this machine alone', () async {
+      // The one carve-out, and it takes nothing away: a loopback connection
+      // never reaches a network, so there is no address to conceal. Sending it
+      // through Tor would ask an exit relay for 127.0.0.1 and reach either
+      // that relay's own loopback or nothing.
+      final settings = await onTor();
+      final local = Profile(
+        id: 'local-server',
+        name: 'Local',
+        host: '127.0.0.1',
+        port: 6697,
+        nickname: 'you',
+      );
+      expect(await resolveProxy(local, settings, profiles), isNull);
+    });
+
+    test('and does not mistake anything else for this machine', () async {
+      // The test errs towards saying no, because a host wrongly called
+      // loopback would connect in the clear.
+      expect(isLoopback('127.0.0.1'), isTrue);
+      expect(isLoopback('localhost'), isTrue);
+      expect(isLoopback('::1'), isTrue);
+      expect(isLoopback('LOCALHOST'), isTrue);
+      expect(isLoopback('127.0.0.1.evil.example'), isFalse);
+      expect(isLoopback('localhost.evil.example'), isFalse);
+      expect(isLoopback('127.1'), isFalse);
+      expect(isLoopback('irc.libera.chat'), isFalse);
+    });
+
     test('overrides every network, so nothing keeps its own answer', () async {
       final settings = await onTor();
       expect(settings.overridesProfiles, isTrue);
