@@ -1,4 +1,5 @@
 pub mod client;
+pub mod tor;
 pub mod types;
 
 #[flutter_rust_bridge::frb(init)]

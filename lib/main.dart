@@ -12,6 +12,7 @@ import 'src/model/log.dart';
 import 'src/model/profile.dart';
 import 'src/model/proxy.dart';
 import 'src/model/settings.dart';
+import 'src/model/tor.dart';
 import 'src/model/workspace.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/theme.dart';
@@ -37,8 +38,18 @@ Future<void> main() async {
   // never flashes before ours replaces it.
   await prepareWindow(Tokens.forMode(settings.themeMode));
   final profiles = await ProfileStore.load();
-  final proxies = await ProxySettings.load();
-  runApp(DdIrcApp(settings: settings, profiles: profiles, proxies: proxies));
+  // Tor before the proxy settings, because the built-in route reads its port
+  // from it. Neither starts anything here — this is a preference being read.
+  final tor = await TorSettings.load();
+  final proxies = await ProxySettings.load(tor: tor);
+  runApp(
+    DdIrcApp(
+      settings: settings,
+      profiles: profiles,
+      proxies: proxies,
+      tor: tor,
+    ),
+  );
 }
 
 /// Keep the log in step with the two switches that control it.
@@ -78,11 +89,13 @@ class DdIrcApp extends StatefulWidget {
     required this.settings,
     required this.profiles,
     required this.proxies,
+    required this.tor,
   });
 
   final AppSettings settings;
   final ProfileStore profiles;
   final ProxySettings proxies;
+  final TorSettings tor;
 
   @override
   State<DdIrcApp> createState() => _DdIrcAppState();
@@ -121,6 +134,13 @@ class _DdIrcAppState extends State<DdIrcApp> {
   /// nothing to connect *with*.
   Future<void> _start() async {
     await startCore();
+    // Awaited, and before the auto-connects: this returns as soon as Tor has
+    // a port, not when Tor is ready, so the wait is short. What it buys is
+    // that a network dialled a moment later finds the proxy already there.
+    // Without it the first auto-connect would resolve its proxy against a Tor
+    // that had not bound yet, and be refused for a reason that had already
+    // stopped being true.
+    await widget.tor.startIfEnabled();
     unawaited(_workspace.connectAutomatic());
   }
 
@@ -142,28 +162,31 @@ class _DdIrcAppState extends State<DdIrcApp> {
         store: widget.profiles,
         child: ProxyScope(
           settings: widget.proxies,
-          child: WorkspaceScope(
-            workspace: _workspace,
-            // The theme is a setting, so the app itself has to listen: nothing
-            // below rebuilds MaterialApp, and `themeMode` is read here.
-            child: ListenableBuilder(
-              listenable: widget.settings,
-              builder: (context, _) => MaterialApp(
-                title: 'ddIRC',
-                debugShowCheckedModeBanner: false,
-                theme: Tokens.themeFor(Tokens.light),
-                darkTheme: Tokens.themeFor(Tokens.dark),
-                themeMode: widget.settings.themeMode,
-                // Wrapping here rather than per screen means every route — and
-                // every dialog on the root navigator — sits under one frame.
-                builder: (context, child) =>
-                    WindowFrame(child: child ?? const SizedBox.shrink()),
-                // Inside MaterialApp rather than around it, so the splash is
-                // themed and cross-fades into the app. The scopes stay above
-                // it, because dialogs are routes and must reach them.
-                home: BootScreen(
-                  load: _start,
-                  builder: (context) => const WorkspaceScreen(),
+          child: TorScope(
+            tor: widget.tor,
+            child: WorkspaceScope(
+              workspace: _workspace,
+              // The theme is a setting, so the app itself has to listen: nothing
+              // below rebuilds MaterialApp, and `themeMode` is read here.
+              child: ListenableBuilder(
+                listenable: widget.settings,
+                builder: (context, _) => MaterialApp(
+                  title: 'ddIRC',
+                  debugShowCheckedModeBanner: false,
+                  theme: Tokens.themeFor(Tokens.light),
+                  darkTheme: Tokens.themeFor(Tokens.dark),
+                  themeMode: widget.settings.themeMode,
+                  // Wrapping here rather than per screen means every route — and
+                  // every dialog on the root navigator — sits under one frame.
+                  builder: (context, child) =>
+                      WindowFrame(child: child ?? const SizedBox.shrink()),
+                  // Inside MaterialApp rather than around it, so the splash is
+                  // themed and cross-fades into the app. The scopes stay above
+                  // it, because dialogs are routes and must reach them.
+                  home: BootScreen(
+                    load: _start,
+                    builder: (context) => const WorkspaceScreen(),
+                  ),
                 ),
               ),
             ),

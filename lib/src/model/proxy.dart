@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart' as core;
 import 'profile.dart';
+import 'tor.dart';
 
 /// Where a server gets its proxy from.
 ///
@@ -20,12 +21,19 @@ import 'profile.dart';
 /// network, with no way to see why. [direct] is deliberately an explicit
 /// choice, spelled out in the UI, rather than something a blank field does by
 /// accident: turning a proxy off for one server should take saying so.
+///
+/// All three are overridden by [ProxyRoute.builtIn]. That is the one exception
+/// to everything above, and it is deliberate: bundled Tor is not an address
+/// this app happens to be pointed at, it is an answer to "does anything I do
+/// leave this machine in the clear", and a per-network opt-out would make that
+/// answer "mostly". See [ProxySettings.overridesProfiles].
 enum ProxyMode {
   /// Whatever the app is set to. The default, and what every existing profile
   /// is read back as.
   followDefault('App default'),
 
-  /// Never proxy this server, whatever the app is set to.
+  /// Never proxy this server, whatever the app-wide proxy is set to. Yields to
+  /// built-in Tor, which nothing is allowed to route around.
   direct('Direct'),
 
   /// This server's own proxy.
@@ -39,6 +47,51 @@ enum ProxyMode {
     (m) => m.name == name,
     orElse: () => ProxyMode.followDefault,
   );
+}
+
+/// Where the app-wide proxy comes from.
+///
+/// The three answers are genuinely different things rather than three ways of
+/// writing an address, which is why this is an enum and not a nullable field.
+/// [builtIn] has no address to type and no credential to store; [manual] has
+/// both; [off] is a decision, and one worth being able to see.
+enum ProxyRoute {
+  /// Connections go direct.
+  off('Off'),
+
+  /// The Tor that ships inside the app, on a loopback port it chose. Beta.
+  builtIn('Built-in Tor'),
+
+  /// A SOCKS5 proxy the user runs — their own Tor on 9050, an SSH tunnel, a
+  /// company proxy. This is what the setting has always been.
+  manual('My own proxy');
+
+  const ProxyRoute(this.label);
+
+  final String label;
+
+  static ProxyRoute byName(Object? name) => ProxyRoute.values.firstWhere(
+    (r) => r.name == name,
+    orElse: () => ProxyRoute.off,
+  );
+}
+
+/// A proxy was asked for and is not there.
+///
+/// Thrown rather than resolved to null, and that distinction is the point.
+/// Null means *direct*, which is a legitimate answer for a profile set to
+/// connect directly — and if a missing proxy also resolved to null, a user who
+/// turned Tor on and watched it fail to start would be connected in clear,
+/// over exactly the route they had just said not to use.
+///
+/// The app promises no proxy fallback. This is where that promise is kept.
+class ProxyUnavailable implements Exception {
+  const ProxyUnavailable(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
 
 /// A SOCKS5 proxy, as configured. The password is not here — it lives in the
@@ -93,54 +146,131 @@ class ProxyEndpoint {
 /// decides where every byte goes. It is also the only preference here with a
 /// secret attached, which means two stores rather than one.
 class ProxySettings extends ChangeNotifier {
-  ProxySettings._(this._prefs, this._secrets);
+  ProxySettings._(this._prefs, this._secrets, this._tor);
 
   static const _kEnabled = 'proxy.enabled';
+  static const _kRoute = 'proxy.route.v1';
   static const _kEndpoint = 'proxy.endpoint.v1';
   static const _secretKey = 'proxy.app-default';
 
   final SharedPreferences? _prefs;
   final FlutterSecureStorage _secrets;
 
-  bool _enabled = false;
+  /// Where [ProxyRoute.builtIn] gets its port from.
+  ///
+  /// Optional so the model can be built without one — the tests do, and so
+  /// would any host with no Tor in it. A null Tor means the built-in route is
+  /// never available, which [ProxyUnavailable] then reports honestly instead
+  /// of quietly connecting direct.
+  final TorSettings? _tor;
+
+  ProxyRoute _route = ProxyRoute.off;
   ProxyEndpoint? _endpoint;
 
-  /// Off. A proxy nobody asked for is a proxy that will not be running.
-  bool get enabled => _enabled;
+  /// Where connections go. Off by default: a proxy nobody asked for is a
+  /// proxy that will not be running.
+  ProxyRoute get route => _route;
 
-  /// What is configured, whether or not it is switched on — so turning the
-  /// switch back on does not mean typing the address again.
+  /// Whether anything at all is in force. Kept for the callers that only want
+  /// that much, and for the preference an older version of the app wrote.
+  bool get enabled => _route != ProxyRoute.off;
+
+  /// The manual address, whether or not it is the route in use — so switching
+  /// to Tor and back does not mean typing it again.
   ProxyEndpoint? get endpoint => _endpoint;
 
-  /// The proxy actually in force, or null. This is the one callers want.
-  ProxyEndpoint? get active => _enabled ? _endpoint : null;
+  /// The proxy actually in force, or null for a direct connection.
+  ///
+  /// Null for [ProxyRoute.builtIn] while Tor is still starting, which is *not*
+  /// the same as direct — see [waiting], and see [resolveProxy], which refuses
+  /// rather than resolving that gap to a direct connection.
+  ProxyEndpoint? get active => switch (_route) {
+    ProxyRoute.off => null,
+    ProxyRoute.manual => _endpoint,
+    ProxyRoute.builtIn => switch (_tor?.port) {
+      final int port => ProxyEndpoint(host: '127.0.0.1', port: port),
+      null => null,
+    },
+  };
 
-  static Future<ProxySettings> load() async {
+  /// Whether this route ignores what individual networks asked for.
+  ///
+  /// True for [ProxyRoute.builtIn] and nothing else. A manual proxy is a
+  /// default, and a network that says "Direct" or brings its own address means
+  /// it. Built-in Tor is not a default: someone who switched it on wants their
+  /// address off the wire, and a single network quietly exempting itself would
+  /// put it back there — announced to that server as a NOTICE, in a WHOIS
+  /// reply, and in whatever the network logs. There is no per-network way to
+  /// want that a little.
+  bool get overridesProfiles => _route == ProxyRoute.builtIn;
+
+  /// A proxy is wanted and is not there. Nothing may connect.
+  bool get waiting => _route == ProxyRoute.builtIn && active == null;
+
+  static Future<ProxySettings> load({TorSettings? tor}) async {
     SharedPreferences? prefs;
     try {
       prefs = await SharedPreferences.getInstance();
     } catch (e) {
       debugPrint('proxy settings unavailable, starting direct: $e');
     }
-    final settings = ProxySettings._(prefs, const FlutterSecureStorage());
+    final settings = ProxySettings._(prefs, const FlutterSecureStorage(), tor);
     settings._read();
+    // The address of the built-in route appears and disappears with Tor, so
+    // anything reading `active` has to be told when that happens.
+    tor?.addListener(settings.notifyListeners);
     return settings;
   }
 
   void _read() {
     final prefs = _prefs;
     if (prefs == null) return;
-    _enabled = prefs.getBool(_kEnabled) ?? false;
+    final stored = prefs.getString(_kRoute);
+    // Before there was a route there was a bool, and a setting saved by that
+    // version has to keep working: a proxy that switched itself off on upgrade
+    // would send the next connection somewhere the user did not choose.
+    _route = stored != null
+        ? ProxyRoute.byName(stored)
+        : (prefs.getBool(_kEnabled) ?? false)
+        ? ProxyRoute.manual
+        : ProxyRoute.off;
+
     final raw = prefs.getString(_kEndpoint);
-    if (raw == null) return;
-    try {
-      _endpoint = ProxyEndpoint.fromJson(jsonDecode(raw));
-    } catch (e) {
-      debugPrint('proxy address could not be read, ignoring it: $e');
+    if (raw != null) {
+      try {
+        _endpoint = ProxyEndpoint.fromJson(jsonDecode(raw));
+      } catch (e) {
+        debugPrint('proxy address could not be read, ignoring it: $e');
+      }
     }
-    // A switch that is on with nothing behind it would fail every connection
-    // for a reason the settings screen does not show. Treat it as off.
-    if (_endpoint == null) _enabled = false;
+    // A manual route with nothing behind it would fail every connection for a
+    // reason the settings screen does not show. Treat it as off.
+    if (_route == ProxyRoute.manual && _endpoint == null) {
+      _route = ProxyRoute.off;
+    }
+  }
+
+  /// Switch to the bundled Tor, or away from it.
+  ///
+  /// Separate from [save] because there is nothing to type and nothing to
+  /// validate — the address is whichever port Tor bound — and running the
+  /// address form for a route that has no address would be theatre.
+  Future<void> useBuiltIn(bool value) async {
+    _route = value
+        ? ProxyRoute.builtIn
+        // Back to the manual address if there is one, rather than straight to
+        // off: turning Tor off should leave the setting where it was before
+        // Tor, not silently discard a proxy the user configured.
+        : (_endpoint != null ? ProxyRoute.manual : ProxyRoute.off);
+    notifyListeners();
+    await _writeRoute();
+  }
+
+  Future<void> _writeRoute() async {
+    await _prefs?.setString(_kRoute, _route.name);
+    // Kept in step for a downgrade, which would otherwise read a route it does
+    // not know beside a bool that contradicts it.
+    await _prefs?.setBool(_kEnabled, _route != ProxyRoute.off);
   }
 
   /// Replace the app-wide proxy.
@@ -154,7 +284,7 @@ class ProxySettings extends ChangeNotifier {
     String? password,
   }) async {
     _endpoint = endpoint;
-    _enabled = enabled && endpoint != null;
+    _route = (enabled && endpoint != null) ? ProxyRoute.manual : ProxyRoute.off;
     notifyListeners();
 
     if (password != null) await _writeSecret(password);
@@ -162,7 +292,7 @@ class ProxySettings extends ChangeNotifier {
     // in the keychain and nothing else.
     if (!(endpoint?.usesAuth ?? false)) await _writeSecret('');
 
-    await _prefs?.setBool(_kEnabled, _enabled);
+    await _writeRoute();
     if (endpoint == null) {
       await _prefs?.remove(_kEndpoint);
     } else {
@@ -201,11 +331,39 @@ class ProxySettings extends ChangeNotifier {
 /// its own proxy with the app-wide credential.
 ///
 /// Returns null for a direct connection, which the core reads as exactly that.
+///
+/// Throws [ProxyUnavailable] when a proxy was asked for and is not there —
+/// which today means the bundled Tor is switched on but has not come up.
+/// Returning null there would be the one bug in this file worth fearing: the
+/// connection would succeed, in clear, over the route the user had just said
+/// not to use, and nothing on screen would look wrong.
 Future<core.ProxyConfig?> resolveProxy(
   Profile profile,
   ProxySettings settings,
   ProfileStore profiles,
 ) async {
+  // Built-in Tor first, and without consulting the profile at all.
+  //
+  // This is the whole of the override, and it is one branch on purpose: every
+  // line below reads a per-network preference, and there is no reading of one
+  // that can put a connection outside Tor while Tor is on. A network set to
+  // "Direct" is not asking to leak — it is asking not to use the *app-wide
+  // address*, which is a different question and one that stops being asked
+  // here.
+  if (settings.overridesProfiles) {
+    final tor = settings.active;
+    if (tor == null) {
+      throw const ProxyUnavailable(
+        'Built-in Tor is switched on but is not running, so there is nothing '
+        'to connect through. Connecting directly would go around it, which is '
+        'not something ddIRC will do on its own — check Tor in App settings.',
+      );
+    }
+    // No credentials: this is loopback, to a Tor this process started, and
+    // there is nobody in between for a username to prove anything to.
+    return core.ProxyConfig(host: tor.host, port: tor.port);
+  }
+
   final (endpoint, password) = switch (profile.proxyMode) {
     ProxyMode.direct => (null, null),
     ProxyMode.custom => (

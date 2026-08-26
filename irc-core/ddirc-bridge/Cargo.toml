@@ -11,6 +11,7 @@ crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
 ddirc-core = { path = "../ddirc-core" }
+ddirc-tor = { path = "../ddirc-tor" }
 flutter_rust_bridge.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 zeroize.workspace = true

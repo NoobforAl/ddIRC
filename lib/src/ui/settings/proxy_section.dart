@@ -86,40 +86,58 @@ class _GlobalProxySectionState extends State<GlobalProxySection> {
     final settings = ProxyScope.of(context);
     final form = _controllerFor(settings);
     final active = settings.active;
+    // Built-in Tor is a proxy too, and while it is on it is the only one:
+    // nothing this form can be set to reaches the network. So the form goes
+    // away rather than sitting there editable and inert — a section that
+    // accepts an address and a "Use this proxy" press, and then routes
+    // everything somewhere else, is worse than one that is plainly closed.
+    final overridden = settings.overridesProfiles;
 
     return SettingsSection(
-      label: 'Proxy',
+      label: 'My own proxy',
       children: [
         SettingsReadout(
           label: 'Status',
-          value: active == null
+          value: overridden
+              ? 'Off — built-in Tor is switched on above'
+              : active == null
               ? 'Off — connections go direct'
               : 'On — ${active.label}',
         ),
         SettingsReadout(
           label: 'Applies to',
-          value: active == null
+          value: overridden
+              ? 'Nothing, while built-in Tor is on'
+              : active == null
               ? 'Nothing, until it is switched on'
               : 'Every network set to "App default"',
         ),
-        ProxyFields(
-          controller: form,
-          shakeTick: _shake,
-          onSubmitted: _busy ? null : () => _apply(settings),
-        ),
-        SettingsActions(
-          children: [
-            if (active != null)
-              SettingsDangerButton(
-                label: 'Stop using it',
-                onPressed: _busy ? null : () => _stop(settings),
+        if (overridden)
+          const SettingsNote(
+            text:
+                'Switch built-in Tor off to use your own proxy instead. The '
+                'address saved here is kept, and comes back with it.',
+          )
+        else ...[
+          ProxyFields(
+            controller: form,
+            shakeTick: _shake,
+            onSubmitted: _busy ? null : () => _apply(settings),
+          ),
+          SettingsActions(
+            children: [
+              if (active != null)
+                SettingsDangerButton(
+                  label: 'Stop using it',
+                  onPressed: _busy ? null : () => _stop(settings),
+                ),
+              SettingsPrimaryButton(
+                label: active == null ? 'Use this proxy' : 'Save changes',
+                onPressed: _busy ? null : () => _apply(settings),
               ),
-            SettingsPrimaryButton(
-              label: active == null ? 'Use this proxy' : 'Save changes',
-              onPressed: _busy ? null : () => _apply(settings),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ],
     );
   }

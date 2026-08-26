@@ -499,10 +499,23 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   /// able to say so, or turning on the app-wide proxy would silently take it
   /// with everything else.
   Widget _proxySection(Tokens t) {
-    final global = ProxyScope.of(context).active;
+    final settings = ProxyScope.of(context);
+    final global = settings.active;
+    // Built-in Tor takes every network, so none of the three choices below is
+    // in force while it is on. The choice stays editable — it is what this
+    // network goes back to when Tor is switched off — but saying nothing here
+    // would leave someone reading "Direct" off the screen and believing it.
+    final overridden = settings.overridesProfiles;
     return SettingsSection(
       label: 'Proxy',
       children: [
+        if (overridden)
+          const SettingsNote(
+            text:
+                'Built-in Tor is on, so this network connects through Tor '
+                'whatever is chosen here. The choice below applies again once '
+                'Tor is switched off.',
+          ),
         SettingsChoice<ProxyMode>(
           label: 'Connect through',
           options: ProxyMode.values,
@@ -515,14 +528,14 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
             if (m != ProxyMode.custom) _proxy.errors.clear();
           }),
         ),
-        if (_proxyMode == ProxyMode.followDefault)
+        if (!overridden && _proxyMode == ProxyMode.followDefault)
           SettingsReadout(
             label: 'App default',
             value: global == null
                 ? 'Not set — this network connects directly'
                 : global.label,
           ),
-        if (_proxyMode == ProxyMode.direct)
+        if (!overridden && _proxyMode == ProxyMode.direct)
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
             child: Text(

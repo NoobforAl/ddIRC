@@ -125,6 +125,109 @@ void main() {
     });
   });
 
+  group('the built-in Tor route', () {
+    late ProfileStore profiles;
+
+    setUp(() async => profiles = await ProfileStore.load());
+
+    // No Tor is running in a test, so `active` is null throughout this group.
+    // That is not a limitation — it is the state the tests are here for. "Tor
+    // is switched on and is not up" is exactly the window in which a wrong
+    // answer connects someone in the clear.
+    Future<ProxySettings> onTor() async {
+      final settings = await ProxySettings.load();
+      await settings.useBuiltIn(true);
+      return settings;
+    }
+
+    test('is on, and waiting, before Tor has a port', () async {
+      final settings = await onTor();
+      expect(settings.route, ProxyRoute.builtIn);
+      expect(settings.enabled, isTrue);
+      expect(settings.active, isNull);
+      expect(settings.waiting, isTrue);
+    });
+
+    test('refuses to resolve rather than resolving to direct', () async {
+      // The single most important assertion in this file. `null` means
+      // *direct*; if this returned null the connection would succeed, in the
+      // clear, over the route the user had just asked not to use.
+      final settings = await onTor();
+      await expectLater(
+        resolveProxy(_profile(), settings, profiles),
+        throwsA(isA<ProxyUnavailable>()),
+      );
+    });
+
+    test('refuses for a network set to Direct too', () async {
+      // Direct means "not the app-wide address". It does not mean "outside
+      // Tor": there is no per-network way to want that.
+      final settings = await onTor();
+      final profile = _profile(mode: ProxyMode.direct);
+      await expectLater(
+        resolveProxy(profile, settings, profiles),
+        throwsA(isA<ProxyUnavailable>()),
+      );
+    });
+
+    test('refuses for a network with its own proxy too', () async {
+      final settings = await onTor();
+      final profile = _profile(mode: ProxyMode.custom, own: _other);
+      await expectLater(
+        resolveProxy(profile, settings, profiles),
+        throwsA(isA<ProxyUnavailable>()),
+      );
+    });
+
+    test('overrides every network, so nothing keeps its own answer', () async {
+      final settings = await onTor();
+      expect(settings.overridesProfiles, isTrue);
+
+      final off = await ProxySettings.load();
+      await off.save(enabled: true, endpoint: _other);
+      expect(off.overridesProfiles, isFalse);
+    });
+
+    test('gives the manual address back when it is switched off', () async {
+      final settings = await ProxySettings.load();
+      await settings.save(enabled: true, endpoint: _other);
+      await settings.useBuiltIn(true);
+      expect(settings.route, ProxyRoute.builtIn);
+
+      await settings.useBuiltIn(false);
+      // Not straight to off: turning Tor off should leave the setting where it
+      // was before Tor rather than discarding a proxy the user configured.
+      expect(settings.route, ProxyRoute.manual);
+      expect(settings.active, _other);
+    });
+
+    test('goes to off when there was no manual address', () async {
+      final settings = await onTor();
+      await settings.useBuiltIn(false);
+      expect(settings.route, ProxyRoute.off);
+      expect(settings.waiting, isFalse);
+    });
+
+    test('survives a reload', () async {
+      await (await ProxySettings.load()).useBuiltIn(true);
+      final reloaded = await ProxySettings.load();
+      expect(reloaded.route, ProxyRoute.builtIn);
+      expect(reloaded.waiting, isTrue);
+    });
+
+    test('reads a setting saved before routes existed', () async {
+      // The upgrade path. A proxy that switched itself off on upgrade would
+      // send the next connection somewhere the user did not choose.
+      SharedPreferences.setMockInitialValues({
+        'proxy.enabled': true,
+        'proxy.endpoint.v1': '{"host":"proxy.example.org","port":1080}',
+      });
+      final settings = await ProxySettings.load();
+      expect(settings.route, ProxyRoute.manual);
+      expect(settings.active, _other);
+    });
+  });
+
   group('a saved profile', () {
     test('round-trips its proxy', () {
       final profile = _profile(mode: ProxyMode.custom, own: _other);

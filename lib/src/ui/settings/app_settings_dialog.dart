@@ -6,6 +6,7 @@ import '../../model/settings.dart';
 import '../background.dart';
 import 'proxy_section.dart';
 import 'settings_chrome.dart';
+import 'tor_section.dart';
 
 /// The section heading, which is not "Window" on a phone.
 String get _backgroundSectionLabel =>
@@ -158,6 +159,8 @@ class AppSettingsDialog extends StatelessWidget {
             ),
           ],
         ),
+        const SettingsRule(),
+        const TorSection(),
         const SettingsRule(),
         const GlobalProxySection(),
         const SettingsRule(),

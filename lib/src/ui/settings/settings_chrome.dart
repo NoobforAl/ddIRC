@@ -118,10 +118,18 @@ class SettingsSection extends StatelessWidget {
     super.key,
     required this.label,
     required this.children,
+    this.beta = false,
   });
 
   final String label;
   final List<Widget> children;
+
+  /// Puts a [BetaBadge] beside the heading.
+  ///
+  /// On the section rather than on the switch inside it, because what is beta
+  /// is the whole feature — the readouts below the switch are as provisional
+  /// as the switch is.
+  final bool beta;
 
   @override
   Widget build(BuildContext context) {
@@ -131,18 +139,67 @@ class SettingsSection extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
-          child: Text(
-            label.toUpperCase(),
-            style: TextStyle(
-              color: t.faint,
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.9,
-            ),
+          child: Row(
+            children: [
+              Text(
+                label.toUpperCase(),
+                style: TextStyle(
+                  color: t.faint,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.9,
+                ),
+              ),
+              if (beta) ...[const SizedBox(width: 7), const BetaBadge()],
+            ],
           ),
         ),
         ...children,
       ],
+    );
+  }
+}
+
+/// Says a feature is not finished, wherever that feature is offered.
+///
+/// One widget rather than the word written into each label, because there is
+/// more than one beta feature and two of them drifting apart — different
+/// wording, different colour, one of them quietly dropped in a refactor —
+/// would leave the user unable to tell which warnings still stand.
+///
+/// The colour is the warning one, not the accent. A badge in the accent
+/// colour reads as a feature being advertised, and this is the opposite of
+/// that: it is the app declining to promise something.
+class BetaBadge extends StatelessWidget {
+  const BetaBadge({super.key, this.tooltip = _default});
+
+  static const _default =
+      'Beta: this works, but it is new, it will have gaps, and it may '
+      'change. Do not depend on it for anything that matters.';
+
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+        decoration: BoxDecoration(
+          color: t.warn.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(
+          'BETA',
+          style: TextStyle(
+            color: t.warn,
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+      ),
     );
   }
 }
