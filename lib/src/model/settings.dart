@@ -55,11 +55,13 @@ class AppSettings extends ChangeNotifier {
   static const _kChatLog = 'log.chat';
   static const _kDebugLog = 'log.debug';
   static const _kStripMetadata = 'send.stripMetadata';
+  static const _kFileTransfers = 'dcc.enabled';
   static const _kRunInBackground = 'app.runInBackground';
   static const _kNotifyPrefix = 'notify.';
 
   final SharedPreferences? _prefs;
 
+  bool _fileTransfers = false;
   bool _showTimestamps = true;
   bool _twentyFourHour = true;
   bool _showSystemMessages = true;
@@ -115,6 +117,7 @@ class AppSettings extends ChangeNotifier {
     _saveChatLogs = prefs.getBool(_kChatLog) ?? _saveChatLogs;
     _saveDebugLogs = prefs.getBool(_kDebugLog) ?? _saveDebugLogs;
     _stripImageMetadata = prefs.getBool(_kStripMetadata) ?? _stripImageMetadata;
+    _fileTransfers = prefs.getBool(_kFileTransfers) ?? _fileTransfers;
     _runInBackground = prefs.getBool(_kRunInBackground) ?? _runInBackground;
     _density = Density.values.firstWhere(
       (d) => d.name == prefs.getString(_kDensity),
@@ -167,6 +170,24 @@ class AppSettings extends ChangeNotifier {
 
   set saveDebugLogs(bool value) => _set(_kDebugLog, value, () {
     _saveDebugLogs = value;
+  });
+
+  /// Whether DCC file transfers are offered at all — beta.
+  ///
+  /// Off, and it takes more than a switch to turn on: the section that owns
+  /// it puts the risk in words and waits for an answer first. That is not
+  /// ceremony. Every other setting here decides how the app looks or what it
+  /// writes to its own disk; this one decides whether a stranger's message can
+  /// result in a TCP connection between their machine and this one, and
+  /// whether your address is handed to whoever asks for a file.
+  ///
+  /// While it is off, an offer is not shown at all. A notice that something
+  /// was offered and cannot be accepted is a prompt to go and turn this on,
+  /// which is the opposite of what an off switch should do.
+  bool get fileTransfers => _fileTransfers;
+
+  set fileTransfers(bool value) => _set(_kFileTransfers, value, () {
+    _fileTransfers = value;
   });
 
   set stripImageMetadata(bool value) => _set(_kStripMetadata, value, () {

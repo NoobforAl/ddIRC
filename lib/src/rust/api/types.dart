@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -122,6 +122,60 @@ sealed class ConnectionStatus with _$ConnectionStatus {
   }) = ConnectionStatus_Reconnecting;
 }
 
+/// A file someone has offered to send.
+///
+/// The filename has already been reduced to something safe to create — no
+/// directory separators, no `..`, no control characters — so it cannot name a
+/// path outside wherever the app decides to put it. Everything else here is
+/// the sender's claim and nothing more: `size` in particular is a number they
+/// wrote, not a fact about a file.
+class DccOffer {
+  /// Safe to use as a name. Not necessarily what the sender typed.
+  final String filename;
+
+  /// Where to connect, as text. Absent for a reverse offer, where the
+  /// sender is asking us to listen instead because they have no address to
+  /// give out — behind NAT, or behind Tor.
+  final String? host;
+
+  /// The port to connect to. Absent for a reverse offer.
+  final int? port;
+
+  /// How large the sender says it is.
+  final BigInt? size;
+
+  /// Identifies a reverse offer when accepting it. Present exactly when
+  /// this is one.
+  final BigInt? token;
+
+  const DccOffer({
+    required this.filename,
+    this.host,
+    this.port,
+    this.size,
+    this.token,
+  });
+
+  @override
+  int get hashCode =>
+      filename.hashCode ^
+      host.hashCode ^
+      port.hashCode ^
+      size.hashCode ^
+      token.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DccOffer &&
+          runtimeType == other.runtimeType &&
+          filename == other.filename &&
+          host == other.host &&
+          port == other.port &&
+          size == other.size &&
+          token == other.token;
+}
+
 @freezed
 sealed class IrcEvent with _$IrcEvent {
   const IrcEvent._();
@@ -182,6 +236,19 @@ sealed class IrcEvent with _$IrcEvent {
     String? channel,
     required BigInt count,
   }) = IrcEvent_MessagesDropped;
+
+  /// Someone offered to send a file, over DCC.
+  ///
+  /// Reported, never answered — nothing has been sent back and no
+  /// connection has been made. Accepting means dialling an address a
+  /// stranger chose, or listening for them, and that is the user's call.
+  const factory IrcEvent.fileOffered({
+    /// Where it arrived: a channel, or the sender's nick for a direct
+    /// message.
+    required String channel,
+    required String from,
+    required DccOffer offer,
+  }) = IrcEvent_FileOffered;
   const factory IrcEvent.error({required String message, required bool fatal}) =
       IrcEvent_Error;
 }

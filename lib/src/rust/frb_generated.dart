@@ -851,6 +851,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  DccOffer dco_decode_box_autoadd_dcc_offer(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_dcc_offer(raw);
+  }
+
+  @protected
   LocalServerInfo dco_decode_box_autoadd_local_server_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_local_server_info(raw);
@@ -872,6 +878,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int dco_decode_box_autoadd_u_16(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_u_64(raw);
   }
 
   @protected
@@ -939,6 +951,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       default:
         throw Exception("unreachable");
     }
+  }
+
+  @protected
+  DccOffer dco_decode_dcc_offer(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return DccOffer(
+      filename: dco_decode_String(arr[0]),
+      host: dco_decode_opt_String(arr[1]),
+      port: dco_decode_opt_box_autoadd_u_16(arr[2]),
+      size: dco_decode_opt_box_autoadd_u_64(arr[3]),
+      token: dco_decode_opt_box_autoadd_u_64(arr[4]),
+    );
   }
 
   @protected
@@ -1017,6 +1044,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           count: dco_decode_u_64(raw[2]),
         );
       case 12:
+        return IrcEvent_FileOffered(
+          channel: dco_decode_String(raw[1]),
+          from: dco_decode_String(raw[2]),
+          offer: dco_decode_box_autoadd_dcc_offer(raw[3]),
+        );
+      case 13:
         return IrcEvent_Error(
           message: dco_decode_String(raw[1]),
           fatal: dco_decode_bool(raw[2]),
@@ -1110,6 +1143,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int? dco_decode_opt_box_autoadd_u_16(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_16(raw);
+  }
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_64(raw);
   }
 
   @protected
@@ -1332,6 +1371,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  DccOffer sse_decode_box_autoadd_dcc_offer(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_dcc_offer(deserializer));
+  }
+
+  @protected
   LocalServerInfo sse_decode_box_autoadd_local_server_info(
     SseDeserializer deserializer,
   ) {
@@ -1359,6 +1404,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_box_autoadd_u_16(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_u_16(deserializer));
+  }
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_64(deserializer));
   }
 
   @protected
@@ -1442,6 +1493,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       default:
         throw UnimplementedError('');
     }
+  }
+
+  @protected
+  DccOffer sse_decode_dcc_offer(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_filename = sse_decode_String(deserializer);
+    var var_host = sse_decode_opt_String(deserializer);
+    var var_port = sse_decode_opt_box_autoadd_u_16(deserializer);
+    var var_size = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_token = sse_decode_opt_box_autoadd_u_64(deserializer);
+    return DccOffer(
+      filename: var_filename,
+      host: var_host,
+      port: var_port,
+      size: var_size,
+      token: var_token,
+    );
   }
 
   @protected
@@ -1542,6 +1610,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         var var_count = sse_decode_u_64(deserializer);
         return IrcEvent_MessagesDropped(channel: var_channel, count: var_count);
       case 12:
+        var var_channel = sse_decode_String(deserializer);
+        var var_from = sse_decode_String(deserializer);
+        var var_offer = sse_decode_box_autoadd_dcc_offer(deserializer);
+        return IrcEvent_FileOffered(
+          channel: var_channel,
+          from: var_from,
+          offer: var_offer,
+        );
+      case 13:
         var var_message = sse_decode_String(deserializer);
         var var_fatal = sse_decode_bool(deserializer);
         return IrcEvent_Error(message: var_message, fatal: var_fatal);
@@ -1677,6 +1754,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_u_16(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_64(deserializer));
     } else {
       return null;
     }
@@ -1942,6 +2030,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_dcc_offer(
+    DccOffer self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_dcc_offer(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_local_server_info(
     LocalServerInfo self,
     SseSerializer serializer,
@@ -1972,6 +2069,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_16(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self, serializer);
   }
 
   @protected
@@ -2040,6 +2143,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_u_64(retryInSecs, serializer);
         sse_encode_u_32(attempt, serializer);
     }
+  }
+
+  @protected
+  void sse_encode_dcc_offer(DccOffer self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.filename, serializer);
+    sse_encode_opt_String(self.host, serializer);
+    sse_encode_opt_box_autoadd_u_16(self.port, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.size, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.token, serializer);
   }
 
   @protected
@@ -2137,8 +2250,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_i_32(11, serializer);
         sse_encode_opt_String(channel, serializer);
         sse_encode_u_64(count, serializer);
-      case IrcEvent_Error(message: final message, fatal: final fatal):
+      case IrcEvent_FileOffered(
+        channel: final channel,
+        from: final from,
+        offer: final offer,
+      ):
         sse_encode_i_32(12, serializer);
+        sse_encode_String(channel, serializer);
+        sse_encode_String(from, serializer);
+        sse_encode_box_autoadd_dcc_offer(offer, serializer);
+      case IrcEvent_Error(message: final message, fatal: final fatal):
+        sse_encode_i_32(13, serializer);
         sse_encode_String(message, serializer);
         sse_encode_bool(fatal, serializer);
     }
@@ -2273,6 +2395,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_u_16(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_64(self, serializer);
     }
   }
 

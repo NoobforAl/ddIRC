@@ -768,6 +768,41 @@ impl Actor {
         }
     }
 
+    /// Handle a CTCP request that is not ACTION.
+    ///
+    /// Exactly one is recognised — `DCC SEND` — and recognising it means
+    /// emitting an event, not replying and not connecting. Everything else is
+    /// dropped in silence, which is the existing policy and the reason this
+    /// client cannot be made to report its version, its uptime or its
+    /// timezone to anyone who asks.
+    ///
+    /// A NOTICE is never a request, so a `DCC` arriving in one is ignored:
+    /// answering a NOTICE is how two clients get into a loop, and the reply to
+    /// a CTCP request is itself a NOTICE.
+    fn on_ctcp(&mut self, target: &str, body: &str, sender: &str, is_notice: bool) {
+        if is_notice {
+            return;
+        }
+        let Some(offer) = crate::dcc::offer::parse_send(body) else {
+            return;
+        };
+
+        // Routed to where the offer arrived: a channel, or the conversation
+        // with whoever sent it. An offer shown somewhere other than where it
+        // was made would leave no way to tell who is asking.
+        let channel = if self.session.is_self(target) {
+            sender.to_owned()
+        } else {
+            target.to_owned()
+        };
+
+        self.emit(IrcEvent::FileOffered {
+            channel,
+            from: sender.to_owned(),
+            offer: Box::new(offer),
+        });
+    }
+
     /// Handle a PRIVMSG or NOTICE.
     fn on_chat(&mut self, target: &str, text: &str, source: Option<String>, is_notice: bool) {
         let Some(sender) = source else { return };
@@ -775,10 +810,18 @@ impl Actor {
         // CTCP ACTION is "\x01ACTION <text>\x01"; other CTCP requests are not
         // chat and are deliberately ignored rather than answered, so the client
         // cannot be used to leak version or timezone information.
+        //
+        // DCC is the one exception, and it is not an exception to that rule:
+        // an offer is reported, never answered. Nothing is sent back and no
+        // connection is made — the user decides, because accepting means
+        // dialling an address a stranger chose.
         let trimmed = text.trim_matches('\u{01}');
         let (body, is_action) = match trimmed.strip_prefix("ACTION ") {
             Some(rest) => (rest, true),
-            None if text.starts_with('\u{01}') => return,
+            None if text.starts_with('\u{01}') => {
+                self.on_ctcp(target, trimmed, &sender, is_notice);
+                return;
+            }
             None => (text, false),
         };
 
@@ -1266,6 +1309,111 @@ mod tests {
             .expect("expected a Message event");
         // The conversation is with alice, not with ourselves.
         assert_eq!(message.target, Target::Direct("alice".to_owned()));
+    }
+
+    #[test]
+    fn a_dcc_offer_is_reported_and_never_answered() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG #test :\u{01}DCC SEND cat.jpg 2130706433 5001 4096\u{01}",
+        );
+
+        let events = drain(&mut rx);
+        let offered = events
+            .iter()
+            .find_map(|e| match e {
+                IrcEvent::FileOffered {
+                    channel,
+                    from,
+                    offer,
+                } => Some((channel, from, offer)),
+                _ => None,
+            })
+            .expect("expected a FileOffered event");
+
+        assert_eq!(offered.0, "#test");
+        assert_eq!(offered.1, "alice");
+        assert_eq!(offered.2.filename, "cat.jpg");
+        assert_eq!(offered.2.port, Some(5001));
+
+        // The whole point: nothing was sent back, and no connection was made.
+        // An offer is reported so the user can decide, not acted on.
+        assert!(outgoing.is_empty(), "no reply was queued");
+        // And it is not chat, so it does not appear as something someone said.
+        assert!(
+            !events.iter().any(|e| matches!(e, IrcEvent::Message(_))),
+            "a DCC offer is not a chat line"
+        );
+    }
+
+    #[test]
+    fn a_dcc_offer_in_a_direct_message_belongs_to_the_sender() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC SEND f 1 2 3\u{01}",
+        );
+
+        let channel = drain(&mut rx)
+            .into_iter()
+            .find_map(|e| match e {
+                IrcEvent::FileOffered { channel, .. } => Some(channel),
+                _ => None,
+            })
+            .expect("expected a FileOffered event");
+        // Shown in the conversation with alice, not one named after us.
+        assert_eq!(channel, "alice");
+    }
+
+    #[test]
+    fn a_dcc_offer_in_a_notice_is_ignored() {
+        // A NOTICE is never a request, and the reply to a CTCP request is
+        // itself a NOTICE — answering one is how two clients start a loop.
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h NOTICE #test :\u{01}DCC SEND f 1 2 3\u{01}",
+        );
+
+        assert!(
+            !drain(&mut rx)
+                .iter()
+                .any(|e| matches!(e, IrcEvent::FileOffered { .. })),
+            "a DCC offer in a NOTICE is not an offer"
+        );
+    }
+
+    #[test]
+    fn a_dcc_offer_naming_a_path_is_dropped_rather_than_shown() {
+        // `parse_send` refuses a filename that cannot be safely created, and
+        // the actor does not paper over that with a blank one: an offer that
+        // cannot be accepted is not shown as one that can.
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":mallory!u@h PRIVMSG #test :\u{01}DCC SEND \"..\" 1 2 3\u{01}",
+        );
+
+        assert!(
+            !drain(&mut rx)
+                .iter()
+                .any(|e| matches!(e, IrcEvent::FileOffered { .. })),
+            "an unusable filename is not an offer"
+        );
     }
 
     #[test]

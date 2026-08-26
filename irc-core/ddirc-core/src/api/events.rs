@@ -5,6 +5,7 @@
 //! later does not change the API surface.
 
 use crate::api::types::{AuthOutcome, ChatMessage, ConnectionStatus, MemberView};
+use crate::dcc::DccOffer;
 
 /// Something that happened on a connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +93,24 @@ pub enum IrcEvent {
     /// a quiet gap in a conversation is never mistaken for silence.
     MessagesDropped { channel: Option<String>, count: u64 },
 
+    /// Someone offered to send a file, over DCC.
+    ///
+    /// Reported, never answered. Accepting means opening a connection to an
+    /// address a stranger chose, or opening a listener for them — either way a
+    /// decision the user makes, not one the client makes on their behalf.
+    ///
+    /// The offer has already been through [`crate::dcc::offer::parse_send`],
+    /// so the filename is safe to create and the address is an `IpAddr` rather
+    /// than a string. Everything else about it is still the sender's claim.
+    FileOffered {
+        /// The conversation it arrived in, so it can be shown in place. A
+        /// channel name, or the sender's nick for a direct message.
+        channel: String,
+        /// Who offered it.
+        from: String,
+        offer: Box<DccOffer>,
+    },
+
     /// A server error or a protocol-level problem worth showing the user.
     Error { message: String, fatal: bool },
 }
@@ -108,6 +127,7 @@ impl IrcEvent {
             | Self::MemberList { channel, .. }
             | Self::ModeChanged { channel, .. } => Some(channel),
             Self::Message(message) => Some(message.target.name()),
+            Self::FileOffered { channel, .. } => Some(channel),
             Self::MessagesDropped { channel, .. } => channel.as_deref(),
             Self::Status { .. }
             | Self::Registered { .. }

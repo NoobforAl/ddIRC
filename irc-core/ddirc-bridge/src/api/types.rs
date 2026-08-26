@@ -6,6 +6,7 @@
 //! tuned for Dart ergonomics without disturbing the core.
 
 use ddirc_core::api::{events, types};
+use ddirc_core::dcc;
 use ddirc_core::media;
 use ddirc_core::text::format;
 
@@ -147,10 +148,50 @@ pub enum IrcEvent {
         channel: Option<String>,
         count: u64,
     },
+    /// Someone offered to send a file, over DCC.
+    ///
+    /// Reported, never answered — nothing has been sent back and no
+    /// connection has been made. Accepting means dialling an address a
+    /// stranger chose, or listening for them, and that is the user's call.
+    FileOffered {
+        /// Where it arrived: a channel, or the sender's nick for a direct
+        /// message.
+        channel: String,
+        from: String,
+        offer: DccOffer,
+    },
     Error {
         message: String,
         fatal: bool,
     },
+}
+
+/// A file someone has offered to send.
+///
+/// The filename has already been reduced to something safe to create — no
+/// directory separators, no `..`, no control characters — so it cannot name a
+/// path outside wherever the app decides to put it. Everything else here is
+/// the sender's claim and nothing more: `size` in particular is a number they
+/// wrote, not a fact about a file.
+#[derive(Debug, Clone)]
+pub struct DccOffer {
+    /// Safe to use as a name. Not necessarily what the sender typed.
+    pub filename: String,
+
+    /// Where to connect, as text. Absent for a reverse offer, where the
+    /// sender is asking us to listen instead because they have no address to
+    /// give out — behind NAT, or behind Tor.
+    pub host: Option<String>,
+
+    /// The port to connect to. Absent for a reverse offer.
+    pub port: Option<u16>,
+
+    /// How large the sender says it is.
+    pub size: Option<u64>,
+
+    /// Identifies a reverse offer when accepting it. Present exactly when
+    /// this is one.
+    pub token: Option<u64>,
 }
 
 /// A SOCKS5 proxy to dial through.
@@ -372,7 +413,31 @@ impl From<events::IrcEvent> for IrcEvent {
             events::IrcEvent::MessagesDropped { channel, count } => {
                 Self::MessagesDropped { channel, count }
             }
+            events::IrcEvent::FileOffered {
+                channel,
+                from,
+                offer,
+            } => Self::FileOffered {
+                channel,
+                from,
+                offer: (*offer).into(),
+            },
             events::IrcEvent::Error { message, fatal } => Self::Error { message, fatal },
+        }
+    }
+}
+
+impl From<dcc::DccOffer> for DccOffer {
+    fn from(offer: dcc::DccOffer) -> Self {
+        Self {
+            filename: offer.filename,
+            // Rendered here rather than on the far side: Dart has no address
+            // type, and formatting an `IpAddr` in two places is how the two
+            // spellings of an IPv6 address drift apart.
+            host: offer.addr.map(|a| a.to_string()),
+            port: offer.port,
+            size: offer.size,
+            token: offer.token,
         }
     }
 }

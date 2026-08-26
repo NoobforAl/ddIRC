@@ -306,9 +306,9 @@ is now exercised by an ordinary `cargo test`.
 
 ## 3. Sending media — beta
 
-**The decision is made: DCC.** See *The problem to solve* at the end of this
-section for the arithmetic that forced it, and *What is left* for the three
-pieces of work it breaks into.
+**The decision is made: DCC**, and the first piece is built — see *Built so
+far*. It ships **beta**, off by default, and turning it on means reading what
+is being accepted first.
 
 A protocol for sending files over IRC, since there is no standard one for
 in-band transfer.
@@ -417,16 +417,44 @@ stops being a chat-message protocol and becomes a framing over the direct
 connection, where the 400-character cap and the send limiter do not apply and
 the 128 MB ceiling becomes reasonable rather than absurd.
 
+### Built so far: reading an offer, and a switch that asks first
+
+✅ **`ddirc-core/src/dcc/`** parses a `DCC SEND` offer, and the actor emits
+`FileOffered` rather than answering it. Nothing is sent back and no connection
+is made — an offer is reported, and accepting is a separate decision that does
+not exist yet.
+
+The filename is the dangerous part and is treated as such. `..\..\.bashrc`,
+`/etc/passwd` and `C:\Windows\System32\drivers\etc\hosts` all reduce to a
+bare name; `.`, `..`, control characters, empty and over-255-byte names are
+refused outright, and an offer whose name cannot be used is dropped rather than
+shown with a blank one. The address is parsed into an `IpAddr` — including the
+packed 32-bit form the protocol actually specifies, where `127.0.0.1` is
+`2130706433` — and judged by nobody here. 19 tests.
+
+✅ **Off by default, and it asks before turning on.** The only switch in App
+settings that does. Every other setting there decides how the app looks or what
+it writes to its own disk; this one decides whether a stranger's message can
+end in a TCP connection between their machine and this one. The dialog is the
+explanation rather than a confirmation — four facts, and the switch is the
+answer to them — and the safer button takes the emphasis, because a consent
+dialog that urges the choice it is warning about has not asked anything.
+
+While it is off, an offer is not shown at all. A notice that something was
+offered and cannot be accepted is a prompt to go and turn this on, which is the
+opposite of what an off switch should do.
+
 ### What is left
 
 1. **Settle what DCC does while Tor is on**, which is the question above and
-   the one that shapes everything else.
-2. **The offer and the acceptance**, in `ddirc-core`: CTCP `DCC SEND`,
-   parsing and emitting, with the address and port handled as data rather than
-   trusted.
-3. **The transfer itself**, and the UI for it — a progress that can be seen and
-   a transfer that can be cancelled, without the chunk traffic appearing as
-   chat lines.
+   the one that shapes everything else. The settings section already says
+   plainly that a transfer does not go through Tor, which is honest but is not
+   an answer.
+2. **Accepting an offer** — connecting, or listening for a reverse one, and
+   writing the file where the user chose with the name already made safe.
+3. **Sending**, which is where the address question becomes unavoidable.
+4. **The UI for a transfer in flight** — progress that can be seen and a
+   transfer that can be cancelled, without the traffic appearing as chat.
 
 ## Done
 

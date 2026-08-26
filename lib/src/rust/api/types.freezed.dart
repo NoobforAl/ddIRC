@@ -1138,7 +1138,7 @@ extension IrcEventPatterns on IrcEvent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IrcEvent_Status value)?  status,TResult Function( IrcEvent_Registered value)?  registered,TResult Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult Function( IrcEvent_Message value)?  message,TResult Function( IrcEvent_Joined value)?  joined,TResult Function( IrcEvent_Parted value)?  parted,TResult Function( IrcEvent_Quit value)?  quit,TResult Function( IrcEvent_NickChanged value)?  nickChanged,TResult Function( IrcEvent_TopicChanged value)?  topicChanged,TResult Function( IrcEvent_MemberList value)?  memberList,TResult Function( IrcEvent_ModeChanged value)?  modeChanged,TResult Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult Function( IrcEvent_Error value)?  error,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IrcEvent_Status value)?  status,TResult Function( IrcEvent_Registered value)?  registered,TResult Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult Function( IrcEvent_Message value)?  message,TResult Function( IrcEvent_Joined value)?  joined,TResult Function( IrcEvent_Parted value)?  parted,TResult Function( IrcEvent_Quit value)?  quit,TResult Function( IrcEvent_NickChanged value)?  nickChanged,TResult Function( IrcEvent_TopicChanged value)?  topicChanged,TResult Function( IrcEvent_MemberList value)?  memberList,TResult Function( IrcEvent_ModeChanged value)?  modeChanged,TResult Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult Function( IrcEvent_FileOffered value)?  fileOffered,TResult Function( IrcEvent_Error value)?  error,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
@@ -1153,7 +1153,8 @@ return nickChanged(_that);case IrcEvent_TopicChanged() when topicChanged != null
 return topicChanged(_that);case IrcEvent_MemberList() when memberList != null:
 return memberList(_that);case IrcEvent_ModeChanged() when modeChanged != null:
 return modeChanged(_that);case IrcEvent_MessagesDropped() when messagesDropped != null:
-return messagesDropped(_that);case IrcEvent_Error() when error != null:
+return messagesDropped(_that);case IrcEvent_FileOffered() when fileOffered != null:
+return fileOffered(_that);case IrcEvent_Error() when error != null:
 return error(_that);case _:
   return orElse();
 
@@ -1172,7 +1173,7 @@ return error(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IrcEvent_Status value)  status,required TResult Function( IrcEvent_Registered value)  registered,required TResult Function( IrcEvent_NetworkNamed value)  networkNamed,required TResult Function( IrcEvent_Message value)  message,required TResult Function( IrcEvent_Joined value)  joined,required TResult Function( IrcEvent_Parted value)  parted,required TResult Function( IrcEvent_Quit value)  quit,required TResult Function( IrcEvent_NickChanged value)  nickChanged,required TResult Function( IrcEvent_TopicChanged value)  topicChanged,required TResult Function( IrcEvent_MemberList value)  memberList,required TResult Function( IrcEvent_ModeChanged value)  modeChanged,required TResult Function( IrcEvent_MessagesDropped value)  messagesDropped,required TResult Function( IrcEvent_Error value)  error,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IrcEvent_Status value)  status,required TResult Function( IrcEvent_Registered value)  registered,required TResult Function( IrcEvent_NetworkNamed value)  networkNamed,required TResult Function( IrcEvent_Message value)  message,required TResult Function( IrcEvent_Joined value)  joined,required TResult Function( IrcEvent_Parted value)  parted,required TResult Function( IrcEvent_Quit value)  quit,required TResult Function( IrcEvent_NickChanged value)  nickChanged,required TResult Function( IrcEvent_TopicChanged value)  topicChanged,required TResult Function( IrcEvent_MemberList value)  memberList,required TResult Function( IrcEvent_ModeChanged value)  modeChanged,required TResult Function( IrcEvent_MessagesDropped value)  messagesDropped,required TResult Function( IrcEvent_FileOffered value)  fileOffered,required TResult Function( IrcEvent_Error value)  error,}){
 final _that = this;
 switch (_that) {
 case IrcEvent_Status():
@@ -1187,7 +1188,8 @@ return nickChanged(_that);case IrcEvent_TopicChanged():
 return topicChanged(_that);case IrcEvent_MemberList():
 return memberList(_that);case IrcEvent_ModeChanged():
 return modeChanged(_that);case IrcEvent_MessagesDropped():
-return messagesDropped(_that);case IrcEvent_Error():
+return messagesDropped(_that);case IrcEvent_FileOffered():
+return fileOffered(_that);case IrcEvent_Error():
 return error(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -1202,7 +1204,7 @@ return error(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IrcEvent_Status value)?  status,TResult? Function( IrcEvent_Registered value)?  registered,TResult? Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult? Function( IrcEvent_Message value)?  message,TResult? Function( IrcEvent_Joined value)?  joined,TResult? Function( IrcEvent_Parted value)?  parted,TResult? Function( IrcEvent_Quit value)?  quit,TResult? Function( IrcEvent_NickChanged value)?  nickChanged,TResult? Function( IrcEvent_TopicChanged value)?  topicChanged,TResult? Function( IrcEvent_MemberList value)?  memberList,TResult? Function( IrcEvent_ModeChanged value)?  modeChanged,TResult? Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult? Function( IrcEvent_Error value)?  error,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IrcEvent_Status value)?  status,TResult? Function( IrcEvent_Registered value)?  registered,TResult? Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult? Function( IrcEvent_Message value)?  message,TResult? Function( IrcEvent_Joined value)?  joined,TResult? Function( IrcEvent_Parted value)?  parted,TResult? Function( IrcEvent_Quit value)?  quit,TResult? Function( IrcEvent_NickChanged value)?  nickChanged,TResult? Function( IrcEvent_TopicChanged value)?  topicChanged,TResult? Function( IrcEvent_MemberList value)?  memberList,TResult? Function( IrcEvent_ModeChanged value)?  modeChanged,TResult? Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult? Function( IrcEvent_FileOffered value)?  fileOffered,TResult? Function( IrcEvent_Error value)?  error,}){
 final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
@@ -1217,7 +1219,8 @@ return nickChanged(_that);case IrcEvent_TopicChanged() when topicChanged != null
 return topicChanged(_that);case IrcEvent_MemberList() when memberList != null:
 return memberList(_that);case IrcEvent_ModeChanged() when modeChanged != null:
 return modeChanged(_that);case IrcEvent_MessagesDropped() when messagesDropped != null:
-return messagesDropped(_that);case IrcEvent_Error() when error != null:
+return messagesDropped(_that);case IrcEvent_FileOffered() when fileOffered != null:
+return fileOffered(_that);case IrcEvent_Error() when error != null:
 return error(_that);case _:
   return null;
 
@@ -1235,7 +1238,7 @@ return error(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( ConnectionStatus status,  String? detail)?  status,TResult Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult Function( String network)?  networkNamed,TResult Function( ChatMessage message)?  message,TResult Function( String channel,  String nick,  bool isSelf)?  joined,TResult Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult Function( String channel,  String nick,  String? reason)?  quit,TResult Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult Function( String channel,  List<MemberView> members)?  memberList,TResult Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult Function( String? channel,  BigInt count)?  messagesDropped,TResult Function( String message,  bool fatal)?  error,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( ConnectionStatus status,  String? detail)?  status,TResult Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult Function( String network)?  networkNamed,TResult Function( ChatMessage message)?  message,TResult Function( String channel,  String nick,  bool isSelf)?  joined,TResult Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult Function( String channel,  String nick,  String? reason)?  quit,TResult Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult Function( String channel,  List<MemberView> members)?  memberList,TResult Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult Function( String? channel,  BigInt count)?  messagesDropped,TResult Function( String channel,  String from,  DccOffer offer)?  fileOffered,TResult Function( String message,  bool fatal)?  error,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
 return status(_that.status,_that.detail);case IrcEvent_Registered() when registered != null:
@@ -1249,7 +1252,8 @@ return nickChanged(_that.channel,_that.old,_that.new_,_that.isSelf);case IrcEven
 return topicChanged(_that.channel,_that.topic,_that.setBy);case IrcEvent_MemberList() when memberList != null:
 return memberList(_that.channel,_that.members);case IrcEvent_ModeChanged() when modeChanged != null:
 return modeChanged(_that.channel,_that.by,_that.affected);case IrcEvent_MessagesDropped() when messagesDropped != null:
-return messagesDropped(_that.channel,_that.count);case IrcEvent_Error() when error != null:
+return messagesDropped(_that.channel,_that.count);case IrcEvent_FileOffered() when fileOffered != null:
+return fileOffered(_that.channel,_that.from,_that.offer);case IrcEvent_Error() when error != null:
 return error(_that.message,_that.fatal);case _:
   return orElse();
 
@@ -1268,7 +1272,7 @@ return error(_that.message,_that.fatal);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( ConnectionStatus status,  String? detail)  status,required TResult Function( String nick,  String? network,  AuthOutcome auth)  registered,required TResult Function( String network)  networkNamed,required TResult Function( ChatMessage message)  message,required TResult Function( String channel,  String nick,  bool isSelf)  joined,required TResult Function( String channel,  String nick,  bool isSelf,  String? reason)  parted,required TResult Function( String channel,  String nick,  String? reason)  quit,required TResult Function( String channel,  String old,  String new_,  bool isSelf)  nickChanged,required TResult Function( String channel,  String topic,  String? setBy)  topicChanged,required TResult Function( String channel,  List<MemberView> members)  memberList,required TResult Function( String channel,  String? by,  List<String> affected)  modeChanged,required TResult Function( String? channel,  BigInt count)  messagesDropped,required TResult Function( String message,  bool fatal)  error,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( ConnectionStatus status,  String? detail)  status,required TResult Function( String nick,  String? network,  AuthOutcome auth)  registered,required TResult Function( String network)  networkNamed,required TResult Function( ChatMessage message)  message,required TResult Function( String channel,  String nick,  bool isSelf)  joined,required TResult Function( String channel,  String nick,  bool isSelf,  String? reason)  parted,required TResult Function( String channel,  String nick,  String? reason)  quit,required TResult Function( String channel,  String old,  String new_,  bool isSelf)  nickChanged,required TResult Function( String channel,  String topic,  String? setBy)  topicChanged,required TResult Function( String channel,  List<MemberView> members)  memberList,required TResult Function( String channel,  String? by,  List<String> affected)  modeChanged,required TResult Function( String? channel,  BigInt count)  messagesDropped,required TResult Function( String channel,  String from,  DccOffer offer)  fileOffered,required TResult Function( String message,  bool fatal)  error,}) {final _that = this;
 switch (_that) {
 case IrcEvent_Status():
 return status(_that.status,_that.detail);case IrcEvent_Registered():
@@ -1282,7 +1286,8 @@ return nickChanged(_that.channel,_that.old,_that.new_,_that.isSelf);case IrcEven
 return topicChanged(_that.channel,_that.topic,_that.setBy);case IrcEvent_MemberList():
 return memberList(_that.channel,_that.members);case IrcEvent_ModeChanged():
 return modeChanged(_that.channel,_that.by,_that.affected);case IrcEvent_MessagesDropped():
-return messagesDropped(_that.channel,_that.count);case IrcEvent_Error():
+return messagesDropped(_that.channel,_that.count);case IrcEvent_FileOffered():
+return fileOffered(_that.channel,_that.from,_that.offer);case IrcEvent_Error():
 return error(_that.message,_that.fatal);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -1297,7 +1302,7 @@ return error(_that.message,_that.fatal);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( ConnectionStatus status,  String? detail)?  status,TResult? Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult? Function( String network)?  networkNamed,TResult? Function( ChatMessage message)?  message,TResult? Function( String channel,  String nick,  bool isSelf)?  joined,TResult? Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult? Function( String channel,  String nick,  String? reason)?  quit,TResult? Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult? Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult? Function( String channel,  List<MemberView> members)?  memberList,TResult? Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult? Function( String? channel,  BigInt count)?  messagesDropped,TResult? Function( String message,  bool fatal)?  error,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( ConnectionStatus status,  String? detail)?  status,TResult? Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult? Function( String network)?  networkNamed,TResult? Function( ChatMessage message)?  message,TResult? Function( String channel,  String nick,  bool isSelf)?  joined,TResult? Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult? Function( String channel,  String nick,  String? reason)?  quit,TResult? Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult? Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult? Function( String channel,  List<MemberView> members)?  memberList,TResult? Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult? Function( String? channel,  BigInt count)?  messagesDropped,TResult? Function( String channel,  String from,  DccOffer offer)?  fileOffered,TResult? Function( String message,  bool fatal)?  error,}) {final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
 return status(_that.status,_that.detail);case IrcEvent_Registered() when registered != null:
@@ -1311,7 +1316,8 @@ return nickChanged(_that.channel,_that.old,_that.new_,_that.isSelf);case IrcEven
 return topicChanged(_that.channel,_that.topic,_that.setBy);case IrcEvent_MemberList() when memberList != null:
 return memberList(_that.channel,_that.members);case IrcEvent_ModeChanged() when modeChanged != null:
 return modeChanged(_that.channel,_that.by,_that.affected);case IrcEvent_MessagesDropped() when messagesDropped != null:
-return messagesDropped(_that.channel,_that.count);case IrcEvent_Error() when error != null:
+return messagesDropped(_that.channel,_that.count);case IrcEvent_FileOffered() when fileOffered != null:
+return fileOffered(_that.channel,_that.from,_that.offer);case IrcEvent_Error() when error != null:
 return error(_that.message,_that.fatal);case _:
   return null;
 
@@ -2174,6 +2180,78 @@ class _$IrcEvent_MessagesDroppedCopyWithImpl<$Res>
 channel: freezed == channel ? _self.channel : channel // ignore: cast_nullable_to_non_nullable
 as String?,count: null == count ? _self.count : count // ignore: cast_nullable_to_non_nullable
 as BigInt,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class IrcEvent_FileOffered extends IrcEvent {
+  const IrcEvent_FileOffered({required this.channel, required this.from, required this.offer}): super._();
+  
+
+/// Where it arrived: a channel, or the sender's nick for a direct
+/// message.
+ final  String channel;
+ final  String from;
+ final  DccOffer offer;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_FileOfferedCopyWith<IrcEvent_FileOffered> get copyWith => _$IrcEvent_FileOfferedCopyWithImpl<IrcEvent_FileOffered>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileOffered&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.from, from) || other.from == from)&&(identical(other.offer, offer) || other.offer == offer));
+}
+
+
+@override
+int get hashCode => Object.hash(runtimeType,channel,from,offer);
+
+@override
+String toString() {
+  return 'IrcEvent.fileOffered(channel: $channel, from: $from, offer: $offer)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_FileOfferedCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_FileOfferedCopyWith(IrcEvent_FileOffered value, $Res Function(IrcEvent_FileOffered) _then) = _$IrcEvent_FileOfferedCopyWithImpl;
+@useResult
+$Res call({
+ String channel, String from, DccOffer offer
+});
+
+
+
+
+}
+/// @nodoc
+class _$IrcEvent_FileOfferedCopyWithImpl<$Res>
+    implements $IrcEvent_FileOfferedCopyWith<$Res> {
+  _$IrcEvent_FileOfferedCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_FileOffered _self;
+  final $Res Function(IrcEvent_FileOffered) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? channel = null,Object? from = null,Object? offer = null,}) {
+  return _then(IrcEvent_FileOffered(
+channel: null == channel ? _self.channel : channel // ignore: cast_nullable_to_non_nullable
+as String,from: null == from ? _self.from : from // ignore: cast_nullable_to_non_nullable
+as String,offer: null == offer ? _self.offer : offer // ignore: cast_nullable_to_non_nullable
+as DccOffer,
   ));
 }
 

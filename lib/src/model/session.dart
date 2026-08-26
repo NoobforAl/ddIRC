@@ -452,11 +452,56 @@ class SessionModel extends ChangeNotifier {
           );
         }
 
+      case IrcEvent_FileOffered(:final channel, :final from, :final offer):
+        // Nothing has happened: the core reports an offer and never answers
+        // one, so no connection exists and nothing has been sent back.
+        //
+        // Not shown at all unless file transfers are switched on. An offer
+        // that cannot be accepted is a prompt to go and enable something,
+        // which is not what an off switch should do — and the offer itself is
+        // a stranger's text, so displaying it is the one thing that costs
+        // anything here.
+        if (!settings.fileTransfers) break;
+        _addLine(
+          channel,
+          ChatLine.system(
+            _describeOffer(from, offer),
+            now,
+            SystemKind.connection,
+          ),
+          isChannel: channel.startsWith('#'),
+        );
+
       case IrcEvent_Error(:final message):
         _addToActive('error: $message');
         AppLog.instance.debug('[${_network ?? config.host}] error: $message');
     }
     notifyListeners();
+  }
+
+  /// One line for a file someone has offered.
+  ///
+  /// The size is the sender's claim and is written as one — "says it is" —
+  /// because nothing has verified it and a transfer that turns out to be ten
+  /// times larger should not be able to say it was never warned about.
+  String _describeOffer(String from, DccOffer offer) {
+    final size = offer.size;
+    final howBig = size == null ? '' : ', says it is ${_bytes(size)}';
+    return '$from offered you "${offer.filename}"$howBig';
+  }
+
+  /// Bytes, in the unit a person would use.
+  static String _bytes(BigInt count) {
+    const kb = 1024.0;
+    const mb = kb * 1024;
+    const gb = mb * 1024;
+    final n = count.toDouble();
+    return switch (n) {
+      < kb => '$count B',
+      < mb => '${(n / kb).toStringAsFixed(0)} KB',
+      < gb => '${(n / mb).toStringAsFixed(1)} MB',
+      _ => '${(n / gb).toStringAsFixed(1)} GB',
+    };
   }
 
   /// Leaving for real: the conversation is gone, so its tab goes with it.

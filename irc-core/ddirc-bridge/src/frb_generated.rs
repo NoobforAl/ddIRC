@@ -910,6 +910,24 @@ impl SseDecode for crate::api::types::ConnectionStatus {
     }
 }
 
+impl SseDecode for crate::api::types::DccOffer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_filename = <String>::sse_decode(deserializer);
+        let mut var_host = <Option<String>>::sse_decode(deserializer);
+        let mut var_port = <Option<u16>>::sse_decode(deserializer);
+        let mut var_size = <Option<u64>>::sse_decode(deserializer);
+        let mut var_token = <Option<u64>>::sse_decode(deserializer);
+        return crate::api::types::DccOffer {
+            filename: var_filename,
+            host: var_host,
+            port: var_port,
+            size: var_size,
+            token: var_token,
+        };
+    }
+}
+
 impl SseDecode for f32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1035,6 +1053,16 @@ impl SseDecode for crate::api::types::IrcEvent {
                 };
             }
             12 => {
+                let mut var_channel = <String>::sse_decode(deserializer);
+                let mut var_from = <String>::sse_decode(deserializer);
+                let mut var_offer = <crate::api::types::DccOffer>::sse_decode(deserializer);
+                return crate::api::types::IrcEvent::FileOffered {
+                    channel: var_channel,
+                    from: var_from,
+                    offer: var_offer,
+                };
+            }
+            13 => {
                 let mut var_message = <String>::sse_decode(deserializer);
                 let mut var_fatal = <bool>::sse_decode(deserializer);
                 return crate::api::types::IrcEvent::Error {
@@ -1177,6 +1205,17 @@ impl SseDecode for Option<u16> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<u16>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u64>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -1541,6 +1580,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::ConnectionStatus>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::types::DccOffer {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.filename.into_into_dart().into_dart(),
+            self.host.into_into_dart().into_dart(),
+            self.port.into_into_dart().into_dart(),
+            self.size.into_into_dart().into_dart(),
+            self.token.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::types::DccOffer {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::types::DccOffer>
+    for crate::api::types::DccOffer
+{
+    fn into_into_dart(self) -> crate::api::types::DccOffer {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::types::IrcEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
@@ -1649,8 +1709,19 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::IrcEvent {
                 count.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            crate::api::types::IrcEvent::Error { message, fatal } => [
+            crate::api::types::IrcEvent::FileOffered {
+                channel,
+                from,
+                offer,
+            } => [
                 12.into_dart(),
+                channel.into_into_dart().into_dart(),
+                from.into_into_dart().into_dart(),
+                offer.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::types::IrcEvent::Error { message, fatal } => [
+                13.into_dart(),
                 message.into_into_dart().into_dart(),
                 fatal.into_into_dart().into_dart(),
             ]
@@ -2005,6 +2076,17 @@ impl SseEncode for crate::api::types::ConnectionStatus {
     }
 }
 
+impl SseEncode for crate::api::types::DccOffer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.filename, serializer);
+        <Option<String>>::sse_encode(self.host, serializer);
+        <Option<u16>>::sse_encode(self.port, serializer);
+        <Option<u64>>::sse_encode(self.size, serializer);
+        <Option<u64>>::sse_encode(self.token, serializer);
+    }
+}
+
 impl SseEncode for f32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -2113,8 +2195,18 @@ impl SseEncode for crate::api::types::IrcEvent {
                 <Option<String>>::sse_encode(channel, serializer);
                 <u64>::sse_encode(count, serializer);
             }
-            crate::api::types::IrcEvent::Error { message, fatal } => {
+            crate::api::types::IrcEvent::FileOffered {
+                channel,
+                from,
+                offer,
+            } => {
                 <i32>::sse_encode(12, serializer);
+                <String>::sse_encode(channel, serializer);
+                <String>::sse_encode(from, serializer);
+                <crate::api::types::DccOffer>::sse_encode(offer, serializer);
+            }
+            crate::api::types::IrcEvent::Error { message, fatal } => {
+                <i32>::sse_encode(13, serializer);
                 <String>::sse_encode(message, serializer);
                 <bool>::sse_encode(fatal, serializer);
             }
@@ -2229,6 +2321,16 @@ impl SseEncode for Option<u16> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <u16>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u64>::sse_encode(value, serializer);
         }
     }
 }

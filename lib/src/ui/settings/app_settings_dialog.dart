@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../model/log.dart';
 import '../../model/settings.dart';
 import '../background.dart';
+import 'file_transfer_section.dart';
 import 'local_server_section.dart';
 import 'proxy_section.dart';
 import 'settings_chrome.dart';
@@ -143,6 +144,9 @@ class AppSettingsDialog extends StatelessWidget {
             const LocalServerSection(),
             const TorSection(),
             const GlobalProxySection(),
+            // Last, because it is the one that does not go through any of the
+            // three above — which is the thing about it worth noticing.
+            const FileTransferSection(),
           ],
         ),
         SettingsCategory(

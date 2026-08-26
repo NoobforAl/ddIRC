@@ -650,6 +650,38 @@ class SettingsDangerButton extends StatelessWidget {
   }
 }
 
+/// An action that is neither the expected one nor a destructive one.
+///
+/// Exists for the case where both answers are ordinary and one of them merely
+/// happens to be safer — a consent dialog, where "turn it on" is a legitimate
+/// choice that should be findable without being urged.
+class SettingsSecondaryButton extends StatelessWidget {
+  const SettingsSecondaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: t.text,
+        side: BorderSide(color: t.rule, width: Tokens.hairline),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      child: Text(label),
+    );
+  }
+}
+
 /// Feedback for an action taken inside a dialog.
 class SettingsNote extends StatelessWidget {
   const SettingsNote({super.key, required this.text, this.isError = false});

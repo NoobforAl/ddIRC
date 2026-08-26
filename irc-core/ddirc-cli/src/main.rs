@@ -275,6 +275,31 @@ fn render(event: &IrcEvent) {
         IrcEvent::MemberList { channel, members } => {
             println!("-- {channel}: {} members --", members.len());
         }
+        IrcEvent::FileOffered {
+            channel,
+            from,
+            offer,
+        } => {
+            // Printed, and that is all the harness does with it — the same
+            // policy the core has. Accepting means dialling an address a
+            // stranger chose, which is not something a test harness decides.
+            let size = match offer.size {
+                Some(bytes) => format!(", {bytes} bytes"),
+                None => String::new(),
+            };
+            let how = if offer.is_reverse() {
+                "reverse".to_owned()
+            } else {
+                match (offer.addr, offer.port) {
+                    (Some(addr), Some(port)) => format!("{addr}:{port}"),
+                    _ => "?".to_owned(),
+                }
+            };
+            println!(
+                "-- {from} offered \"{}\" [{channel}] via {how}{size} --",
+                offer.filename
+            );
+        }
         IrcEvent::ModeChanged {
             channel,
             by,
