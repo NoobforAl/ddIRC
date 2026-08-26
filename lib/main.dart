@@ -6,6 +6,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'src/model/local_server.dart';
@@ -115,6 +116,29 @@ class _DdIrcAppState extends State<DdIrcApp> {
     proxies: widget.proxies,
   );
 
+  /// Built once, not per build.
+  ///
+  /// `ColorScheme.fromSeed` derives a full Material 3 tonal palette in a
+  /// perceptual colour space, and both of these were being recomputed on every
+  /// notification from [AppSettings] — which includes every progress tick
+  /// while Tor bootstraps. Worse than the arithmetic: a fresh [ThemeData] is a
+  /// different object, so the [Theme] above the app changed identity and every
+  /// widget in the tree that reads `context.tokens` was rebuilt with it.
+  ///
+  /// The palette is a constant, so the theme is one too.
+  static final ThemeData _light = Tokens.themeFor(Tokens.light);
+  static final ThemeData _dark = Tokens.themeFor(Tokens.dark);
+
+  /// The one setting [MaterialApp] actually reads.
+  ///
+  /// Listening to all of [AppSettings] meant rebuilding the app — and with it
+  /// the navigator above every route — when the timestamps switch moved. This
+  /// passes on a change only when the theme has genuinely changed.
+  late final _themeMode = _Selected<ThemeMode>(
+    widget.settings,
+    () => widget.settings.themeMode,
+  );
+
   /// Owns staying connected while the app is not the thing in front — a tray
   /// icon and a hidden window on desktop, a foreground service on Android,
   /// and nothing at all on iOS, which will not hold a socket open anyway.
@@ -158,6 +182,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
 
   @override
   void dispose() {
+    _themeMode.dispose();
     _background.dispose();
     // Closes every live connection, so quitting never leaves a socket behind.
     // Already done by the time a tray quit reaches here, and idempotent for
@@ -182,15 +207,15 @@ class _DdIrcAppState extends State<DdIrcApp> {
                 workspace: _workspace,
                 // The theme is a setting, so the app itself has to listen:
                 // nothing below rebuilds MaterialApp, and `themeMode` is read
-                // here.
-                child: ListenableBuilder(
-                  listenable: widget.settings,
-                  builder: (context, _) => MaterialApp(
+                // here. Only that one setting, though — see [_themeMode].
+                child: ValueListenableBuilder<ThemeMode>(
+                  valueListenable: _themeMode,
+                  builder: (context, mode, _) => MaterialApp(
                     title: 'ddIRC',
                     debugShowCheckedModeBanner: false,
-                    theme: Tokens.themeFor(Tokens.light),
-                    darkTheme: Tokens.themeFor(Tokens.dark),
-                    themeMode: widget.settings.themeMode,
+                    theme: _light,
+                    darkTheme: _dark,
+                    themeMode: mode,
                     // Wrapping here rather than per screen means every route —
                     // and every dialog on the root navigator — sits under one
                     // frame.
@@ -211,5 +236,41 @@ class _DdIrcAppState extends State<DdIrcApp> {
         ),
       ),
     );
+  }
+}
+
+/// One derived value of a [Listenable], which notifies only when it changes.
+///
+/// The models here are whole-object notifiers: [AppSettings] tells its
+/// listeners that *something* moved, not what. That is the right shape for a
+/// settings dialog, which is showing all of it anyway, and the wrong shape for
+/// a listener that cares about one field — it rebuilds for every change but
+/// its own.
+///
+/// Reading through a function rather than taking a value keeps the source of
+/// truth on the model. Nothing is mirrored, so nothing can go stale.
+class _Selected<T> extends ChangeNotifier implements ValueListenable<T> {
+  _Selected(this._source, this._read) : _value = _read() {
+    _source.addListener(_check);
+  }
+
+  final Listenable _source;
+  final T Function() _read;
+  T _value;
+
+  @override
+  T get value => _value;
+
+  void _check() {
+    final next = _read();
+    if (next == _value) return;
+    _value = next;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _source.removeListener(_check);
+    super.dispose();
   }
 }

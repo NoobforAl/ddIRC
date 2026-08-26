@@ -96,14 +96,18 @@ class _MessageViewState extends State<MessageView> {
       );
     }
 
+    // Once per build rather than once per row. `DateTime.now()` is a syscall
+    // on every platform, and asking it the same question fifteen times inside
+    // one frame cannot get fifteen different answers worth having.
+    final arrivedAfter = DateTime.now().subtract(_arrival);
+
     return ListView.builder(
       controller: _controller,
       padding: const EdgeInsets.symmetric(vertical: 10),
       itemCount: lines.length,
       itemBuilder: (context, i) {
         final line = lines[i];
-        final fresh =
-            i >= _freshFrom && DateTime.now().difference(line.at) < _arrival;
+        final fresh = i >= _freshFrom && line.at.isAfter(arrivedAfter);
 
         if (line.isSystem) {
           return Arrive(

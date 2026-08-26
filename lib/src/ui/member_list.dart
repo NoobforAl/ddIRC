@@ -38,6 +38,14 @@ class _MemberListState extends State<MemberList> {
   @override
   void didUpdateWidget(MemberList old) {
     super.didUpdateWidget(old);
+    // The roster is replaced wholesale or not at all — the core sends a full
+    // list, never a delta — so identity is an exact answer to "did anyone
+    // arrive". Without this guard every repaint of the session, including one
+    // caused by a message in a different channel, rebuilt two sets of every
+    // nick in the channel. In `#Debian` that is 1,766 string hashes to
+    // discover that nothing happened.
+    if (identical(old.members, widget.members)) return;
+
     final now = {for (final m in widget.members) m.nick};
     _fresh = now.difference(_known);
     _known = now;

@@ -48,6 +48,46 @@ class Workspace extends ChangeNotifier {
   String? get activeProfileId => _active;
 
   SessionModel? sessionFor(String profileId) => _sessions[profileId];
+
+  /// The badge numbers the rail last repainted with, per profile.
+  ///
+  /// The workspace forwards a session's news so the rail can show it, and the
+  /// rail reads exactly two numbers off a session: unread, and mentions. So
+  /// those two are what a forward is *for*, and anything else the session
+  /// changed is news only to the screen already listening to it directly.
+  ///
+  /// This matters most in the ordinary case. A message arriving in the
+  /// conversation you are reading leaves both numbers at zero — it is already
+  /// read — so forwarding it repainted every network mark, the profile list
+  /// and the whole session subtree to show nothing that had changed.
+  final Map<String, (int, int)> _badges = {};
+
+  /// Held so it can be removed again. `addListener(notifyListeners)` could be
+  /// undone by name; a closure cannot.
+  final Map<String, VoidCallback> _forwarders = {};
+
+  /// Forward this session's news to the workspace, but only the part of it
+  /// the workspace draws.
+  VoidCallback _watch(String profileId, SessionModel session) {
+    void forward() {
+      final badge = (session.totalUnread, session.totalMentions);
+      if (_badges[profileId] == badge) return;
+      _badges[profileId] = badge;
+      notifyListeners();
+    }
+
+    _badges[profileId] = (session.totalUnread, session.totalMentions);
+    _forwarders[profileId] = forward;
+    session.addListener(forward);
+    return forward;
+  }
+
+  void _unwatch(String profileId, SessionModel session) {
+    final forward = _forwarders.remove(profileId);
+    if (forward != null) session.removeListener(forward);
+    _badges.remove(profileId);
+  }
+
   bool isConnecting(String profileId) => _connecting.contains(profileId);
   bool isConnected(String profileId) => _sessions.containsKey(profileId);
 
@@ -151,8 +191,9 @@ class Workspace extends ChangeNotifier {
         settings: settings,
       )..start();
       // One listener per session, forwarded so the whole workspace repaints
-      // when any network has news — that is what the rail badges read.
-      session.addListener(notifyListeners);
+      // when any network has news — that is what the rail badges read, and
+      // [_watch] keeps the forward to exactly that.
+      _watch(profile.id, session);
 
       _sessions[profile.id] = session;
       if (focus || _active == null) _active = profile.id;
@@ -172,7 +213,7 @@ class Workspace extends ChangeNotifier {
   void disconnect(String profileId) {
     final session = _sessions.remove(profileId);
     if (session == null) return;
-    session.removeListener(notifyListeners);
+    _unwatch(profileId, session);
     session.dispose();
 
     if (_active == profileId) {
@@ -218,8 +259,9 @@ class Workspace extends ChangeNotifier {
   void closeAll() {
     if (_closed) return;
     _closed = true;
-    for (final session in _sessions.values) {
-      session.removeListener(notifyListeners);
+    for (final entry in _sessions.entries) {
+      final session = entry.value;
+      _unwatch(entry.key, session);
       // Sends a QUIT, so the servers hear it from us rather than finding out
       // when the socket dies two minutes later.
       session.dispose();

@@ -51,6 +51,17 @@ class _SessionScreenState extends State<SessionScreen> {
   /// as the text changes, so it dismisses this attempt and not the next one.
   bool _dismissed = false;
 
+  /// Bumped when the command suggestions change, and listened to by the strip
+  /// that draws them and by nothing else.
+  ///
+  /// Typing used to `setState` the whole screen. Everything on it — the
+  /// channel list, the tab strip, the member list, the entire scrollback —
+  /// was rebuilt on each keystroke to decide whether to offer `/join`, and on
+  /// a low-end phone that is the difference between a composer that keeps up
+  /// with a thumb and one that does not. Nothing else here reads what is in
+  /// the composer, so nothing else needs telling.
+  final _suggestionRevision = ValueNotifier<int>(0);
+
   SessionModel get session => widget.session;
 
   @override
@@ -77,11 +88,13 @@ class _SessionScreenState extends State<SessionScreen> {
 
   void _onTyped() {
     if (!mounted) return;
-    setState(() {
-      _dismissed = false;
-      _highlighted = 0;
-    });
+    _dismissed = false;
+    _highlighted = 0;
+    _redrawSuggestions();
   }
+
+  /// Redraw the suggestion strip, and only it.
+  void _redrawSuggestions() => _suggestionRevision.value++;
 
   void _complete(SlashCommand command) {
     // The trailing space is the point: completing a command leaves the caret
@@ -90,7 +103,8 @@ class _SessionScreenState extends State<SessionScreen> {
       text: '/${command.name} ',
       selection: TextSelection.collapsed(offset: command.name.length + 2),
     );
-    setState(() => _dismissed = false);
+    _dismissed = false;
+    _redrawSuggestions();
     _composerFocus.requestFocus();
   }
 
@@ -102,13 +116,13 @@ class _SessionScreenState extends State<SessionScreen> {
 
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.arrowDown) {
-      setState(() => _highlighted = (_highlighted + 1) % matches.length);
+      _highlighted = (_highlighted + 1) % matches.length;
+      _redrawSuggestions();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowUp) {
-      setState(() {
-        _highlighted = (_highlighted - 1 + matches.length) % matches.length;
-      });
+      _highlighted = (_highlighted - 1 + matches.length) % matches.length;
+      _redrawSuggestions();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.tab || key == LogicalKeyboardKey.enter) {
@@ -118,7 +132,8 @@ class _SessionScreenState extends State<SessionScreen> {
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.escape) {
-      setState(() => _dismissed = true);
+      _dismissed = true;
+      _redrawSuggestions();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -131,6 +146,7 @@ class _SessionScreenState extends State<SessionScreen> {
     _composerFocus.onKeyEvent = null;
     _composer.dispose();
     _composerFocus.dispose();
+    _suggestionRevision.dispose();
     super.dispose();
   }
 
@@ -324,10 +340,13 @@ class _SessionScreenState extends State<SessionScreen> {
         // Growing rather than appearing, so a rejected command never shoves
         // the composer out from under a caret already being typed into.
         Reveal(child: _error == null ? null : _ErrorBar(text: _error!)),
-        _CommandSuggestions(
-          commands: _suggestions,
-          highlighted: _highlighted,
-          onPick: _complete,
+        ListenableBuilder(
+          listenable: _suggestionRevision,
+          builder: (context, _) => _CommandSuggestions(
+            commands: _suggestions,
+            highlighted: _highlighted,
+            onPick: _complete,
+          ),
         ),
         _composerBar(t, active),
       ],

@@ -238,10 +238,15 @@ class _ArriveState extends State<Arrive> with SingleTickerProviderStateMixin {
   /// Small enough to read as the line settling rather than as it flying in.
   static const _lift = 6.0;
 
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    value: 1,
-  );
+  /// Null except while this row is actually travelling.
+  ///
+  /// Almost every [Arrive] in the app never animates: a scrollback is
+  /// thousands of rows that were already there, and each one used to build a
+  /// controller, an [AnimatedBuilder], an [Opacity] and a [Transform] to
+  /// express standing still. Held lazily and released on arrival, so the cost
+  /// belongs to the handful of rows that are moving rather than to every row
+  /// that scrolls past.
+  AnimationController? _controller;
 
   bool _decided = false;
 
@@ -254,24 +259,38 @@ class _ArriveState extends State<Arrive> with SingleTickerProviderStateMixin {
     _decided = true;
     final m = context.motion;
     if (!widget.play || m.disabled) return;
-    _controller
-      ..duration = m.normal
+    _controller = AnimationController(vsync: this, duration: m.normal)
+      ..addStatusListener(_onArrived)
       ..forward(from: 0);
+  }
+
+  /// Landed. Drop the machinery and rebuild as the plain child.
+  void _onArrived(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted) return;
+    final controller = _controller;
+    _controller = null;
+    setState(() {});
+    // After the frame, because disposing a controller an [AnimatedBuilder] is
+    // still listening to throws.
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller?.dispose());
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final controller = _controller;
+    if (controller == null) return widget.child;
+
     return AnimatedBuilder(
-      animation: _controller,
+      animation: controller,
       child: widget.child,
       builder: (context, child) {
-        final t = Motion.curve.transform(_controller.value);
+        final t = Motion.curve.transform(controller.value);
         return Opacity(
           opacity: t,
           child: Transform.translate(

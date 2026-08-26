@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../rust/api/client.dart' as core;
 import '../rust/api/types.dart';
@@ -185,14 +186,32 @@ class SessionModel extends ChangeNotifier {
   AuthOutcome? get auth => _auth;
 
   /// Conversations in the order they were opened.
-  UnmodifiableListView<Conversation> get conversations =>
-      UnmodifiableListView(_order.map((k) => _conversations[k]!));
+  ///
+  /// Materialised rather than a view over a lazy `map`. An
+  /// [UnmodifiableListView] wrapping a mapped iterable indexes by walking, so
+  /// the `ListView.builder` that reads this was doing O(n) work per row and
+  /// O(n^2) per build. Rebuilt only when the set of conversations changes,
+  /// which is a join or a part, not a message.
+  List<Conversation> get conversations => _conversationsCache ??=
+      UnmodifiableListView([for (final key in _order) _conversations[key]!]);
 
   Conversation? get active => _active == null ? null : _conversations[_active];
 
   /// Open tabs, left to right.
-  UnmodifiableListView<Conversation> get tabs =>
-      UnmodifiableListView(_tabs.map((k) => _conversations[k]!));
+  List<Conversation> get tabs => _tabsCache ??= UnmodifiableListView([
+    for (final key in _tabs) _conversations[key]!,
+  ]);
+
+  List<Conversation>? _conversationsCache;
+  List<Conversation>? _tabsCache;
+
+  /// Drop both projections. Cheap, and called from every mutation of either
+  /// list, so a stale one is not something a future edit can reintroduce by
+  /// forgetting which of the two it touched.
+  void _invalidateLists() {
+    _conversationsCache = null;
+    _tabsCache = null;
+  }
 
   int get totalUnread =>
       _conversations.values.fold(0, (sum, c) => sum + c.unread);
@@ -208,6 +227,39 @@ class SessionModel extends ChangeNotifier {
     _subscription = core.eventStream(id: connectionId).listen(_onEvent);
   }
 
+  /// Repaint at most once per frame, however many events arrived in it.
+  ///
+  /// The core delivers one event per line, and a busy channel delivers a lot
+  /// of them — a netsplit rejoining `#Debian` is several hundred inside a
+  /// second. Notifying per event meant a full rebuild of the rail, the
+  /// channel list, the tab strip, the scrollback and the member list per
+  /// *line*, and on a low-end phone the frame budget is gone long before the
+  /// burst is. The screen can only show one frame anyway, so the extra
+  /// rebuilds bought nothing that was ever displayed.
+  ///
+  /// A post-frame callback rather than a microtask, because each event
+  /// arrives in its own turn of the event loop and a microtask would coalesce
+  /// nothing. The cost is that a line appears a frame later than it used to;
+  /// the gain is that it appears at all while a flood is in progress.
+  ///
+  /// User actions — selecting a conversation, closing a tab — still notify
+  /// directly. Those are one-at-a-time and want the immediate answer.
+  void _queueNotify() {
+    if (_notifyQueued || _disposed) return;
+    _notifyQueued = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      _notifyQueued = false;
+      if (!_disposed) notifyListeners();
+    });
+    // A post-frame callback only runs if a frame runs. Nothing else has asked
+    // for one when the app is idle, which is exactly when the first message
+    // of a burst lands.
+    SchedulerBinding.instance.scheduleFrame();
+  }
+
+  bool _notifyQueued = false;
+  bool _disposed = false;
+
   /// Stop waiting out the reconnect backoff and try again now.
   ///
   /// The connection, and with it the scrollback, survives — this wakes the
@@ -217,6 +269,7 @@ class SessionModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _subscription?.cancel();
     core.disconnect(id: connectionId, reason: 'ddIRC');
     super.dispose();
@@ -234,6 +287,7 @@ class SessionModel extends ChangeNotifier {
     final created = Conversation(name: name, isChannel: isChannel);
     _conversations[key] = created;
     _order.add(key);
+    _invalidateLists();
     // Arriving somewhere opens it. A channel joined from /join or from the
     // profile's autojoin list that did not appear in the strip would be
     // invisible until the user went looking for it in the list.
@@ -249,7 +303,10 @@ class SessionModel extends ChangeNotifier {
     if (!_conversations.containsKey(key)) return;
     // Picking something from the list opens it if it was closed, which is the
     // only way back to a tab the user shut.
-    if (!_tabs.contains(key)) _tabs.add(key);
+    if (!_tabs.contains(key)) {
+      _tabs.add(key);
+      _invalidateLists();
+    }
     _active = key;
     _conversations[key]!.markRead();
     notifyListeners();
@@ -264,6 +321,7 @@ class SessionModel extends ChangeNotifier {
     final index = _tabs.indexOf(key);
     if (index == -1) return;
     _tabs.removeAt(index);
+    _invalidateLists();
 
     if (_active == key) {
       _active = _tabs.isEmpty ? null : _tabs[index.clamp(0, _tabs.length - 1)];
@@ -476,7 +534,7 @@ class SessionModel extends ChangeNotifier {
         _addToActive('error: $message');
         AppLog.instance.debug('[${_network ?? config.host}] error: $message');
     }
-    notifyListeners();
+    _queueNotify();
   }
 
   /// One line for a file someone has offered.
@@ -510,11 +568,15 @@ class SessionModel extends ChangeNotifier {
     _conversations.remove(key);
     _order.remove(key);
     _tabs.remove(key);
+    _invalidateLists();
     if (_active == key) {
       _active = _tabs.isNotEmpty
           ? _tabs.last
           : (_order.isEmpty ? null : _order.last);
-      if (_active != null && !_tabs.contains(_active)) _tabs.add(_active!);
+      if (_active != null && !_tabs.contains(_active)) {
+        _tabs.add(_active!);
+        _invalidateLists();
+      }
     }
   }
 

@@ -158,14 +158,18 @@ void main() {
   });
 
   group('Arrive', () {
-    double opacityOf(WidgetTester tester) => tester
-        .widget<Opacity>(
-          find.descendant(
-            of: find.byType(Arrive),
-            matching: find.byType(Opacity),
-          ),
-        )
-        .opacity;
+    // No [Opacity] layer at all is full strength, and is the resting state:
+    // [Arrive] builds none for a row that was already there, and disposes the
+    // one it built the moment the row lands. Every row in a scrollback is in
+    // that state, which is the whole reason for the arrangement.
+    double opacityOf(WidgetTester tester) {
+      final layers = find.descendant(
+        of: find.byType(Arrive),
+        matching: find.byType(Opacity),
+      );
+      if (layers.evaluate().isEmpty) return 1;
+      return tester.widget<Opacity>(layers.first).opacity;
+    }
 
     testWidgets('lifts a new row into place', (tester) async {
       await tester.pumpWidget(
@@ -204,6 +208,46 @@ void main() {
         _host(child: const Arrive(play: false, child: _bar)),
       );
       expect(opacityOf(tester), 1);
+    });
+
+    testWidgets('a row that never animates carries no machinery at all', (
+      tester,
+    ) async {
+      // Worth its own test because it is invisible in a screenshot and is the
+      // whole point of the arrangement: a scrollback is thousands of rows and
+      // essentially all of them are at rest. A controller, an
+      // [AnimatedBuilder], an [Opacity] and a [Transform] each is a lot of
+      // widgets to express standing still.
+      await tester.pumpWidget(
+        _host(
+          child: const Column(
+            children: [
+              Arrive(play: false, child: _bar),
+              Arrive(play: false, child: _bar),
+              Arrive(play: false, child: _bar),
+            ],
+          ),
+        ),
+      );
+
+      expect(find.byType(Opacity), findsNothing);
+      expect(find.byType(AnimatedBuilder), findsNothing);
+      expect(find.byType(Arrive), findsNWidgets(3));
+    });
+
+    testWidgets('drops the machinery again once the row has landed', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _host(child: const Arrive(play: true, child: _bar)),
+      );
+      // Mid-flight it is there, because something is genuinely moving.
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(find.byType(Opacity), findsOneWidget);
+
+      await tester.pumpAndSettle();
+      expect(find.byType(Opacity), findsNothing);
+      expect(find.byType(Arrive), findsOneWidget);
     });
 
     testWidgets('is instant when the platform asks for reduced motion', (

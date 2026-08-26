@@ -26,14 +26,20 @@ Future<void> _pump(WidgetTester tester, List<String> nicks) {
   );
 }
 
+/// How strongly the row for [nick] is drawn, where no [Opacity] layer at all
+/// counts as full strength.
+///
+/// A row at rest carries no opacity layer: [Arrive] builds none for a row that
+/// was already there, and drops the one it built as soon as the row has
+/// landed. So its absence is not a gap in the test — it is the strongest
+/// statement available that the row is drawn plainly.
 double _opacityOf(WidgetTester tester, String nick) {
-  return tester
-      .widget<Opacity>(
-        find
-            .ancestor(of: find.text(nick), matching: find.byType(Opacity))
-            .first,
-      )
-      .opacity;
+  final layers = find.ancestor(
+    of: find.text(nick),
+    matching: find.byType(Opacity),
+  );
+  if (layers.evaluate().isEmpty) return 1;
+  return tester.widget<Opacity>(layers.first).opacity;
 }
 
 void main() {
