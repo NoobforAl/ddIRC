@@ -107,6 +107,7 @@ class LocalServerSettings extends ChangeNotifier {
       _port = null;
       _networkName = null;
       _failure = '$e';
+      await _stopProfileDialling();
       // Left switched on rather than silently flipped off: the user asked for
       // a server, this failed to give them one, and a switch that turns itself
       // off would hide that.
@@ -120,12 +121,26 @@ class LocalServerSettings extends ChangeNotifier {
   Future<void> _stop() async {
     _port = null;
     _networkName = null;
+    await _stopProfileDialling();
     notifyListeners();
     try {
       await core.localServerStop();
     } catch (e) {
       debugPrint('the local server did not stop cleanly: $e');
     }
+  }
+
+  /// Stop the profile dialling a port that is no longer answering.
+  ///
+  /// The profile itself is kept, because the nickname and channels on it are
+  /// the user's and switching a server off is not a reason to discard them.
+  /// What is dropped is the auto-connect: a network that would fail at every
+  /// launch, for a server the user has turned off, is an error message on a
+  /// timer rather than a feature.
+  Future<void> _stopProfileDialling() async {
+    final existing = _profiles.byId(profileId);
+    if (existing == null || !existing.autoConnect) return;
+    await _profiles.save(existing.copyWith(autoConnect: false));
   }
 
   /// Point one profile at wherever the server just bound.
