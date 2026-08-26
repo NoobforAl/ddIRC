@@ -14,8 +14,7 @@ import 'package:ddirc/src/model/log.dart';
 
 late Directory _dir;
 
-File _file(String name) =>
-    File('${_dir.path}${Platform.pathSeparator}$name');
+File _file(String name) => File('${_dir.path}${Platform.pathSeparator}$name');
 
 Future<String> _read(String name) async {
   final file = _file(name);
@@ -60,30 +59,28 @@ void main() {
     expect(await _read('chat.log'), isEmpty);
   });
 
-  test('records a conversation when asked, with the network and channel',
-      () async {
-    AppLog.instance.configure(chat: true, debug: false);
-    AppLog.instance.chat(
-      network: 'ErgoTest',
-      conversation: '#ddirc',
-      text: '<ada> hello',
-    );
-    await AppLog.instance.flush();
+  test(
+    'records a conversation when asked, with the network and channel',
+    () async {
+      AppLog.instance.configure(chat: true, debug: false);
+      AppLog.instance.chat(
+        network: 'ErgoTest',
+        conversation: '#ddirc',
+        text: '<ada> hello',
+      );
+      await AppLog.instance.flush();
 
-    final written = await _read('chat.log');
-    expect(written, contains('ErgoTest'));
-    expect(written, contains('#ddirc'));
-    expect(written, contains('<ada> hello'));
-    expect(await _read('debug.log'), isEmpty);
-  });
+      final written = await _read('chat.log');
+      expect(written, contains('ErgoTest'));
+      expect(written, contains('#ddirc'));
+      expect(written, contains('<ada> hello'));
+      expect(await _read('debug.log'), isEmpty);
+    },
+  );
 
   test('stops immediately when switched off', () async {
     AppLog.instance.configure(chat: true, debug: false);
-    AppLog.instance.chat(
-      network: 'n',
-      conversation: '#c',
-      text: 'before',
-    );
+    AppLog.instance.chat(network: 'n', conversation: '#c', text: 'before');
     await AppLog.instance.flush();
 
     AppLog.instance.configure(chat: false, debug: false);

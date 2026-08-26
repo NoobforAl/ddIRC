@@ -29,7 +29,9 @@ Future<void> _pump(WidgetTester tester, List<String> nicks) {
 double _opacityOf(WidgetTester tester, String nick) {
   return tester
       .widget<Opacity>(
-        find.ancestor(of: find.text(nick), matching: find.byType(Opacity)).first,
+        find
+            .ancestor(of: find.text(nick), matching: find.byType(Opacity))
+            .first,
       )
       .opacity;
 }

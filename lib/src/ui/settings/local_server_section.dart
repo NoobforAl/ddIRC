@@ -49,7 +49,9 @@ class _LocalServerSectionState extends State<LocalServerSection> {
           ),
           SettingsReadout(
             label: 'Address',
-            value: server.port == null ? 'None yet' : '127.0.0.1:${server.port}',
+            value: server.port == null
+                ? 'None yet'
+                : '127.0.0.1:${server.port}',
           ),
           SettingsReadout(
             label: 'Network',

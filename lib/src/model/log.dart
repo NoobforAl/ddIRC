@@ -201,9 +201,7 @@ class AppLog {
     for (final target in _Target.values) {
       for (final name in [target.filename, '${target.filename}.1']) {
         try {
-          final file = File(
-            '${directory.path}${Platform.pathSeparator}$name',
-          );
+          final file = File('${directory.path}${Platform.pathSeparator}$name');
           if (await file.exists()) await file.delete();
         } catch (error) {
           debugPrint('ddIRC: could not delete $name ($error)');

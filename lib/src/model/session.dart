@@ -454,9 +454,7 @@ class SessionModel extends ChangeNotifier {
 
       case IrcEvent_Error(:final message):
         _addToActive('error: $message');
-        AppLog.instance.debug(
-          '[${_network ?? config.host}] error: $message',
-        );
+        AppLog.instance.debug('[${_network ?? config.host}] error: $message');
     }
     notifyListeners();
   }

@@ -107,19 +107,35 @@ start at the epoch, subtract a step of 10^18 seconds, and **halve the step only
 when `checked_sub` returns `None`** — on success it keeps subtracting at the
 same size. That is a linear walk at every step size.
 
-On Linux the floor is close enough that it converges at once. On Windows
-`SystemTime` is a `FILETIME`, so the floor is **1601-01-01 — 11,644,473,600
-seconds below the epoch** — and the walk has 369 years to cover at ever-finer
-granularity. Measured: **1.52 billion iterations in ten seconds**, 84 of the
-~89 halvings done, step down to 51 ns.
+On Windows that never terminates, and the reason is sharper than "slow".
+`SystemTime` there is a `FILETIME`, counted in **100-nanosecond intervals** —
+so `checked_sub` of anything finer than 100 ns returns `Some`, *unchanged*:
+
+```
+ 200 ns -> Some, moved = true
+ 100 ns -> Some, moved = true
+  99 ns -> Some, moved = false
+  51 ns -> Some, moved = false
+   1 ns -> Some, moved = false
+```
+
+The step reaches 51 ns after 112 iterations, in under a millisecond. From
+there every probe succeeds, so it never halves again; and every probe is a
+no-op, so `res` never moves. The loop has no exit. Left running it did
+**112 iterations in 0.0 s and then nothing for thirty minutes**.
+
+On Linux `SystemTime` is a `timespec` with nanosecond resolution, so a 1 ns
+step is a real subtraction and the search converges. The bug is invisible
+there, which is presumably why it shipped.
 
 Because it is a `LazyLock` it happens once per process, on the first consensus
 with a preamble to date-check. That is why the failure looked like a network
 problem for so long, and why it reproduces on **arti's own 5 KB test
 document**, `tor-dirmgr/testdata/mdconsensus1.txt`.
 
-Confirmed with a **20-line reproduction that has no dependencies at all** —
-`find_limit` transcribed verbatim against `std::time::SystemTime`. It also
+Confirmed with a **reproduction that has no dependencies at all** —
+`find_limit` transcribed verbatim against `std::time::SystemTime`, and the
+five-line resolution check above. It also
 reproduces on Rust 1.91 and 1.98, in debug and release, and in a crate whose
 only dependency is `tor-netdoc`. There is no fixed release: 0.4.0 is the newest
 of four.
@@ -130,10 +146,15 @@ of four.
    consumer that makes it visible. The no-dependency reproduction is what to
    send.
 2. **Decide what to do meanwhile.** Three options, in order of preference:
-   patch `saturating-time` behind a `[patch.crates-io]` until a fix lands
-   (small, and the algorithm's fix is obvious — halve on success too, or seed
-   the search from a known floor); wait; or ship the feature switched off with
-   the settings section saying it does not work yet on Windows.
+   patch `saturating-time` behind a `[patch.crates-io]` until a fix lands;
+   wait; or ship the feature switched off with the settings section saying it
+   does not work yet on Windows.
+
+   The fix upstream is small, and now that the mechanism is known it is also
+   obvious: stop when a probe succeeds without moving. One comparison, and it
+   ends the loop on every platform whose clock has a granularity — which is all
+   of them, Linux included, where 1 ns merely happens to be fine enough to hide
+   it.
 3. **A timed bootstrap on a platform that is not Windows**, which is the number
    the shipping decision actually rests on and which nothing here has yet
    measured.

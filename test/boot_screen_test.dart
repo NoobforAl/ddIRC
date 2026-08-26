@@ -32,10 +32,7 @@ Future<void> _pumpBoot(
       home: Builder(
         builder: (context) => MediaQuery(
           data: MediaQuery.of(context).copyWith(disableAnimations: true),
-          child: BootScreen(
-            load: load,
-            builder: (context) => const Text(_app),
-          ),
+          child: BootScreen(load: load, builder: (context) => const Text(_app)),
         ),
       ),
     ),
