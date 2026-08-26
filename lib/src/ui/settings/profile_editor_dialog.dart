@@ -92,7 +92,14 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   final Map<_Input, String> _errors = {};
   int _shake = 0;
   bool _busy = false;
-  bool _showSasl = false;
+
+  /// Whether the Advanced group is unfolded.
+  ///
+  /// Everything a network needs to connect is above it — an address, a
+  /// nickname, the channels to join. SASL and this network's proxy are
+  /// answers most people never give, and a form that asks for them anyway
+  /// reads as a form with a lot of questions in it.
+  bool _showAdvanced = false;
   bool _passwordTouched = false;
   late ProxyMode _proxyMode =
       widget.profile?.proxyMode ?? ProxyMode.followDefault;
@@ -103,7 +110,13 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   @override
   void initState() {
     super.initState();
-    _showSasl = widget.profile?.usesSasl ?? false;
+    // Open from the start when this profile already has an answer in there.
+    // A disclosure that hides a setting the user themselves configured is a
+    // setting they will conclude has been lost.
+    _showAdvanced =
+        (widget.profile?.usesSasl ?? false) ||
+        (widget.profile?.proxyMode ?? ProxyMode.followDefault) !=
+            ProxyMode.followDefault;
     _proxy.addListener(() {
       if (mounted) setState(() {});
     });
@@ -231,10 +244,13 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ..clear()
           ..addAll(proxyErrors);
         _shake++;
-        if (errors.keys.any(
-          (f) => f == _Input.account || f == _Input.password,
-        )) {
-          _showSasl = true;
+        // An error inside something folded away is an error nobody can see,
+        // and the form would refuse to save while showing nothing wrong.
+        if (proxyErrors.isNotEmpty ||
+            errors.keys.any(
+              (f) => f == _Input.account || f == _Input.password,
+            )) {
+          _showAdvanced = true;
         }
       });
       return;
@@ -343,33 +359,46 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         const SettingsRule(),
         SettingsSection(
           label: 'Identity',
-          children: [
-            _field(t, _Input.nick, 'Nickname'),
-            _saslToggle(t),
-            if (_showSasl) ...[
-              _field(t, _Input.account, 'SASL account'),
-              _field(
-                t,
-                _Input.password,
-                'SASL password',
-                obscure: true,
-                hint: !_isNew && widget.profile!.usesSasl
-                    ? 'Stored — leave blank to keep it'
-                    : null,
-              ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
-                child: Text(
-                  'Kept in the platform keychain, never in app settings, and '
-                  'zeroized by the core once authentication completes.',
-                  style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-                ),
-              ),
-            ],
-          ],
+          children: [_field(t, _Input.nick, 'Nickname')],
         ),
         const SettingsRule(),
-        _proxySection(t),
+        SettingsDisclosure(
+          label: 'Advanced',
+          summary: _advancedSummary,
+          open: _showAdvanced,
+          onToggle: () => setState(() => _showAdvanced = !_showAdvanced),
+          children: [
+            SettingsSection(
+              label: 'Authentication',
+              children: [
+                _field(t, _Input.account, 'SASL account'),
+                _field(
+                  t,
+                  _Input.password,
+                  'SASL password',
+                  obscure: true,
+                  hint: !_isNew && widget.profile!.usesSasl
+                      ? 'Stored — leave blank to keep it'
+                      : null,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                  child: Text(
+                    'Optional. Kept in the platform keychain, never in app '
+                    'settings, and zeroized by the core once authentication '
+                    'completes.',
+                    style: TextStyle(
+                      color: t.faint,
+                      fontSize: 11.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            _proxySection(t),
+          ],
+        ),
         const SettingsRule(),
         SettingsActions(
           children: [
@@ -556,27 +585,21 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     );
   }
 
-  Widget _saslToggle(Tokens t) {
-    return InkWell(
-      onTap: () => setState(() => _showSasl = !_showSasl),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 4, 18, 10),
-        child: Row(
-          children: [
-            Icon(
-              _showSasl ? Icons.expand_less : Icons.expand_more,
-              size: 16,
-              color: t.muted,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              'SASL account (optional)',
-              style: TextStyle(color: t.muted, fontSize: 12.5),
-            ),
-          ],
-        ),
-      ),
-    );
+  /// What is set inside Advanced, for the line shown while it is shut.
+  ///
+  /// Names the contents when nothing is set, and reports what is set when
+  /// something is — so folding it away never hides a decision that has been
+  /// made, only ones that have not.
+  String get _advancedSummary {
+    final set = <String?>[
+      if (_text(_Input.account).isNotEmpty) 'SASL',
+      switch (_proxyMode) {
+        ProxyMode.followDefault => null,
+        ProxyMode.direct => 'always direct',
+        ProxyMode.custom => 'own proxy',
+      },
+    ].nonNulls.toList();
+    return set.isEmpty ? 'SASL, proxy' : set.join(' · ');
   }
 
   Widget _field(

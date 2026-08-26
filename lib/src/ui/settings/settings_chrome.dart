@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../motion.dart';
 import '../shake.dart';
+import '../touchable.dart';
 
 /// Shared chrome for the settings dialogs.
 ///
@@ -16,12 +18,22 @@ class SettingsDialog extends StatelessWidget {
     this.subtitle,
     required this.children,
     this.width = 420,
+    this.onBack,
   });
 
   final String title;
   final String? subtitle;
   final List<Widget> children;
   final double width;
+
+  /// Shows a back arrow to the left of the title, for a dialog that is one
+  /// level down inside itself.
+  ///
+  /// The close button stays where it is. Back and close answer different
+  /// questions — *up one level* and *I am finished* — and a dialog two levels
+  /// deep that could only be left by retracing its own steps would be worse
+  /// than the flat list it replaced.
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +78,9 @@ class SettingsDialog extends StatelessWidget {
   Widget _header(BuildContext context) {
     final t = context.tokens;
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 15, 8, 14),
+      // The back arrow brings its own leading inset, so the title sits on the
+      // same vertical line either way.
+      padding: EdgeInsets.fromLTRB(onBack == null ? 18 : 6, 15, 8, 14),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(color: t.rule, width: Tokens.hairline),
@@ -75,6 +89,16 @@ class SettingsDialog extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (onBack != null) ...[
+            IconButton(
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back, size: 18),
+              color: t.muted,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Back to settings',
+            ),
+            const SizedBox(width: 2),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -112,65 +136,7 @@ class SettingsDialog extends StatelessWidget {
   }
 }
 
-/// A group of related sections, with one heading above them.
-///
-/// The settings dialog grew past the point where a flat list of nine sections
-/// could be scanned: everything looked equally important, so finding the proxy
-/// meant reading the timestamps. Two levels fixes that, and two is the limit —
-/// a third would mean scrolling to find out what you are inside of.
-///
-/// The visual grammar is deliberately the other way round from the obvious
-/// one. A rule marks a *category* boundary, and sections within a category are
-/// separated only by their own headings. So the heaviest mark on screen is the
-/// widest division, which is what a rule between every section stopped being
-/// once there were nine of them.
-class SettingsCategory extends StatelessWidget {
-  const SettingsCategory({
-    super.key,
-    required this.label,
-    required this.children,
-    this.first = false,
-  });
-
-  final String label;
-  final List<Widget> children;
-
-  /// Skips the rule above, for the one at the top of the dialog.
-  final bool first;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (!first)
-          const Padding(
-            padding: EdgeInsets.only(top: 16),
-            child: Divider(height: Tokens.hairline),
-          ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(18, first ? 14 : 16, 18, 0),
-          child: Text(
-            label,
-            // Full text colour and sentence case, against the sections'
-            // faint uppercase. The two headings have to be told apart at a
-            // glance or the hierarchy is decorative.
-            style: TextStyle(
-              color: t.text,
-              fontSize: 13.5,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.1,
-            ),
-          ),
-        ),
-        ...children,
-      ],
-    );
-  }
-}
-
-/// A labelled group of rows, sitting inside a [SettingsCategory].
+/// A labelled group of rows, and the unit a settings page is built from.
 class SettingsSection extends StatelessWidget {
   const SettingsSection({
     super.key,
@@ -258,6 +224,176 @@ class BetaBadge extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A row that opens a page of settings rather than changing one.
+///
+/// The index of the settings dialog is made of these. Each carries a summary
+/// of what is currently set inside it, and that is not decoration: a flat list
+/// showed the whole state at a glance, and a menu that hides it behind three
+/// taps is a straight loss unless each row says what it is holding. So the
+/// Connection row reads "Built-in Tor" when Tor is on, and someone checking
+/// whether they are proxied never has to open anything.
+class SettingsNavRow extends StatelessWidget {
+  const SettingsNavRow({
+    super.key,
+    required this.label,
+    required this.summary,
+    required this.onTap,
+    this.beta = false,
+  });
+
+  final String label;
+
+  /// What is set inside, in a handful of words. Never empty — a row with
+  /// nothing to report says what it governs instead.
+  final String summary;
+
+  final VoidCallback onTap;
+
+  /// Marks a page that contains a beta feature. On the row as well as inside,
+  /// because the point of the badge is to be seen before the thing is reached.
+  final bool beta;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Touchable(
+      onTap: onTap,
+      builder: (context, touch) => AnimatedContainer(
+        duration: context.motion.fast,
+        curve: Motion.curve,
+        color: t.surfaceHover.withValues(alpha: touch.wash),
+        padding: const EdgeInsets.fromLTRB(18, 13, 12, 13),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: t.text,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (beta) ...[
+                        const SizedBox(width: 8),
+                        const BetaBadge(),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    summary,
+                    style: TextStyle(
+                      color: t.muted,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Icon(Icons.chevron_right, size: 18, color: t.faint),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A group of rows behind one heading that can be folded away.
+///
+/// For the parts of a form most people never touch. Collapsed, the form is the
+/// three or four answers a network actually needs; expanded, nothing has moved
+/// anywhere else, which is the difference between this and a second dialog.
+///
+/// Deliberately controlled rather than holding its own [open] state. The
+/// caller has to be able to open it without being asked — a validation error
+/// inside something folded away is an error nobody can see, and a form that
+/// refuses to save while showing nothing wrong is the worst version of this
+/// pattern.
+class SettingsDisclosure extends StatelessWidget {
+  const SettingsDisclosure({
+    super.key,
+    required this.label,
+    required this.summary,
+    required this.children,
+    required this.open,
+    required this.onToggle,
+  });
+
+  final String label;
+
+  /// Shown beside the heading while it is shut, so what is folded away is
+  /// still named. This is what stops a disclosure hiding a setting the user
+  /// has already changed.
+  final String summary;
+
+  final List<Widget> children;
+  final bool open;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Touchable(
+          onTap: onToggle,
+          builder: (context, touch) => AnimatedContainer(
+            duration: context.motion.fast,
+            curve: Motion.curve,
+            color: t.surfaceHover.withValues(alpha: touch.wash),
+            padding: const EdgeInsets.fromLTRB(18, 12, 12, 12),
+            child: Row(
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: t.text,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    open ? '' : summary,
+                    textAlign: TextAlign.right,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: t.faint, fontSize: 11.5),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                AnimatedRotation(
+                  duration: context.motion.normal,
+                  curve: Motion.curve,
+                  turns: open ? 0.25 : 0,
+                  child: Icon(Icons.chevron_right, size: 18, color: t.faint),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Reveal(
+          child: open
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: children,
+                )
+              : null,
+        ),
+      ],
     );
   }
 }
