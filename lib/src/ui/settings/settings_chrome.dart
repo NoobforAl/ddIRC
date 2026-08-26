@@ -112,7 +112,65 @@ class SettingsDialog extends StatelessWidget {
   }
 }
 
-/// A labelled group of rows.
+/// A group of related sections, with one heading above them.
+///
+/// The settings dialog grew past the point where a flat list of nine sections
+/// could be scanned: everything looked equally important, so finding the proxy
+/// meant reading the timestamps. Two levels fixes that, and two is the limit —
+/// a third would mean scrolling to find out what you are inside of.
+///
+/// The visual grammar is deliberately the other way round from the obvious
+/// one. A rule marks a *category* boundary, and sections within a category are
+/// separated only by their own headings. So the heaviest mark on screen is the
+/// widest division, which is what a rule between every section stopped being
+/// once there were nine of them.
+class SettingsCategory extends StatelessWidget {
+  const SettingsCategory({
+    super.key,
+    required this.label,
+    required this.children,
+    this.first = false,
+  });
+
+  final String label;
+  final List<Widget> children;
+
+  /// Skips the rule above, for the one at the top of the dialog.
+  final bool first;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (!first)
+          const Padding(
+            padding: EdgeInsets.only(top: 16),
+            child: Divider(height: Tokens.hairline),
+          ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(18, first ? 14 : 16, 18, 0),
+          child: Text(
+            label,
+            // Full text colour and sentence case, against the sections'
+            // faint uppercase. The two headings have to be told apart at a
+            // glance or the hierarchy is decorative.
+            style: TextStyle(
+              color: t.text,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.1,
+            ),
+          ),
+        ),
+        ...children,
+      ],
+    );
+  }
+}
+
+/// A labelled group of rows, sitting inside a [SettingsCategory].
 class SettingsSection extends StatelessWidget {
   const SettingsSection({
     super.key,
