@@ -422,6 +422,7 @@ ddIRC/
 │  ├─ ddirc-core/     # the reusable core — no Flutter awareness
 │  ├─ ddirc-cli/      # terminal harness; the Phase 1 acceptance gate
 │  ├─ ddirc-server/   # the local IRC server: loopback only, TLS only
+│  ├─ ddirc-tor/      # the bundled Tor: arti behind a loopback SOCKS5 port
 │  └─ ddirc-bridge/   # ddirc_bridge — the frb binding crate
 └─ pubspec.yaml
 ```
@@ -448,6 +449,12 @@ unchanged.
 other half of the protocol and wants dependencies the client half does not —
 and because nothing that ships in the app should be able to reach it by
 accident.
+
+`ddirc-tor` is separate for the same reason and one more: it is 500 crates, and
+keeping them behind one door means the core still builds and tests without
+them. It ends at a loopback port, which is deliberate — the app has spoken
+SOCKS5 to an external Tor since the proxy setting existed, so bundling one
+added no second way for a connection to leave.
 
 | Module | Responsibility |
 |---|---|
@@ -786,3 +793,13 @@ description to keep in step; it also puts the generated certificate in
 
 Lint and test are separate workflows so a formatting slip and a broken test
 report as two different failures.
+
+## Licence
+
+**GPL-3.0-or-later.** The full text is in `LICENSE`.
+
+Everything bundled is compatible with it: arti and its tree are
+`MIT OR Apache-2.0` throughout, and the rest of the workspace was already
+permissive. The obligation runs the other way, which is the point of choosing
+it — a client whose job is to be checkable should be checkable by whoever ends
+up holding it.

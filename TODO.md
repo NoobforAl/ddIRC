@@ -3,84 +3,146 @@
 Ordered easiest first. Everything left carries either a new dependency, a
 per-platform decision, or an unanswered question.
 
-Both of those opening questions have now been answered — see items 1 and 2 —
-so what is left is code, plus one judgement call about a large dependency.
+Items 1 and 2 are built. What is left on 1 is not ours — a dependency of a
+dependency spins forever on Windows, and the reproduction is written down under
+*Where it is stuck*. What is left on 2 is running it once.
 
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
 ## 1. Built-in Tor — beta
 
-- **Ship Tor rather than expect it.** ✅ **The research is done**; the decision
-  to adopt is deliberately not made. The numbers below are measured rather than
-  estimated.
+- **Ship Tor rather than expect it.** ✅ **Adopted, and built** — `arti-client`
+  0.45, wrapped in `irc-core/ddirc-tor/`, reachable from the app.
+  ⛔ **It does not bootstrap**, and the reason is not ours. See *Where it is
+  stuck*.
 
-  Half of this already works, and is tested. Anyone running Tor themselves can
-  point the proxy setting at `127.0.0.1:9050` today — the form starts on that
-  port for exactly that reason — and `make dev-tor` brings up a real Tor for
-  exercising it. What is left is bundling it, so that using Tor does not first
-  require installing Tor.
+The app is now **GPL-3.0-or-later**, which is what made adopting a 507-crate
+tree straightforward: arti is `MIT OR Apache-2.0` throughout, and both may be
+taken into a GPL-3 work. The obligation runs the other way.
+
+### What was built
+
+A crate that binds a SOCKS5 listener on a loopback port it chose, and hands
+back the port number. Nothing above it learned a new way to connect — the app
+has been able to reach Tor through a SOCKS5 proxy since the proxy setting
+existed; what was missing was Tor. So the bundled path is the path that was
+already tested.
+
+**Turning it on makes it the route, not a default.** `resolveProxy` answers
+built-in Tor before it looks at the profile at all, so a network set to Direct
+or carrying its own proxy goes through Tor like everything else. There is no
+per-network way to want a little less of this: someone who switched Tor on
+wants their address off the wire, and one network exempting itself puts it back
+there — announced to that server, in a WHOIS reply, and in whatever the network
+logs.
+
+The single exception is **loopback**, and it takes nothing away. A connection
+to `127.0.0.1` never reaches a network, so there is no address to conceal;
+sending it through Tor would ask an exit relay for this machine and reach
+either that relay's own loopback or nothing. The app's own IRC server is
+exactly this case, which is why the two features do not fight.
+
+The other half is the gap before Tor is up. `resolveProxy` **throws** rather
+than returning null, because null means *direct*: if "Tor is on but not
+running" also resolved to null, the connection would succeed, in the clear,
+over exactly the route the user had just refused, and nothing on screen would
+look wrong. The app promises no proxy fallback; that is where the promise is
+kept.
+
+Every connection gets its own circuit — `isolate_every_stream` — so two IRC
+networks cannot be correlated by sharing an exit.
 
 ### What the research found
 
 Measured against `arti-client` **0.45.0**, built for `x86_64-pc-windows-msvc`
-with `opt-level = "z"`, LTO, `panic = "abort"` and stripping — the most
-favourable settings available, not a debug build.
+with `opt-level = "z"`, LTO, `panic = "abort"` and stripping.
 
 | | |
 |---|---|
 | **Binary size** | **+3.83 MB** against an identical binary carrying only tokio (0.21 MB to 4.04 MB) |
 | **Dependency tree** | **507 crates**, 36 of them `tor-*` |
-| **MSRV** | **1.91** — this workspace pins **1.82**, so adopting it moves that |
-| **Licence** | `MIT OR Apache-2.0` throughout, with nothing copyleft anywhere in the tree. The obligation is attribution, which the app stores are content with |
-| **Bootstrap time** | **Not established.** See below |
+| **MSRV** | **1.91** — the workspace pinned 1.82 and now pins 1.91 |
+| **Licence** | `MIT OR Apache-2.0` throughout, compatible with GPL-3 |
+| **Bootstrap time** | **Never completes on Windows.** See below |
 
-Three integration costs that only appeared by building it, and would otherwise
-have been found the hard way:
+Three integration costs that only appeared by building it:
 
 - **It does not link out of the box.** `arti-client` pulls `rusqlite` for its
   directory cache, which by default expects a system `sqlite3` — on Windows
   that surfaces as `LNK1181: cannot open input file 'sqlite3.lib'`. The answer
   is the `static-sqlite` feature, which compiles SQLite from source and so
   wants a C toolchain on *every* target, the Android and iOS ABIs included.
-- **It collides with our TLS.** Arti's `rustls` feature selects the `ring`
-  crypto provider; this tree is on `aws-lc-rs`, because `irc` takes
-  `tokio-rustls` with its defaults. Cargo unifies features, so enabling arti's
-  would turn *both* on, and rustls 0.23 answers "both" with a panic at the
-  first handshake rather than an error at build time — the client would stop
-  connecting to anything at all. One line fixes it, by installing a process
-  default provider at startup, but it has to be known about first.
-- **`zstd-sys` and `ring` bring their own C and assembly**, which is the same
-  cross-compilation surface a second time.
+- **The rustls crypto provider has to be chosen deliberately.** An earlier note
+  here said arti's `rustls` feature selects `ring` and would collide with this
+  tree's `aws-lc-rs`. **That was wrong**, and the correction is worth keeping:
+  the sparse index shows `tor-rtcompat`'s `rustls` feature pulling
+  `futures-rustls` with `default-features = false` and *no provider at all*. So
+  arti forces nothing, and the binary decides. `ddirc-tor::provider()` installs
+  `aws_lc_rs` explicitly, matching what `irc` already selects through
+  `tokio-rustls`. Getting this wrong is not a build error — it is a panic at
+  the first handshake.
+- **`zstd-sys` brings its own C**, which is the same cross-compilation surface
+  a second time.
 
-### The question still open
+### Where it is stuck
 
-**Whether embedded Arti actually works is unanswered**, and this machine could
-not settle it. It reaches the Tor network — two completed channel handshakes
-with real relays, and a circuit built — and then never obtained a consensus, in
-runs of 5 and 25 minutes. Raw TCP to three of the four directory authorities
-succeeds from here, so a restricted egress path is the likelier explanation
-than an Arti fault, but that is not proof either way.
+**Not the Tor network, not censorship, and not arti's own logic.** The
+bootstrap reaches the network, opens channels to real relays, builds circuits
+and downloads a 3.6 MB consensus in about four seconds. Then one thread pegs a
+core forever, at a flat 5 MB of memory, and nothing else ever happens.
 
-**Nothing should adopt a 507-crate dependency on the strength of a bootstrap
-that has never been seen to finish.** The next step is one timed run on an
-unrestricted network. If it bootstraps in tens of seconds the case is strong;
-if it takes minutes, a client that reconnects at launch has a problem worth
-designing around, and the external proxy that already works looks better.
+The stall is in `saturating-time` 0.4.0, reached from `tor-netdoc`:
 
-### If it is adopted
+```
+tor_netdoc::doc::netstatus::md::Preamble::validity_time_range
+  saturating_time::SaturatingTime::saturating_sub
+    saturating_time::internal::min_value      ← a LazyLock, computed once
+      saturating_time::internal::find_min
+        saturating_time::internal::find_limit ← spins here
+```
 
-The seam already exists, which is why none of this is urgent. `resolveProxy` in
-`lib/src/model/proxy.dart` decides exactly one thing — which `ProxyConfig` a
-profile connects through. Built-in Tor is a fourth arm on that switch,
-resolving to whatever loopback port the embedded SOCKS listener bound. Nothing
-underneath it has to change.
+`find_limit` discovers the minimum representable `SystemTime` by probing:
+start at the epoch, subtract a step of 10^18 seconds, and **halve the step only
+when `checked_sub` returns `None`** — on success it keeps subtracting at the
+same size. That is a linear walk at every step size.
+
+On Linux the floor is close enough that it converges at once. On Windows
+`SystemTime` is a `FILETIME`, so the floor is **1601-01-01 — 11,644,473,600
+seconds below the epoch** — and the walk has 369 years to cover at ever-finer
+granularity. Measured: **1.52 billion iterations in ten seconds**, 84 of the
+~89 halvings done, step down to 51 ns.
+
+Because it is a `LazyLock` it happens once per process, on the first consensus
+with a preamble to date-check. That is why the failure looked like a network
+problem for so long, and why it reproduces on **arti's own 5 KB test
+document**, `tor-dirmgr/testdata/mdconsensus1.txt`.
+
+Confirmed with a **20-line reproduction that has no dependencies at all** —
+`find_limit` transcribed verbatim against `std::time::SystemTime`. It also
+reproduces on Rust 1.91 and 1.98, in debug and release, and in a crate whose
+only dependency is `tor-netdoc`. There is no fixed release: 0.4.0 is the newest
+of four.
+
+### What is left
+
+1. **Report it upstream** — to `saturating-time`, and to arti, which is the
+   consumer that makes it visible. The no-dependency reproduction is what to
+   send.
+2. **Decide what to do meanwhile.** Three options, in order of preference:
+   patch `saturating-time` behind a `[patch.crates-io]` until a fix lands
+   (small, and the algorithm's fix is obvious — halve on success too, or seed
+   the search from a known floor); wait; or ship the feature switched off with
+   the settings section saying it does not work yet on Windows.
+3. **A timed bootstrap on a platform that is not Windows**, which is the number
+   the shipping decision actually rests on and which nothing here has yet
+   measured.
 
 ## 2. A local IRC server — beta
 
-- **Run an IRC server inside the app.** ✅ **The scope question is settled and
-  the server is built**, in `irc-core/ddirc-server/`. ⛔ **Not reachable from
-  the app yet** — it has no FFI and no settings switch. See *What is left*.
+- **Run an IRC server inside the app.** ✅ **Built, and reachable from the
+  app**: `irc-core/ddirc-server/`, an FFI in `ddirc-bridge`, a switch in App
+  settings under *Connection*, and a network that appears in the rail.
 
 ### The scope question, answered: loopback only
 
@@ -104,7 +166,7 @@ that works on the developer's machine.
 listener**: publish it as an onion service, where the address is the key, NAT
 stops mattering, and Tor authenticates which service answered. That depends on
 item 1 — and `arti-client` carries an `onion-service-service` feature for
-exactly this. So the order the two want doing in is Tor first, this second.
+exactly this. It is now blocked on the same thing item 1 is.
 
 ### The TLS story, answered: it issues its own, and that is not a bypass
 
@@ -125,6 +187,13 @@ survive a restart; the leaf is minted in memory at every start and written
 nowhere, so the key that actually terminates connections lives exactly as long
 as the server does.
 
+**The anchor never crosses the FFI.** `extra_root_cert` stays absent from the
+Dart-visible `ServerConfig`; `api/server.rs` fills it in on the Rust side, and
+only for a connection whose host *and port* are the loopback address this
+process just bound. Matching on host alone would have been a wider grant than
+the one being made — loopback is not one service, and the bundled Tor is on it
+too.
+
 ### What was built
 
 - Loopback only — `127.0.0.1` and `::1`, on the same port, so `localhost` works
@@ -140,6 +209,13 @@ as the server does.
   half-applied state get in.
 - **The MOTD says it is beta**, because a MOTD is the one thing every client
   shows on arrival, and whoever connected may not be whoever started it.
+- **One profile, maintained rather than typed.** The port is different at every
+  start, so asking anyone to configure a network pointed at it would be asking
+  them to retype it every launch. `LocalServerSettings` rewrites a profile with
+  a fixed id, keeping the nickname, alt nicks and channels — only the port
+  changes. It is marked `ProxyMode.direct` and auto-connects, because a server
+  switched on that nothing connects to is a port and a certificate in exchange
+  for nothing.
 
 **Two new crates, both pulled in by `rcgen`** — `yasna` and `time`. Everything
 else was already here: `irc-proto` is what the client itself is built on, so
@@ -163,14 +239,11 @@ is now exercised by an ordinary `cargo test`.
 
 ### What is left
 
-1. **The FFI.** `ddirc-bridge` has to start and stop it, and hand back the port
-   and the anchor path. `extra_root_cert` stays off the Dart-visible type: the
-   bridge fills it in for this one profile, the way `dev_root_cert()` already
-   does for the dev server in debug builds.
-2. **The settings switch, carrying a beta label**, and a profile pointed at the
-   server so it can be reached without anyone typing an address.
-3. A `BetaBadge` in the settings vocabulary, since item 1 will want the same one
-   and two of them would drift.
+1. **Run it.** Everything above is built, analysed and unit-tested, and the
+   Windows app builds — but nobody has yet switched it on in a running app and
+   talked to themselves. That is the one thing between this and done.
+2. Nothing else. The FFI, the switch, the beta label and the shared `BetaBadge`
+   are all in place.
 
 ## 3. Sending media — beta
 
