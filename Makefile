@@ -93,8 +93,12 @@ help:
 	@echo "  make fix FLUTTER=/c/src/flutter/bin/flutter"
 
 ## Format everything, apply what the linters can fix themselves, then check.
+#
+# `dart fix` is looped over the sources one at a time because it takes exactly
+# one path — unlike `dart format` on the line above, which takes the list — and
+# answers the whole list with a usage error rather than doing anything.
 fix: fmt
-	$(DART) fix --apply $(DART_SRC)
+	@for dir in $(DART_SRC); do $(DART) fix --apply "$$dir"; done
 	$(CARGO) clippy $(MANIFEST) --workspace --all-targets --fix \
 		--allow-dirty --allow-staged
 	@$(MAKE) --no-print-directory lint
