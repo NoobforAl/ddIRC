@@ -1,0 +1,39 @@
+[package]
+name = "ddirc-tor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Tor, bundled: an embedded Arti client behind a loopback SOCKS5 listener."
+
+[dependencies]
+# The Tor Project's own Rust implementation. Not a bundled `tor` binary: there
+# is no second process to ship, sign, notarise, or keep from being killed.
+#
+# `default-features = false` because the default set picks native-tls, which on
+# Android means vendoring OpenSSL and on every platform means a second TLS
+# stack beside the one this tree already links. `rustls` here pulls no crypto
+# provider of its own — see `provider()` in lib.rs for why that matters and who
+# ends up choosing.
+#
+# `static-sqlite` is not optional in practice: the directory cache is rusqlite,
+# which otherwise expects a system sqlite3 and does not link on Windows.
+arti-client = { workspace = true }
+tor-rtcompat = { workspace = true }
+rustls = { workspace = true }
+
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }
+futures-util = { workspace = true }
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "test-util"] }
+# The real client, so the ignored end-to-end test proves the thing that
+# actually matters rather than a stand-in. Not a cycle: nothing in the core
+# knows this crate exists.
+ddirc-core = { path = "../ddirc-core" }
+# Only so the ignored bootstrap test can show what Arti is actually doing.
+# Without a subscriber installed, `RUST_LOG` sets nothing and a stalled
+# bootstrap is silent, which is worse than no test at all.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

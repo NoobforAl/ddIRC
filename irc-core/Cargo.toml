@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["ddirc-core", "ddirc-cli", "ddirc-bridge", "ddirc-server"]
+members = ["ddirc-core", "ddirc-cli", "ddirc-bridge", "ddirc-server", "ddirc-tor"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
-license = "MPL-2.0"
+rust-version = "1.91"
+license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
 irc = { version = "1.1.0", default-features = false, features = ["tls-rust", "ctcp", "channel-lists", "proxy"] }
@@ -36,6 +36,17 @@ tokio-rustls = { version = "0.26" }
 # The one genuinely new dependency, and the only part of the local server that
 # was not already here. See `identity.rs` for why it is not hand-rolled.
 rcgen = "0.14"
+# Tor, embedded. The version is pinned to a minor because arti's own crates
+# move together and mixing them is not supported.
+arti-client = { version = "0.45.0", default-features = false, features = [
+    "tokio",
+    "rustls",
+    "static-sqlite",
+    "compression",
+    "flowctl-cc",
+    "onion-service-client",
+] }
+tor-rtcompat = { version = "0.45.0", default-features = false, features = ["tokio", "rustls"] }
 tracing = "0.1"
 flutter_rust_bridge = "=2.13.0"
 zeroize = { version = "1", features = ["derive"] }
