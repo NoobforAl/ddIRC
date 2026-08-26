@@ -65,3 +65,40 @@ zeroize = { version = "1", features = ["derive"] }
 # Delete the directory and this block together when a fixed release exists.
 [patch.crates-io]
 saturating-time = { path = "vendor/saturating-time" }
+
+# ---------------------------------------------------------------------------
+# How the native core is built.
+#
+# Cargo's defaults are aimed at a library being developed, not at an app being
+# run on a phone, and the gap shows most on the hardware that can least afford
+# it. Both profiles below are about one thing: the core does TLS, compression
+# and protocol parsing on every connection, and none of that is work the device
+# should be doing at a debug build's speed.
+
+[profile.release]
+opt-level = 3
+# Thin rather than fat. Fat LTO is a single-threaded link over 507 crates,
+# which on this tree costs more build time than the last few percent is worth;
+# thin still inlines across crate boundaries, which is where the parsing and
+# TLS paths lose out without it.
+lto = "thin"
+# One unit per crate. The default of sixteen exists to parallelise the build,
+# and it pays for that by handing the optimiser sixteen partial views of the
+# same crate instead of one whole one.
+codegen-units = 1
+strip = "symbols"
+# Deliberately NOT `panic = "abort"`, tempting as the size saving is.
+# flutter_rust_bridge turns a panic inside a bridged call into a Dart exception
+# by catching the unwind. Aborting would turn every one of those into a crash
+# of the whole app.
+panic = "unwind"
+
+# Dependencies optimised even in a debug build; our own crates left alone.
+#
+# A debug `aws-lc-rs` is not slightly slower than a release one, it is slower by
+# more than an order of magnitude — enough that the TLS handshake becomes the
+# thing you are waiting for on an older phone, and enough to make `flutter run`
+# look like the app is broken rather than unoptimised. Nothing in this list is
+# what anyone is debugging, so there is nothing to lose by optimising it.
+[profile.dev.package."*"]
+opt-level = 2

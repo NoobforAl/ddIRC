@@ -11,6 +11,10 @@ in the app rather than in a test.
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
+Item 4 breaks the ordering: it is the smallest thing on this page and arrived
+last, out of a performance pass that found it. It is left at the bottom so the
+numbering above stays stable, since items 1 and 2 refer to each other by it.
+
 ## 1. Built-in Tor — beta
 
 - **Ship Tor rather than expect it.** ✅ **Adopted, built and working** —
@@ -456,10 +460,229 @@ opposite of what an off switch should do.
 4. **The UI for a transfer in flight** — progress that can be seen and a
    transfer that can be cancelled, without the traffic appearing as chat.
 
+## 4. The member list goes stale
+
+Found while making the app faster, and worth writing down because the obvious
+fix is the one that would undo the work.
+
+`emit_member_list` is reached from three places: the end of a `NAMES` burst,
+our own `JOIN`, and a mode change that actually moved someone's privilege. So
+the roster the UI holds is correct at the moment you join a channel and after
+anyone is opped — and is never told about the next thousand people who come and
+go. In `#Debian` the count on screen is whatever it was when you arrived.
+
+`MemberList` in Dart is already written expecting otherwise: it diffs the
+roster to fade in arrivals, and its own comment reasons about departures. That
+code is correct and is currently never reached.
+
+**The fix is not to emit the roster on join and part.** That is one event
+carrying 883 members, serialised across the FFI and re-sorted, every time
+anybody anywhere in the channel does anything — which is precisely the shape of
+the problem the performance pass went looking for. It wants a delta:
+
+- A `MemberChanged { channel, nick, joined | left | renamed | away }` event
+  beside `MemberList`, with `MemberList` staying as the full roster it already
+  is for the two moments that genuinely need one.
+- Applied to the list Dart already holds, in the order the core sends it.
+- Which means the Dart side owns an ordering rule for the first time, since
+  inserting one nick correctly means knowing where it goes. Either the core
+  sends a sort key with the member, or the rule is written twice and drifts.
+
+Costed as small, but it touches the FFI, so it takes a `make codegen` and the
+three exhaustive matches that a new `IrcEvent` variant always breaks —
+`ddirc-bridge/src/api/types.rs`, `ddirc-cli/src/main.rs`, `session.dart`.
+
 ## Done
 
 Kept here rather than deleted, because each one records a decision that would
 otherwise have to be made again.
+
+### Making it fast enough for a cheap phone
+
+- ✅ **The app was slow on a Galaxy A30s, and it was not the network.** Nine
+  changes, none of them a rewrite: the app was doing an enormous amount of work
+  that was never displayed.
+
+  What follows is grouped by how much it mattered rather than by which file it
+  is in, because the shape of the problem was the same everywhere — a
+  notification meaning *something changed* being answered with *rebuild
+  everything*.
+
+  **What is measured is labelled as such**, and what is not is arithmetic off
+  the code rather than a number off a device. Nobody has run this on the A30s
+  yet, so there is no end-to-end figure and this section does not invent one.
+
+#### The screen was rebuilt once per IRC line
+
+  `SessionModel` notified per event, and a busy channel is hundreds of events a
+  second. Each one rebuilt the network rail, the channel list, the tab strip,
+  the whole scrollback and the member list. A screen can show one frame either
+  way, so every rebuild after the first in a frame was work nobody ever saw.
+
+  Events now coalesce into one repaint per frame. Deliberately a post-frame
+  callback rather than a microtask: each event arrives in its own turn of the
+  event loop, so a microtask would have coalesced nothing. A line appears a
+  frame later than it used to, and appears at all during a flood, which it
+  effectively did not before.
+
+  User actions — selecting a conversation, closing a tab — still notify
+  directly. Those come one at a time and want the immediate answer.
+
+#### The workspace repainted for news it does not draw
+
+  Every session forwarded every notification to the `Workspace`, which repainted
+  everything above it. The rail reads exactly two numbers off a session: unread
+  and mentions. So a message in the conversation you are *reading* — where both
+  numbers stay at zero, because it is already read — repainted every network
+  mark and the entire session subtree to show nothing that had changed. The
+  forward now passes on only a change to those two numbers.
+
+#### Typing rebuilt the whole session screen
+
+  The composer's listener called `setState` on the screen, so every keystroke
+  rebuilt the channel list, the member list and the entire scrollback in order
+  to decide whether to offer `/join`. Nothing else on the screen reads what is
+  in the composer, and now nothing else is told: the suggestion strip listens to
+  a notifier of its own.
+
+#### Two full Material themes, rebuilt on every settings change
+
+  The worst line in the app, and the least obvious. `MaterialApp` was wrapped in
+  a listener on all of `AppSettings`, and its `theme:` and `darkTheme:`
+  arguments each called `ColorScheme.fromSeed` — a full Material 3 tonal palette
+  derived in a perceptual colour space — *on every rebuild*.
+
+  Worse than the arithmetic: a fresh `ThemeData` is a different object, so the
+  `Theme` above the app changed identity and every widget in the tree that reads
+  `context.tokens` was rebuilt with it. That is every message row on screen. The
+  palette is a constant, so the themes are now built once; and `MaterialApp`
+  listens to `themeMode` alone rather than to every setting.
+
+  **Measured at 1.32 ms** for the pair, on a desktop x86, in the Dart VM —
+  before counting the tree rebuild that followed it. This is a per-interaction
+  cost rather than a per-message one: `AppSettings` notifies when a setting
+  changes, so what it bought was a stutter every time a switch moved, on a
+  screen whose whole job is switches.
+
+#### Every row in the scrollback carried an animation it was not running
+
+  `Arrive` built an `AnimationController`, an `AnimatedBuilder`, an `Opacity`
+  and a `Transform` for each row — including the thousands that had been there
+  all along and were expressing standing still. It now builds none for a row
+  that never animates, and disposes the machinery when a row that does animate
+  lands.
+
+  Counted over twenty rows: **20 `Opacity` layers before, 0 after** at rest, 20
+  during an actual arrival, and 0 again once it finishes — with an
+  `AnimationController` and an `AnimatedBuilder` alongside each. Two tests in
+  `motion_test.dart` hold that, because it is the kind of regression that is
+  invisible in a screenshot.
+
+  The existing tests were reading the `Opacity` widget to check a row was at
+  full strength; they now read the absence of one, which says it more strongly.
+
+#### The member list diffed itself for nothing
+
+  `didUpdateWidget` built two sets of every nick in the channel on every repaint
+  of the session, including one caused by a message in a different channel.
+  1,766 string hashes in `#Debian` to discover that nobody had moved. The core
+  replaces the roster wholesale, so an identity check is an exact answer.
+
+#### Indexing a conversation list walked it
+
+  `conversations` and `tabs` returned an `UnmodifiableListView` wrapping a lazy
+  `map`, which indexes by walking. The `ListView.builder` reading it was doing
+  O(n) work per row. Materialised now, and cached until the set of conversations
+  actually changes.
+
+#### The member sort: **7.8x**, and two wrong answers on the way
+
+  Measured, by `ddirc-core/tests/sort_bench.rs`, in release, on this machine:
+
+  ```
+    size   original      lazy   shipped   speed-up
+      50    0.026ms   0.005ms   0.004ms     6.6x
+     481    0.407ms   0.130ms   0.061ms     6.6x
+     883    0.832ms   0.251ms   0.107ms     7.8x
+    2000    2.265ms   0.771ms   0.288ms     7.9x
+  ```
+
+  The Rust side, and the same mistake as the Dart side in a different language:
+  work inside a comparator is multiplied by the O(n log n) times a sort calls
+  it. The original computed *both* halves of the key in there — ranking walked
+  each member's prefix list twice per comparison, and `to_lowercase()` allocated
+  two fresh `String`s per comparison, some eighteen thousand allocations to
+  order `#Debian` once, on the frame a channel finishes joining.
+
+  **The lesson is the middle column.** The first attempt hoisted the rank out
+  and replaced the two allocations with a lazy lowercase iterator comparison
+  that allocates *nothing at all*. It is three times slower than what shipped,
+  and a standalone microbenchmark of it — written with a cheaper
+  `display_prefix` than the real one — reported it as slower than the original,
+  which was wrong in the other direction. Two readings of the same change, both
+  wrong, until it was timed against the actual code.
+
+  What shipped hoists the rank *and* the lowercased nick, paying one allocation
+  per member so that the comparator is an integer compare and a `memcmp`.
+  Allocation count was never the thing to minimise; work inside the comparator
+  was. All three versions are kept in the bench file, timed side by side, so the
+  next person to have the clever idea can see it lose in about four seconds.
+
+#### Cargo was building the core for a library author, not for a phone
+
+  There was no `[profile.*]` in the workspace at all, so both defaults applied.
+  Release now carries thin LTO and one codegen unit per crate — thin rather than
+  fat because fat LTO is a single-threaded link over 507 crates, and one unit
+  because the default of sixteen buys build parallelism by handing the optimiser
+  sixteen partial views of the same crate.
+
+  Deliberately **not** `panic = "abort"`, tempting as the size saving is:
+  flutter_rust_bridge turns a panic inside a bridged call into a Dart exception
+  by catching the unwind, and aborting would turn every one of those into a
+  crash of the whole app.
+
+  The other half matters more for anyone running `flutter run`:
+  `[profile.dev.package."*"]` now builds dependencies at `opt-level = 2` while
+  leaving our own crates alone. A debug `aws-lc-rs` is not slightly slower than
+  a release one, it is slower by more than an order of magnitude — enough that
+  the TLS handshake becomes the thing you are waiting for on an older phone.
+  The first build after this change rebuilds every dependency once, which on the
+  arti tree is not quick.
+
+  **None of this makes a debug Flutter build fast.** Dart is interpreted before
+  it is JITted and the framework carries its assertions; `--profile` or
+  `--release` is still how the app is judged.
+
+### Not the web, and why
+
+- ⛔ **There is no web target, and the blocker is not the Rust tooling.**
+  Checked rather than assumed, because it is the sort of question that gets
+  asked again.
+
+  flutter_rust_bridge 2.13 *does* support the web — it ships a wasm loader and
+  a `_web` platform layer, and generating for it is a flag. So the bridge is
+  fine. The core is not:
+
+  ```
+  error: This wasm target is unsupported by mio.
+         If using Tokio, disable the net feature.
+  ```
+
+  That is `cargo check -p ddirc-core --target wasm32-unknown-unknown`, and
+  disabling tokio's net feature means giving up TCP, which is the entire crate.
+  The refusal is honest rather than an oversight: **a browser cannot open a TCP
+  socket at all**, so there is nothing for a wasm IRC client to connect with.
+  The same wall stops the SOCKS5 proxy, the bundled Tor, the local server and
+  DCC, all of which are TCP by definition.
+
+  A ddIRC that ran in a browser would therefore not be this app compiled for a
+  new target. It would be a second client speaking IRC over a **WebSocket**, and
+  it would only reach servers that offer one or sit behind a gateway that does
+  — which most networks do not, and which means trusting whoever runs the
+  gateway with the plaintext, since TLS would terminate there rather than at the
+  server. That is a different product with a different threat model, not a build
+  setting, and adding a `web/` folder that compiles into an app which cannot
+  connect to anything would be the worst of both.
 
 ### Keep running in the background
 
