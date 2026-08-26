@@ -12,6 +12,7 @@
 //! bootstrap commentary and the time it took, and that is the number the
 //! decision to ship this rests on.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use ddirc_core::api::events::IrcEvent;
@@ -191,13 +192,29 @@ async fn the_client_registers_through_the_bundled_tor() {
     // roster is the server volunteering data, which is the direction that
     // matters — it is the one a half-open proxied connection would never
     // produce.
+    //
+    // Kept rather than taken once, because the roster arrives twice: the core
+    // emits one the moment we join, holding only ourselves, and the real one
+    // on `RPL_ENDOFNAMES` once the server has finished listing. Reading the
+    // first would report "1 person" in a channel of hundreds and prove far
+    // less than it appeared to.
     let mut joined: Vec<String> = Vec::new();
-    let mut rosters: Vec<(String, usize)> = Vec::new();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-    while rosters.len() < CHANNELS.len() {
+    let mut rosters: HashMap<String, usize> = HashMap::new();
+    let mut heard = 0_u32;
+
+    // One loop, so the roster keeps being updated while we listen. Ends when
+    // both channels have answered *and* the listening window is up.
+    let joins_by = tokio::time::Instant::now() + Duration::from_secs(120);
+    let listen_until = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let settled = rosters.len() == CHANNELS.len();
+        let deadline = if settled { listen_until } else { joins_by };
         let event = match tokio::time::timeout_at(deadline, rx.recv()).await {
             Ok(Some(event)) => event,
             Ok(None) => panic!("the event stream closed while joining"),
+            // Out of time is the end of the listening window once the joins
+            // are in, and a failure before that.
+            Err(_) if settled => break,
             Err(_) => panic!("joined {joined:?}, but only got rosters for {rosters:?}"),
         };
         match event {
@@ -209,18 +226,20 @@ async fn the_client_registers_through_the_bundled_tor() {
                 println!("joined {channel}");
                 joined.push(channel);
             }
-            IrcEvent::MemberList { channel, members }
-                if !rosters.iter().any(|(c, _)| *c == channel) =>
-            {
-                println!("{channel}: {} people", members.len());
+            IrcEvent::MemberList { channel, members } => {
                 assert!(
                     !members.is_empty(),
                     "{channel} came back with an empty roster, which cannot be right"
                 );
-                rosters.push((channel, members.len()));
+                rosters.insert(channel, members.len());
             }
             IrcEvent::TopicChanged { channel, topic, .. } => {
                 println!("{channel} topic: {topic}");
+            }
+            IrcEvent::Message(message) => {
+                heard += 1;
+                let text: String = message.spans.iter().map(|s| s.text.as_str()).collect();
+                println!("  <{}> {text}", message.sender);
             }
             IrcEvent::Error { message, fatal } => {
                 assert!(!fatal, "the server hung up on us: {message}");
@@ -230,19 +249,22 @@ async fn the_client_registers_through_the_bundled_tor() {
         }
     }
 
-    // Sit for a moment and report whatever the channels say, so a run of this
-    // shows real traffic arriving over Tor rather than only handshakes.
-    println!("listening for 20s");
-    let listen_until = tokio::time::Instant::now() + Duration::from_secs(20);
-    let mut heard = 0_u32;
-    while let Ok(Some(event)) = tokio::time::timeout_at(listen_until, rx.recv()).await {
-        if let IrcEvent::Message(message) = event {
-            heard += 1;
-            let text: String = message.spans.iter().map(|s| s.text.as_str()).collect();
-            println!("  <{}> {text}", message.sender);
-        }
+    for channel in CHANNELS {
+        // Matched without regard to case, because the name that comes back is
+        // the server's: ask OFTC for `#debian` and it answers about `#Debian`.
+        // Channel names are case-insensitive and the core keeps the casing the
+        // server used, which is right — so it is the lookup that has to bend.
+        let (name, count) = rosters
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(channel))
+            .map(|(name, count)| (name.as_str(), *count))
+            .unwrap_or((channel, 0));
+        println!("{name}: {count} people");
+        // A public channel this size is never down to one person, and one
+        // person is exactly what a roster read too early reports.
+        assert!(count > 1, "{name} had only {count} in it");
     }
-    println!("heard {heard} messages in 20s");
+    println!("heard {heard} messages while listening");
 
     let _ = handle
         .send(ClientCommand::Disconnect {

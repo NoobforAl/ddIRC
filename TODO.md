@@ -3,19 +3,35 @@
 Ordered easiest first. Everything left carries either a new dependency, a
 per-platform decision, or an unanswered question.
 
-Items 1 and 2 are built. What is left on 1 is not ours — a dependency of a
-dependency spins forever on Windows, and the reproduction is written down under
-*Where it is stuck*. What is left on 2 is running it once.
+Items 1 and 2 are built and working. Item 1 needed a bug fixing in a dependency
+of a dependency first — see *The bug in the way*, which is worth keeping
+whatever happens upstream. What is left on both is the same thing: running them
+in the app rather than in a test.
 
 Everything here ships **disabled by default**. Items marked **beta** should
 additionally be labelled as such in the UI.
 
 ## 1. Built-in Tor — beta
 
-- **Ship Tor rather than expect it.** ✅ **Adopted, and built** — `arti-client`
-  0.45, wrapped in `irc-core/ddirc-tor/`, reachable from the app.
-  ⛔ **It does not bootstrap**, and the reason is not ours. See *Where it is
-  stuck*.
+- **Ship Tor rather than expect it.** ✅ **Adopted, built and working** —
+  `arti-client` 0.45, wrapped in `irc-core/ddirc-tor/`, reachable from the app.
+
+**Measured, on Windows, over the real network:**
+
+```
+[   0.2s]   8%: handshaking with Tor relays
+[   1.1s]  15%: connecting successfully; directory is fetching a consensus
+[   4.6s]  36%: directory is fetching authority certificates (0/9)
+[   5.3s]  45%: directory is fetching microdescriptors (0/10129)
+[  14.3s] 100%: directory is usable
+bootstrapped in 14.3s
+```
+
+Then the whole path, with nothing stubbed: the app's own client, through the
+app's own Tor, over real TLS to OFTC — registered, joined `#oftc` (481 people)
+and `#Debian` (883), and sat in them receiving real traffic. That is
+`the_client_registers_through_the_bundled_tor` in `ddirc-tor/tests/`, and it
+uses the same `ProxyConfig` the Dart side fills in.
 
 The app is now **GPL-3.0-or-later**, which is what made adopting a 507-crate
 tree straightforward: arti is `MIT OR Apache-2.0` throughout, and both may be
@@ -64,7 +80,7 @@ with `opt-level = "z"`, LTO, `panic = "abort"` and stripping.
 | **Dependency tree** | **507 crates**, 36 of them `tor-*` |
 | **MSRV** | **1.91** — the workspace pinned 1.82 and now pins 1.91 |
 | **Licence** | `MIT OR Apache-2.0` throughout, compatible with GPL-3 |
-| **Bootstrap time** | **Never completes on Windows.** See below |
+| **Bootstrap time** | **14.3 s** cold, on Windows, from a state directory that did not exist. A warm start reuses the cached consensus |
 
 Three integration costs that only appeared by building it:
 
@@ -85,12 +101,15 @@ Three integration costs that only appeared by building it:
 - **`zstd-sys` brings its own C**, which is the same cross-compilation surface
   a second time.
 
-### Where it is stuck
+### The bug in the way, and the fix
 
-**Not the Tor network, not censorship, and not arti's own logic.** The
-bootstrap reaches the network, opens channels to real relays, builds circuits
-and downloads a 3.6 MB consensus in about four seconds. Then one thread pegs a
-core forever, at a flat 5 MB of memory, and nothing else ever happens.
+Kept in full, because it took most of a session to find and the next person
+to meet it deserves the answer rather than the search.
+
+**It was not the Tor network, not censorship, and not arti's own logic.** The
+bootstrap reached the network, opened channels to real relays, built circuits
+and downloaded a 3.6 MB consensus in about four seconds. Then one thread pegged
+a core forever, at a flat 5 MB of memory, and nothing else ever happened.
 
 The stall is in `saturating-time` 0.4.0, reached from `tor-netdoc`:
 
@@ -140,24 +159,43 @@ reproduces on Rust 1.91 and 1.98, in debug and release, and in a crate whose
 only dependency is `tor-netdoc`. There is no fixed release: 0.4.0 is the newest
 of four.
 
+### The fix, and where it lives
+
+One condition. A probe that succeeds *without moving* carries the same
+information as one that failed — the step is finer than the clock — so it has
+to halve the step rather than count as progress:
+
+```rust
+Some(st) if st != res => res = st,
+_ => { /* halve, or stop at 1ns */ }
+```
+
+With that, `find_limit` terminates in **118 iterations, about a microsecond**,
+and returns 1601-01-01 — which is provably the floor, since the next 100 ns
+probe from it does return `None`. It fixes `find_max` at the same time, and it
+is correct on Linux too, where the old code only survived because 1 ns happens
+to be fine enough to hide the flaw.
+
+`saturating-time` is vendored at `irc-core/vendor/saturating-time/` with that
+change and the reasoning in the source, patched in through `[patch.crates-io]`
+in the workspace manifest. Vendored rather than forked because it is 546 lines
+with no dependencies, under `MIT OR Apache-2.0`.
+
+**Delete the directory and the `[patch.crates-io]` block together** when a
+fixed release exists. Nothing else in this workspace depends on the crate
+directly.
+
 ### What is left
 
 1. **Report it upstream** — to `saturating-time`, and to arti, which is the
-   consumer that makes it visible. The no-dependency reproduction is what to
-   send.
-2. **Decide what to do meanwhile.** Three options, in order of preference:
-   patch `saturating-time` behind a `[patch.crates-io]` until a fix lands;
-   wait; or ship the feature switched off with the settings section saying it
-   does not work yet on Windows.
-
-   The fix upstream is small, and now that the mechanism is known it is also
-   obvious: stop when a probe succeeds without moving. One comparison, and it
-   ends the loop on every platform whose clock has a granularity — which is all
-   of them, Linux included, where 1 ns merely happens to be fine enough to hide
-   it.
-3. **A timed bootstrap on a platform that is not Windows**, which is the number
-   the shipping decision actually rests on and which nothing here has yet
-   measured.
+   consumer that makes it visible. The no-dependency reproduction and the
+   one-condition patch are what to send.
+2. **Run it in the app.** Everything above was measured through
+   `cargo test`; nobody has yet switched Tor on in a running ddIRC and watched
+   a network connect through it.
+3. **A timed bootstrap on a platform that is not Windows**, for comparison.
+   Not blocking anything — 14.3 s is already a usable number, and the failure
+   this fixed could not have happened on Linux at all.
 
 ## 2. A local IRC server — beta
 
@@ -187,7 +225,7 @@ that works on the developer's machine.
 listener**: publish it as an onion service, where the address is the key, NAT
 stops mattering, and Tor authenticates which service answered. That depends on
 item 1 — and `arti-client` carries an `onion-service-service` feature for
-exactly this. It is now blocked on the same thing item 1 is.
+exactly this. Item 1 now works, so this is unblocked and merely unbuilt.
 
 ### The TLS story, answered: it issues its own, and that is not a bypass
 
@@ -268,9 +306,9 @@ is now exercised by an ordinary `cargo test`.
 
 ## 3. Sending media — beta
 
-**Blocked on a decision** — see *The problem to solve* at the end of this
-section. The specification below is worth keeping either way; what is
-undecided is what carries the bytes.
+**The decision is made: DCC.** See *The problem to solve* at the end of this
+section for the arithmetic that forced it, and *What is left* for the three
+pieces of work it breaks into.
 
 A protocol for sending files over IRC, since there is no standard one for
 in-band transfer.
@@ -350,20 +388,45 @@ single acknowledgement. The same sum puts a 1 MB image at ~2 hours and a
 200 KB avatar at ~23 minutes.
 
 Sending files as chat messages therefore cannot work for anything larger than
-a few kilobytes, at any rate a server will tolerate. Two directions worth
-weighing before writing the protocol:
+a few kilobytes, at any rate a server will tolerate.
 
-- **DCC**, the established IRC answer: peers negotiate in-band, then open a
-  direct TCP connection and send the file over that, subject to no message
-  rate limit at all. Its weaknesses are well known — it exposes IP addresses
-  and struggles with NAT — but it is what other clients implement and
-  interoperate with.
-- **Out-of-band upload**, where the file goes to a host over HTTPS and only a
-  link travels over IRC. Simplest to build, but adds a service to run.
+### The decision: DCC
+
+✅ **Settled.** Peers negotiate in-band, then open a direct TCP connection and
+send the file over that, subject to no message rate limit at all. It is what
+other clients implement, so a transfer works with people who are not using
+ddIRC — which the alternative, an out-of-band HTTPS upload, could never manage
+without everyone agreeing on the same host.
+
+Its two known weaknesses are worth stating plainly, because one of them just
+changed:
+
+- **It exposes IP addresses.** A DCC offer names an address and port for the
+  other side to dial. That was the strongest argument against it, and item 1
+  answers it: with bundled Tor there is a route that does not involve handing
+  anyone your address. What that means concretely is the first thing to design
+  — a reverse DCC, an onion service per transfer, or a refusal to offer DCC at
+  all while Tor is on.
+- **It struggles with NAT.** Both directions are worth supporting for this
+  reason: DCC SEND, where the sender listens, and reverse DCC, where the
+  receiver does.
 
 Most of the specification above — the handshake, the hashes, the chunking, the
-acknowledgements, the metadata stripping, the failure limits — survives either
-choice. What changes is what carries the bytes.
+acknowledgements, the metadata stripping, the failure limits — carries over. It
+stops being a chat-message protocol and becomes a framing over the direct
+connection, where the 400-character cap and the send limiter do not apply and
+the 128 MB ceiling becomes reasonable rather than absurd.
+
+### What is left
+
+1. **Settle what DCC does while Tor is on**, which is the question above and
+   the one that shapes everything else.
+2. **The offer and the acceptance**, in `ddirc-core`: CTCP `DCC SEND`,
+   parsing and emitting, with the address and port handled as data rather than
+   trusted.
+3. **The transfer itself**, and the UI for it — a progress that can be seen and
+   a transfer that can be cancelled, without the chunk traffic appearing as
+   chat lines.
 
 ## Done
 
