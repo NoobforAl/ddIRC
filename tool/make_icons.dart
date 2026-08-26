@@ -38,6 +38,14 @@ const _icoSizes = [16, 24, 32, 48, 64, 128, 256];
 /// one — which is the kind of fault nobody reports.
 const _trayIcoSizes = [16, 20, 24, 32];
 
+/// The size of the mark on the Android launch screen, in dp.
+///
+/// 72dp is what Android 12's own splash API reserves for icon content inside
+/// its 108dp canvas. Matching it means the mark is the same size on a phone
+/// old enough to use this drawable and on one new enough that the system
+/// draws its own splash instead.
+const _splashDp = 72;
+
 /// The base size of an Android notification icon, in dp.
 ///
 /// Android draws the small icon at 24dp and uses only its alpha channel, so
@@ -128,6 +136,26 @@ void main(List<String> args) {
     write(
       'android/app/src/main/res/drawable-$density/ic_notification.png',
       trayTemplate(size),
+    );
+  }
+
+  // The launch screen, which is the first thing anyone sees.
+  //
+  // Android paints `windowBackground` from the moment the process starts until
+  // Flutter's engine draws its first frame, and on a slow phone that is most of
+  // a second — plus however long `main()` spends reading preferences before it
+  // calls `runApp`. A flat colour for all of that is a screen that looks
+  // broken rather than one that looks like it is starting.
+  //
+  // A bitmap rather than a vector, and at real densities: a `windowBackground`
+  // is drawn before any of the app's own code runs, so the fewer moving parts
+  // the better.
+  for (final MapEntry(key: density, value: factor)
+      in _androidDensities.entries) {
+    final size = _splashDp * factor;
+    write(
+      'android/app/src/main/res/drawable-$density/ic_splash.png',
+      png(render(size), size, size),
     );
   }
 

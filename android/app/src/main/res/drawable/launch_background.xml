@@ -1,4 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    What the system paints from the moment the process starts until Flutter's
+    engine draws its first frame. On an older phone that is most of a second,
+    and a flat colour for all of it reads as a black screen rather than as an
+    app opening.
+
+    The colour matches the app's own window background in both themes, so
+    Flutter's first frame lands on the same ground the splash was already on.
+
+    From Android 12 the platform draws its own splash from the launcher icon
+    and ignores this file; nothing here needs a `-v31` variant, because the
+    system's version shows the same mark.
+-->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:drawable="@color/window_background" />
+    <item>
+        <bitmap
+            android:gravity="center"
+            android:src="@drawable/ic_splash" />
+    </item>
 </layer-list>

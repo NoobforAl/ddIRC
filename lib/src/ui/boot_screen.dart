@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../model/errors.dart';
@@ -14,10 +15,18 @@ import 'motion.dart';
 /// simply not be there. Before this, that failure was a window that came up
 /// blank and stayed blank. Now it is a sentence and a button.
 ///
-/// The splash is deliberately shy. Nothing is drawn for the first
-/// [_quiet] — a start that finishes inside that never flashes a logo at
-/// anyone — and once it *has* appeared it stays for [_atLeast], because a
-/// splash that blinks reads as a glitch rather than as a start.
+/// The splash is deliberately shy, on the platforms where being shy is right.
+/// Nothing is drawn for the first [_quiet] — a start that finishes inside that
+/// never flashes a logo at anyone — and once it *has* appeared it stays for
+/// [_atLeast], because a splash that blinks reads as a glitch rather than as a
+/// start.
+///
+/// On Android [_quiet] is zero, and that is not an inconsistency. The system
+/// has already been showing the mark, on this same background, since the
+/// process started — see `android/app/src/main/res/drawable/launch_background.xml`.
+/// Waiting before drawing it again would take the mark *away* for a seventh of
+/// a second and then bring it back, which is the blink this delay exists to
+/// prevent.
 class BootScreen extends StatefulWidget {
   const BootScreen({super.key, required this.load, required this.builder});
 
@@ -34,8 +43,12 @@ class BootScreen extends StatefulWidget {
 
 class _BootScreenState extends State<BootScreen> {
   /// Long enough to cover a warm start, short enough that a slow one does not
-  /// feel like the app has failed to open.
-  static const _quiet = Duration(milliseconds: 140);
+  /// feel like the app has failed to open — and zero where the platform has
+  /// been showing the mark all along, so this continues it rather than
+  /// interrupting it.
+  static Duration get _quiet => defaultTargetPlatform == TargetPlatform.android
+      ? Duration.zero
+      : const Duration(milliseconds: 140);
 
   /// How long the splash stays once it is on screen.
   static const _atLeast = Duration(milliseconds: 420);
@@ -60,17 +73,24 @@ class _BootScreenState extends State<BootScreen> {
 
   Future<void> _start() async {
     _reveal?.cancel();
+    final quiet = _quiet;
     setState(() {
-      _visible = false;
+      // Visible from the first frame where the platform has already been
+      // showing the mark. A zero-duration `Timer` would still not fire until
+      // the next turn of the event loop, which is one frame of the mark being
+      // absent — the exact blink this is arranging to avoid.
+      _visible = quiet == Duration.zero;
       _ready = false;
       _error = null;
     });
     _elapsed
       ..reset()
       ..start();
-    _reveal = Timer(_quiet, () {
-      if (mounted) setState(() => _visible = true);
-    });
+    if (!_visible) {
+      _reveal = Timer(quiet, () {
+        if (mounted) setState(() => _visible = true);
+      });
+    }
 
     Object? failure;
     try {

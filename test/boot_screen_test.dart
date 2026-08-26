@@ -1,10 +1,12 @@
 // Tests for the startup gate.
 //
-// Three behaviours, none of which can be seen in a screenshot: a start that
+// Four behaviours, none of which can be seen in a screenshot: a start that
 // finishes quickly must never flash a logo, a start that is slow must hold the
-// splash long enough to be read, and a start that fails must say so and be
-// retryable. The last one is the reason this widget exists — before it, a core
-// that would not load produced an empty window and no explanation.
+// splash long enough to be read, a start that fails must say so and be
+// retryable, and on Android the splash must be there from the very first frame
+// because the system has already been showing the mark. The failure case is
+// the reason this widget exists — before it, a core that would not load
+// produced an empty window and no explanation.
 //
 // Motion is switched off throughout. It makes the frames deterministic, and it
 // keeps the splash's own looping animation from stopping `pumpAndSettle` from
@@ -12,6 +14,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -59,9 +62,15 @@ double _splashOpacity(WidgetTester tester) {
 }
 
 void main() {
-  testWidgets('shows nothing at all for a start that finishes at once', (
+  testWidgets('on a desktop, shows nothing for a start that finishes at once', (
     tester,
   ) async {
+    // Widget tests report Android unless told otherwise, and Android is now
+    // the platform with the different answer — so the desktop behaviour has to
+    // name its platform or it silently stops being tested. Set and cleared
+    // inside the body, because the framework checks the override is unset
+    // before any `tearDown` gets to run.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     await _pumpBoot(tester, () async {});
 
     // The splash is mounted from the first frame but transparent, so a warm
@@ -71,9 +80,36 @@ void main() {
     await tester.pump(_beforeReveal);
     expect(find.text(_app), findsOneWidget);
     expect(find.text(_starting), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('on Android the splash is there from the first frame', (
+    tester,
+  ) async {
+    // Because the system has been drawing the mark on this same background
+    // since the process started. Waiting would take it away and put it back,
+    // which is the blink the quiet period exists to prevent — so on the one
+    // platform that has a real launch screen, the quiet period is the thing
+    // that would cause it.
+    expect(defaultTargetPlatform, TargetPlatform.android);
+
+    final gate = Completer<void>();
+    await _pumpBoot(tester, () => gate.future);
+
+    expect(_splashOpacity(tester), 1);
+    expect(find.text(_starting), findsOneWidget);
+
+    gate.complete();
+    await tester.pump(_wellPast);
+    await tester.pumpAndSettle();
+    expect(find.text(_app), findsOneWidget);
   });
 
   testWidgets('reveals itself when the start is slow', (tester) async {
+    // Timed against the desktop quiet period, which is the one there is a
+    // reveal to wait for.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+
     final gate = Completer<void>();
     await _pumpBoot(tester, () => gate.future);
 
@@ -92,6 +128,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(_app), findsOneWidget);
     expect(find.text(_starting), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('reports a failure instead of an empty window', (tester) async {

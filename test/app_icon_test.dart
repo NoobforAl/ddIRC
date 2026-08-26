@@ -45,6 +45,16 @@ void main() {
     expect(committed, icons.png(icons.render(192), 192, 192));
   });
 
+  test('the Android launch-screen mark is the current mark', () {
+    // The one icon nobody looks at during development, because it is only on
+    // screen while the app is starting — which is exactly when a stale or
+    // missing one is least likely to be noticed and most likely to be seen.
+    final committed = File(
+      'android/app/src/main/res/drawable-xxxhdpi/ic_splash.png',
+    ).readAsBytesSync();
+    expect(committed, icons.png(icons.render(72 * 4), 72 * 4, 72 * 4));
+  });
+
   test('the macOS icon set is the current mark', () {
     final committed = File(
       'macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png',
