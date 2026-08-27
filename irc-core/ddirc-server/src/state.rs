@@ -55,6 +55,14 @@ struct Client {
     /// completing the moment NICK and USER have both arrived — otherwise a
     /// client that is still negotiating gets a welcome mid-conversation.
     negotiating: bool,
+    /// What they said on the way out, kept until the socket actually closes.
+    ///
+    /// A `QUIT` is a statement, not a disconnection: the connection ends a
+    /// moment later when the client hangs up, and it is the session task
+    /// watching the socket that reports that. Without somewhere to put the
+    /// reason in between, everyone in the channel is told "Connection closed"
+    /// however deliberately the person left.
+    quit_reason: Option<String>,
     /// Normalised names of the channels this client is in, so a disconnect does
     /// not have to search every channel on the server.
     channels: HashSet<String>,
@@ -113,6 +121,25 @@ pub struct Network {
 /// channel.
 fn fold(name: &str) -> String {
     name.to_ascii_lowercase()
+}
+
+/// Cut a string down to `max` bytes, on a character boundary.
+///
+/// `String::truncate` is the obvious call and is the wrong one: it **panics**
+/// when the index falls inside a multi-byte character. Everything bounded here
+/// arrived on the wire, so a topic or a quit message with an `é` straddling
+/// the limit would panic the one task that owns all the server's state — and
+/// that task dying leaves a listener still accepting connections that will
+/// never be answered.
+fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
 }
 
 fn now() -> u64 {
@@ -180,6 +207,7 @@ impl Network {
                 real: None,
                 registered: false,
                 negotiating: false,
+                quit_reason: None,
                 channels: HashSet::new(),
             },
         );
@@ -187,6 +215,10 @@ impl Network {
 
     /// A connection has gone, for any reason — QUIT, a dropped socket, or the
     /// server shutting down. Everyone who shared a channel is told once.
+    ///
+    /// `reason` is what the session task saw happen to the socket, which is a
+    /// worse answer than what the client *said* if it said anything. Someone
+    /// who typed `/quit heading out` should not appear to have dropped off.
     pub fn disconnect(&mut self, id: ClientId, reason: &str) {
         let Some(client) = self.clients.remove(&id) else {
             return;
@@ -195,10 +227,11 @@ impl Network {
             self.nicks.remove(&fold(nick));
         }
 
+        let said = client.quit_reason.clone();
         let quit = Message {
             tags: None,
             prefix: Some(client.prefix()),
-            command: Command::QUIT(Some(reason.to_owned())),
+            command: Command::QUIT(Some(said.unwrap_or_else(|| reason.to_owned()))),
         };
 
         // Once, not once per shared channel: someone who shares three channels
@@ -239,8 +272,14 @@ impl Network {
             Command::PONG(..) => {}
             Command::QUIT(reason) => {
                 // The session task sees the socket close and calls `disconnect`
-                // itself, so nothing is done here beyond letting it happen.
-                let _ = reason;
+                // itself, so the connection is not ended here — only what to
+                // say about it is recorded. Bounded like a topic, because it is
+                // a string from the wire that is about to be sent to everyone
+                // else on the server.
+                if let Some(client) = self.clients.get_mut(&id) {
+                    client.quit_reason =
+                        Some(reason.map_or_else(|| "Quit".to_owned(), |r| truncate(&r, TOPIC_LEN)));
+                }
             }
             command => {
                 if !self.is_registered(id) {
@@ -587,8 +626,7 @@ impl Network {
         }
 
         let setter = self.nick_of(id);
-        let mut text = text;
-        text.truncate(TOPIC_LEN);
+        let text = truncate(&text, TOPIC_LEN);
         let shown = self.channels[&key].name.clone();
         if let Some(channel) = self.channels.get_mut(&key) {
             channel.topic = if text.is_empty() {
@@ -1094,6 +1132,79 @@ mod tests {
         );
         // The nick is free again the moment its holder is gone.
         assert!(!net.nicks.contains_key("alice"));
+    }
+
+    #[test]
+    fn what_someone_said_on_the_way_out_is_what_the_channel_is_told() {
+        let (mut net, mut rxs) = network(2);
+        register(&mut net, 0, "alice");
+        register(&mut net, 1, "bob");
+        net.handle(0, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        net.handle(1, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        drain(&mut rxs[1]);
+
+        net.handle(0, Message::new(None, "QUIT", vec!["heading out"]).unwrap());
+        // The socket closes a moment later, and the session task reports what
+        // it saw — which is not what alice said.
+        net.disconnect(0, "Connection closed");
+
+        let bob = drain(&mut rxs[1]);
+        assert!(has(&bob, "QUIT :heading out"), "{bob:?}");
+        assert!(!has(&bob, "Connection closed"), "{bob:?}");
+    }
+
+    #[test]
+    fn a_dropped_socket_still_says_something() {
+        let (mut net, mut rxs) = network(2);
+        register(&mut net, 0, "alice");
+        register(&mut net, 1, "bob");
+        net.handle(0, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        net.handle(1, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        drain(&mut rxs[1]);
+
+        // No QUIT at all: the connection simply went away.
+        net.disconnect(0, "Connection closed");
+        assert!(has(&drain(&mut rxs[1]), "QUIT :Connection closed"));
+    }
+
+    #[test]
+    fn a_quit_message_from_the_wire_cannot_panic_or_run_long() {
+        let (mut net, mut rxs) = network(2);
+        register(&mut net, 0, "alice");
+        register(&mut net, 1, "bob");
+        net.handle(0, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        net.handle(1, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        drain(&mut rxs[1]);
+
+        // Multi-byte, and long enough that the cut lands inside a character.
+        // `String::truncate` would panic here, and the state task taking a
+        // panic is every client on the server losing theirs.
+        let said = "é".repeat(TOPIC_LEN);
+        net.handle(0, Message::new(None, "QUIT", vec![said.as_str()]).unwrap());
+        net.disconnect(0, "Connection closed");
+
+        let bob = drain(&mut rxs[1]);
+        // Cut to the limit, and cut between characters: half an `é` is not a
+        // string this could have sent at all.
+        let quit = bob.iter().find(|l| l.contains("QUIT")).expect("a quit");
+        assert_eq!(quit.matches('é').count(), TOPIC_LEN / 'é'.len_utf8());
+        assert!(!quit.contains('\u{fffd}'), "{quit}");
+    }
+
+    #[test]
+    fn a_topic_that_straddles_the_limit_is_cut_on_a_character() {
+        let (mut net, mut rxs) = network(1);
+        register(&mut net, 0, "alice");
+        net.handle(0, Message::new(None, "JOIN", vec!["#one"]).unwrap());
+        drain(&mut rxs[0]);
+
+        net.handle(
+            0,
+            Message::new(None, "TOPIC", vec!["#one", &"é".repeat(TOPIC_LEN)]).unwrap(),
+        );
+        let lines = drain(&mut rxs[0]);
+        let topic = lines.iter().find(|l| l.contains("TOPIC")).expect("a topic");
+        assert_eq!(topic.matches('é').count(), TOPIC_LEN / 'é'.len_utf8());
     }
 
     #[test]

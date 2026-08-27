@@ -61,7 +61,12 @@ fn running() -> &'static Mutex<Option<Running>> {
 pub(crate) fn anchor_for(host: &str, port: u16) -> Option<String> {
     let guard = running().lock().unwrap_or_else(|e| e.into_inner());
     let running = guard.as_ref()?;
-    let loopback = matches!(host, "127.0.0.1" | "::1" | "localhost");
+    // `[::1]` as well as `::1`, because that is how an IPv6 literal is written
+    // beside a port and so is how someone types one. The Dart side already
+    // treats the bracketed form as loopback and skips the proxy for it; a
+    // profile that got that far and then no anchor would fail its TLS
+    // handshake for a reason nothing on screen could explain.
+    let loopback = matches!(host, "127.0.0.1" | "::1" | "[::1]" | "localhost");
     (loopback && port == running.server.port()).then(|| running.anchor.clone())
 }
 

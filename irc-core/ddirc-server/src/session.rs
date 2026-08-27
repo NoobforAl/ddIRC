@@ -7,12 +7,13 @@
 //! lives in [`crate::state`], and none of it is reachable from here — which is
 //! what lets it be tested without a socket.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use bytes::BytesMut;
 use futures_util::{SinkExt, StreamExt};
 use irc_proto::error::ProtocolError;
-use irc_proto::{IrcCodec, Message};
+use irc_proto::{Command, IrcCodec, Message, Response};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::time::{timeout, Duration};
@@ -135,11 +136,22 @@ pub async fn serve(
         return;
     }
 
+    // Whether registration actually completed, which only the state task
+    // knows — and which it says out loud, to this connection, exactly once:
+    // `RPL_WELCOME` is sent at the end of registration and at no other time.
+    // So the writer reads the answer off the wire it is already writing,
+    // rather than a second channel existing to carry one bit backwards.
+    let registered = Arc::new(AtomicBool::new(false));
+
     // The writer owns the sending half for the rest of the connection. It ends
     // when the queue closes, which happens when the state task drops the
     // client — so a disconnect tears down both directions from one place.
+    let welcomed = registered.clone();
     let writer = tokio::spawn(async move {
         while let Some(message) = outbox.recv().await {
+            if matches!(message.command, Command::Response(Response::RPL_WELCOME, _)) {
+                welcomed.store(true, Ordering::Release);
+            }
             if sink.send(message).await.is_err() {
                 break;
             }
@@ -149,13 +161,26 @@ pub async fn serve(
 
     let mut registered_by = Some(tokio::time::Instant::now() + REGISTRATION_GRACE);
     let reason = loop {
-        // The deadline is dropped once the client is talking. Keeping it would
-        // mean disconnecting people mid-conversation for having taken a while
-        // to say hello.
+        // The deadline is dropped when the client is *registered*, not when it
+        // first says something. Dropping it on the first line was the same
+        // guard in name only: `NICK bob` and then silence held a task, a
+        // buffer and a claimed nickname for as long as the server ran.
+        if registered_by.is_some() && registered.load(Ordering::Acquire) {
+            registered_by = None;
+        }
+
         let next = match registered_by {
             Some(deadline) => {
                 match timeout(deadline - tokio::time::Instant::now(), lines.next()).await {
                     Ok(next) => next,
+                    // Registration may have completed while this was waiting;
+                    // the welcome is written by the other task, so the flag is
+                    // worth one more look before anyone is disconnected over
+                    // a deadline they had already met.
+                    Err(_) if registered.load(Ordering::Acquire) => {
+                        registered_by = None;
+                        continue;
+                    }
                     Err(_) => break "Registration timeout".to_owned(),
                 }
             }
@@ -164,7 +189,6 @@ pub async fn serve(
 
         match next {
             Some(Ok(message)) => {
-                registered_by = None;
                 if events
                     .send(Event::Line {
                         id,
