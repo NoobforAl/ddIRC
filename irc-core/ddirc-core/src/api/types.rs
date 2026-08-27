@@ -323,6 +323,14 @@ pub struct MemberView {
     /// Highest-privilege prefix, e.g. `@` or `+`.
     pub prefix: Option<String>,
     pub away: bool,
+    /// Where this member belongs in the list, as an opaque string to compare.
+    ///
+    /// Carried so the UI can put one arriving nick in the right place without
+    /// owning a second copy of the ordering rule. Never displayed, and its
+    /// contents are not a promise — only that comparing two of them gives the
+    /// same order the core would have sorted them into. See
+    /// [`crate::state::Member::sort_key`].
+    pub sort_key: String,
 }
 
 /// Where a message was addressed.

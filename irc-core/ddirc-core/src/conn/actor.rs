@@ -651,17 +651,28 @@ impl Actor {
                     let is_self = self.session.is_self(&nick);
                     self.emit(IrcEvent::Joined {
                         channel: channel.clone(),
-                        nick,
+                        nick: nick.clone(),
                         is_self,
                     });
                     if is_self {
+                        // Our own join is one of the two moments a whole
+                        // roster is the right answer: there was nothing there
+                        // before it, and `NAMES` is about to replace it anyway.
                         self.emit_member_list(channel);
+                    } else {
+                        self.emit_member_changed(channel, &nick, &nick);
                     }
                 }
             }
             Irc::PART(channel, reason) => {
                 let Some(nick) = source else { return };
                 let is_self = self.session.is_self(&nick);
+                // Taken before the removal, because afterwards there is
+                // nothing left to ask how the roster spelled them.
+                let filed_as = self
+                    .session
+                    .known_nick(&nick)
+                    .unwrap_or_else(|| nick.clone());
                 if self.session.on_part(channel, &nick) {
                     self.emit(IrcEvent::Parted {
                         channel: channel.clone(),
@@ -669,29 +680,59 @@ impl Actor {
                         is_self,
                         reason: reason.as_deref().map(format::strip),
                     });
+                    // Our own part closes the conversation, roster and all, so
+                    // there is nobody left to tell about it.
+                    if !is_self {
+                        self.emit_member_changed(channel, &filed_as, &filed_as);
+                    }
                 }
             }
             Irc::QUIT(reason) => {
                 let Some(nick) = source else { return };
                 let reason = reason.as_deref().map(format::strip);
+                let filed_as = self
+                    .session
+                    .known_nick(&nick)
+                    .unwrap_or_else(|| nick.clone());
                 for channel in self.session.on_quit(&nick) {
                     self.emit(IrcEvent::Quit {
-                        channel,
+                        channel: channel.clone(),
                         nick: nick.clone(),
                         reason: reason.clone(),
                     });
+                    self.emit_member_changed(&channel, &filed_as, &filed_as);
                 }
             }
             Irc::NICK(new) => {
                 let Some(old) = source else { return };
                 let is_self = self.session.is_self(&old);
+                let filed_as = self.session.known_nick(&old).unwrap_or_else(|| old.clone());
                 for channel in self.session.on_nick_change(&old, new) {
                     self.emit(IrcEvent::NickChanged {
-                        channel,
+                        channel: channel.clone(),
                         old: old.clone(),
                         new: new.clone(),
                         is_self,
                     });
+                    // A rename moves them in the ordering as well as changing
+                    // the label, which is why this is the same event an
+                    // arrival uses rather than a rename of its own.
+                    self.emit_member_changed(&channel, &filed_as, new);
+                }
+            }
+            // Only sent by a server that offered `away-notify` and was taken
+            // up on it — see `conn/sasl.rs`. Without the capability nobody is
+            // ever told, which is why the away state used to be a field that
+            // could not change.
+            Irc::AWAY(message) => {
+                let Some(nick) = source else { return };
+                let away = message.is_some();
+                let filed_as = self
+                    .session
+                    .known_nick(&nick)
+                    .unwrap_or_else(|| nick.clone());
+                for channel in self.session.set_away(&nick, away) {
+                    self.emit_member_changed(&channel, &filed_as, &filed_as);
                 }
             }
             Irc::ChannelMODE(channel, modes) => self.on_mode(channel, modes, source),
@@ -762,9 +803,15 @@ impl Actor {
             self.emit(IrcEvent::ModeChanged {
                 channel: channel.to_owned(),
                 by: source,
-                affected,
+                affected: affected.clone(),
             });
-            self.emit_member_list(channel);
+            // One event each rather than the whole roster. Being opped moves
+            // someone to the top of the list, which is a move of one row —
+            // and `affected` is already the nicks the roster spells them by,
+            // since `on_mode` reads them off the members it changed.
+            for nick in affected {
+                self.emit_member_changed(channel, &nick, &nick);
+            }
         }
     }
 
@@ -855,6 +902,44 @@ impl Actor {
         self.emit(IrcEvent::Message(Box::new(message)));
     }
 
+    /// One member of one channel, as the UI holds them.
+    ///
+    /// `None` when they are not in that channel, which is the ordinary answer
+    /// for someone who has just left and the reason a departure carries no
+    /// member at all.
+    fn member_view(&self, channel: &str, nick: &str) -> Option<MemberView> {
+        let prefixes = &self.session.isupport.prefixes;
+        let key = self.session.isupport.casemapping.normalize(nick);
+        let member = self.session.channel(channel)?.member(&key)?;
+        Some(MemberView {
+            nick: member.nick.clone(),
+            prefix: member.display_prefix(prefixes).map(|p| p.to_string()),
+            away: member.away,
+            sort_key: member.sort_key(prefixes),
+        })
+    }
+
+    /// Tell the UI about one person, in one channel.
+    ///
+    /// `previous` is the nick the roster has them filed under and `nick` the
+    /// one to look up now — the same string except in a rename, which is the
+    /// whole reason the two are separate.
+    fn emit_member_changed(&mut self, channel: &str, previous: &str, nick: &str) {
+        let member = self.member_view(channel, nick);
+        // A channel we are not in has no roster to correct, and a departure
+        // from one is not news. `member_view` returning `None` is meaningful
+        // for someone who left a channel we *are* in, so the two are told
+        // apart here rather than by the absence of a member.
+        if member.is_none() && self.session.channel(channel).is_none() {
+            return;
+        }
+        self.emit(IrcEvent::MemberChanged {
+            channel: channel.to_owned(),
+            previous: previous.to_owned(),
+            member,
+        });
+    }
+
     fn emit_member_list(&mut self, channel: &str) {
         let Some(chan) = self.session.channel(channel) else {
             return;
@@ -867,6 +952,7 @@ impl Actor {
                 nick: m.nick.clone(),
                 prefix: m.display_prefix(prefixes).map(|p| p.to_string()),
                 away: m.away,
+                sort_key: m.sort_key(prefixes),
             })
             .collect();
 
@@ -1221,6 +1307,150 @@ mod tests {
         );
     }
 
+    /// Every `MemberChanged` in `events`, as (previous, the member or `None`).
+    fn changes(events: &[IrcEvent]) -> Vec<(String, Option<MemberView>)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                IrcEvent::MemberChanged {
+                    previous, member, ..
+                } => Some((previous.clone(), member.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn someone_arriving_is_one_member_rather_than_a_roster() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        feed(&mut actor, &mut outgoing, ":dave!u@h JOIN #test");
+
+        let events = drain(&mut rx);
+        let changed = changes(&events);
+        assert_eq!(changed.len(), 1, "{events:?}");
+        let (previous, member) = &changed[0];
+        assert_eq!(previous, "dave");
+        let member = member.as_ref().expect("an arrival carries the member");
+        assert_eq!(member.nick, "dave");
+        assert!(!member.away);
+        // The roster is 883 people in a real channel; it is not sent because
+        // one of them arrived.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, IrcEvent::MemberList { .. })),
+            "{events:?}"
+        );
+    }
+
+    #[test]
+    fn leaving_removes_exactly_one_row_and_quitting_removes_it_everywhere() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        feed(&mut actor, &mut outgoing, ":ddirc!u@h JOIN #second");
+        feed(&mut actor, &mut outgoing, ":alice!u@h JOIN #second");
+        drain(&mut rx);
+
+        feed(&mut actor, &mut outgoing, ":bob!u@h PART #test");
+        let changed = changes(&drain(&mut rx));
+        assert_eq!(changed, vec![("bob".to_owned(), None)]);
+
+        // A quit is the same shape, once per channel they shared with us.
+        feed(&mut actor, &mut outgoing, ":alice!u@h QUIT :Ping timeout");
+        let changed = changes(&drain(&mut rx));
+        assert_eq!(changed.len(), 2, "{changed:?}");
+        assert!(changed
+            .iter()
+            .all(|(prev, m)| prev == "alice" && m.is_none()));
+    }
+
+    #[test]
+    fn a_rename_names_the_row_it_replaces() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        feed(&mut actor, &mut outgoing, ":alice!u@h NICK alicia");
+
+        let changed = changes(&drain(&mut rx));
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        let (previous, member) = &changed[0];
+        // The old nick is what the UI has the row filed under; the new one is
+        // what goes in its place, at whatever position it now sorts to.
+        assert_eq!(previous, "alice");
+        let member = member.as_ref().expect("a rename carries the member");
+        assert_eq!(member.nick, "alicia");
+        assert_eq!(member.prefix.as_deref(), Some("@"), "privileges follow");
+    }
+
+    #[test]
+    fn a_departure_is_identified_by_the_spelling_the_roster_holds() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        // `NAMES` said `bob`; the PART prefix shouts it. Same person under
+        // every casemapping, and the UI only knows the first spelling.
+        feed(&mut actor, &mut outgoing, ":BOB!u@h PART #test");
+
+        let changed = changes(&drain(&mut rx));
+        assert_eq!(changed, vec![("bob".to_owned(), None)]);
+    }
+
+    #[test]
+    fn away_reaches_every_channel_shared_with_the_person_who_went_away() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        feed(&mut actor, &mut outgoing, ":ddirc!u@h JOIN #second");
+        feed(&mut actor, &mut outgoing, ":alice!u@h JOIN #second");
+        drain(&mut rx);
+
+        feed(&mut actor, &mut outgoing, ":alice!u@h AWAY :making tea");
+        let changed = changes(&drain(&mut rx));
+        assert_eq!(changed.len(), 2, "{changed:?}");
+        assert!(changed
+            .iter()
+            .all(|(prev, m)| prev == "alice" && m.as_ref().is_some_and(|m| m.away)));
+
+        // Back again, and told once more. A repeat of a state already held is
+        // not news and is not sent — servers re-announce on reconnects.
+        feed(&mut actor, &mut outgoing, ":alice!u@h AWAY");
+        let changed = changes(&drain(&mut rx));
+        assert_eq!(changed.len(), 2, "{changed:?}");
+        assert!(changed
+            .iter()
+            .all(|(_, m)| m.as_ref().is_some_and(|m| !m.away)));
+
+        feed(&mut actor, &mut outgoing, ":alice!u@h AWAY");
+        assert!(changes(&drain(&mut rx)).is_empty(), "nothing changed");
+    }
+
+    #[test]
+    fn the_sort_key_orders_a_roster_the_way_the_core_does() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+
+        let members = drain(&mut rx)
+            .iter()
+            .rev()
+            .find_map(|e| match e {
+                IrcEvent::MemberList { members, .. } => Some(members.clone()),
+                _ => None,
+            })
+            .expect("expected a MemberList event");
+
+        // The whole point of carrying the key: sorting by it alone reproduces
+        // the order, so the UI can place one arrival without a second copy of
+        // the rule that produced this list.
+        let mut by_key = members.clone();
+        by_key.sort_by(|a, b| a.sort_key.cmp(&b.sort_key));
+        assert_eq!(by_key, members);
+        assert!(members.iter().all(|m| !m.sort_key.is_empty()));
+    }
+
     #[test]
     fn channel_message_is_sanitised_and_attributed() {
         let (mut actor, mut rx, mut outgoing) = actor(&[]);
@@ -1469,19 +1699,30 @@ mod tests {
             "expected bob to be the affected member, got {events:?}"
         );
 
-        let members = events
+        // One member changed, so one member is sent — not the roster. Being
+        // opped also moves bob up the ordering, which is why the same event
+        // carries a sort key rather than a prefix alone.
+        let bob = events
             .iter()
             .rev()
             .find_map(|e| match e {
-                IrcEvent::MemberList { members, .. } => Some(members.clone()),
+                IrcEvent::MemberChanged {
+                    member: Some(member),
+                    ..
+                } if member.nick == "bob" => Some(member.clone()),
                 _ => None,
             })
-            .expect("member list should be refreshed");
-        let bob = members.iter().find(|m| m.nick == "bob").unwrap();
+            .expect("the opped member should be sent");
         assert_eq!(
             bob.prefix.as_deref(),
             Some("@"),
             "bob was opped, not the mask"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, IrcEvent::MemberList { .. })),
+            "a privilege change is one row, not a whole roster: {events:?}"
         );
     }
 

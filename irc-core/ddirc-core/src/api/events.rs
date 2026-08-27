@@ -75,11 +75,33 @@ pub enum IrcEvent {
         set_by: Option<String>,
     },
 
-    /// The member list changed. Sent as a whole roster rather than deltas so
-    /// the UI cannot drift out of sync with the core.
+    /// The whole roster, for the moments that genuinely need one: the end of a
+    /// `NAMES` burst, and our own join.
+    ///
+    /// Everything after that is a [`Self::MemberChanged`]. Sending the roster
+    /// on every arrival and departure would be one event carrying 883 members,
+    /// serialised across the FFI and re-sorted, because somebody joined.
     MemberList {
         channel: String,
         members: Vec<MemberView>,
+    },
+
+    /// One person in a channel arrived, left, was renamed, changed privilege,
+    /// or went away — applied to the roster the UI already holds.
+    ///
+    /// Deliberately shaped as a replacement rather than four kinds of event,
+    /// because the UI's work is the same in every case: find the row filed
+    /// under `previous`, and put `member` where it now belongs. A rename is
+    /// then not a special case, and neither is an op, both of which move
+    /// someone in the ordering.
+    MemberChanged {
+        channel: String,
+        /// The nick the roster currently files them under — the row to replace
+        /// or remove, spelled as the UI was given it. For an arrival there is
+        /// no such row and this is the new nick.
+        previous: String,
+        /// What they are now, or [`None`] if they are gone.
+        member: Option<MemberView>,
     },
 
     /// Someone's channel privileges changed.
@@ -125,6 +147,7 @@ impl IrcEvent {
             | Self::NickChanged { channel, .. }
             | Self::TopicChanged { channel, .. }
             | Self::MemberList { channel, .. }
+            | Self::MemberChanged { channel, .. }
             | Self::ModeChanged { channel, .. } => Some(channel),
             Self::Message(message) => Some(message.target.name()),
             Self::FileOffered { channel, .. } => Some(channel),

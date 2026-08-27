@@ -58,6 +58,47 @@ impl Member {
     pub fn display_prefix(&self, prefixes: &Prefixes) -> Option<char> {
         prefixes.highest(self.prefixes.iter())
     }
+
+    /// Where this member sorts, as one string that can be compared anywhere.
+    ///
+    /// The ordering is privilege first, then case-insensitively by nick — and
+    /// the reason it is a *string* rather than the pair it is derived from is
+    /// that it has to survive the FFI. The UI keeps the roster in order while
+    /// applying arrivals and departures one at a time, which means knowing
+    /// where a nick goes; the alternative is the same rule written twice, in
+    /// two languages, drifting apart the first time either changes.
+    ///
+    /// The rank is fixed-width so it compares as a number would, and the
+    /// separator is below every printable character so the boundary between
+    /// the two halves cannot be crossed by a nick.
+    pub fn sort_key(&self, prefixes: &Prefixes) -> String {
+        let rank = self
+            .display_prefix(prefixes)
+            .and_then(|p| prefixes.rank(p))
+            .unwrap_or(usize::MAX)
+            .min(0xffff);
+
+        // Written out rather than `format!("{rank:04x}")`, which costs more
+        // than everything else in this function put together: the formatting
+        // machinery parses a spec and goes through a trait object, once per
+        // member, every time a roster is sorted. Measured at 0.271ms against
+        // this one's 0.149ms over 883 members — see `tests/sort_bench.rs`,
+        // which exists because reading this code gave the wrong answer twice
+        // before and has now done it a third time.
+        const HEX: [u8; 16] = *b"0123456789abcdef";
+        let mut key = String::with_capacity(5 + self.nick.len());
+        for shift in [12, 8, 4, 0] {
+            key.push(HEX[(rank >> shift) & 0xf] as char);
+        }
+        key.push('\u{1}');
+        // Folded straight into the key. `push_str(&self.nick.to_lowercase())`
+        // is the obvious alternative and was measured at 0.186ms against this
+        // one's 0.149ms over 883 members — the second allocation and the copy
+        // out of it cost more than stepping the iterator, even though
+        // `str::to_lowercase` has the better inner loop.
+        key.extend(self.nick.chars().flat_map(char::to_lowercase));
+        key
+    }
 }
 
 /// A joined channel.
@@ -114,20 +155,18 @@ impl Channel {
     /// was still three times slower than this. Allocation count is not the
     /// thing to minimise here; work inside the comparator is.
     pub fn sorted_members(&self, prefixes: &Prefixes) -> Vec<&Member> {
-        let mut keyed: Vec<(usize, String, &Member)> = self
+        // The same key each member carries across the FFI, so a roster sorted
+        // here and a roster kept in order there cannot disagree about where
+        // anyone goes. Still one allocation per member and a `memcmp` in the
+        // comparator, which is what the measurement was about.
+        let mut keyed: Vec<(String, &Member)> = self
             .members
             .values()
-            .map(|m| {
-                let rank = m
-                    .display_prefix(prefixes)
-                    .and_then(|p| prefixes.rank(p))
-                    .unwrap_or(usize::MAX);
-                (rank, m.nick.to_lowercase(), m)
-            })
+            .map(|m| (m.sort_key(prefixes), m))
             .collect();
 
-        keyed.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-        keyed.into_iter().map(|(_, _, m)| m).collect()
+        keyed.sort_by(|a, b| a.0.cmp(&b.0));
+        keyed.into_iter().map(|(_, m)| m).collect()
     }
 }
 
@@ -395,13 +434,39 @@ impl Session {
     }
 
     /// Mark a member away or back across every channel they share with us.
-    pub fn set_away(&mut self, nick: &str, away: bool) {
+    ///
+    /// Returns the display names of the channels where something actually
+    /// changed, so the caller can tell those rosters and no others. A server
+    /// with `away-notify` sends one `AWAY` per person however many channels
+    /// they are in, and re-sends the same state on reconnects.
+    pub fn set_away(&mut self, nick: &str, away: bool) -> Vec<String> {
         let member_key = self.normalize(nick);
-        for channel in self.channels.values_mut() {
-            if let Some(member) = channel.members.get_mut(&member_key) {
+        self.channels
+            .values_mut()
+            .filter_map(|channel| {
+                let member = channel.members.get_mut(&member_key)?;
+                if member.away == away {
+                    return None;
+                }
                 member.away = away;
-            }
-        }
+                Some(channel.name.clone())
+            })
+            .collect()
+    }
+
+    /// How the roster spells a nick, wherever it knows them.
+    ///
+    /// The wire's casing and the roster's can differ — `NAMES` said `Alice`
+    /// and the `PART` prefix says `alice` — and they are the same person under
+    /// the server's casemapping. Anything identifying a member to the UI has
+    /// to use the spelling the UI was given, or it will look for a row that is
+    /// filed under the other one.
+    pub fn known_nick(&self, nick: &str) -> Option<String> {
+        let member_key = self.normalize(nick);
+        self.channels
+            .values()
+            .find_map(|c| c.members.get(&member_key))
+            .map(|m| m.nick.clone())
     }
 
     /// True if `text` mentions our nick as a whole word.

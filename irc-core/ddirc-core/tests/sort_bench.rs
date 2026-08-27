@@ -22,14 +22,39 @@
 //!   with a lazy lowercase iterator comparison that allocates **nothing at
 //!   all**. It is three times slower than what shipped.
 //! - **What shipped** hoists the rank *and* the lowercased nick, paying one
-//!   allocation per member so that the comparator is an integer compare and a
-//!   byte-slice compare.
+//!   allocation per member so that the comparator is a single `memcmp`.
 //!
 //! The allocation-free version losing to the allocating one is the point.
 //! `String` comparison is a `memcmp`; a `flat_map(char::to_lowercase)` compare
 //! is a state machine stepped one character at a time, and a sort runs it
 //! O(n log n) times. Minimising allocations was the wrong target; minimising
 //! work inside the comparator was the right one.
+//!
+//! # The third wrong guess, which is this file earning its keep again
+//!
+//! What shipped is now one `String` per member — [`Member::sort_key`] — rather
+//! than the `(rank, String)` pair it used to be, because the UI applies
+//! arrivals and departures one at a time and needs the same ordering on the
+//! far side of the FFI. Building that key costs something: **0.107ms became
+//! 0.155ms** over 883 members, so about 7.8x became about 6.8x.
+//!
+//! Two things were measured on the way, and both were worth measuring:
+//!
+//! - `format!("{rank:04x}\u{1}{nick}")` is **0.271ms** — worse than the pair it
+//!   replaced and barely better than doing nothing. The formatting machinery
+//!   parses a spec and dispatches through a trait object, per member, per sort.
+//!   Writing the four hex digits out by hand is most of the difference.
+//! - Appending the nick with `push_str(&nick.to_lowercase())` is **0.186ms**,
+//!   against **0.155ms** for folding it in with `flat_map(char::to_lowercase)`.
+//!   Note that this is the *opposite* of the lesson above, and not a
+//!   contradiction of it: there the iterator ran inside the comparator, O(n log
+//!   n) times; here it runs once per member, where the second allocation and
+//!   the copy out of it cost more than stepping it does.
+//!
+//! The 0.048ms given up buys a member list that is no longer wrong, and is
+//! repaid immediately: this sort now runs when a channel is joined rather than
+//! every time anybody in it is opped, and the roster it produces is no longer
+//! serialised across the FFI on every arrival.
 
 use std::cmp::Ordering;
 use std::time::Instant;

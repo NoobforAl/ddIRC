@@ -275,6 +275,25 @@ fn render(event: &IrcEvent) {
         IrcEvent::MemberList { channel, members } => {
             println!("-- {channel}: {} members --", members.len());
         }
+        IrcEvent::MemberChanged {
+            channel,
+            previous,
+            member,
+        } => match member {
+            Some(member) if member.nick != *previous => {
+                println!("-- {channel}: {previous} is now {} --", member.nick);
+            }
+            Some(member) => {
+                let away = if member.away { " (away)" } else { "" };
+                println!(
+                    "-- {channel}: {}{}{} --",
+                    member.prefix.as_deref().unwrap_or_default(),
+                    member.nick,
+                    away
+                );
+            }
+            None => println!("-- {channel}: {previous} is gone --"),
+        },
         IrcEvent::FileOffered {
             channel,
             from,

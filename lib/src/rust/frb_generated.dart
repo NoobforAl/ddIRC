@@ -863,6 +863,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MemberView dco_decode_box_autoadd_member_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_member_view(raw);
+  }
+
+  @protected
   ProxyConfig dco_decode_box_autoadd_proxy_config(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_proxy_config(raw);
@@ -1033,23 +1039,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           members: dco_decode_list_member_view(raw[2]),
         );
       case 10:
+        return IrcEvent_MemberChanged(
+          channel: dco_decode_String(raw[1]),
+          previous: dco_decode_String(raw[2]),
+          member: dco_decode_opt_box_autoadd_member_view(raw[3]),
+        );
+      case 11:
         return IrcEvent_ModeChanged(
           channel: dco_decode_String(raw[1]),
           by: dco_decode_opt_String(raw[2]),
           affected: dco_decode_list_String(raw[3]),
         );
-      case 11:
+      case 12:
         return IrcEvent_MessagesDropped(
           channel: dco_decode_opt_String(raw[1]),
           count: dco_decode_u_64(raw[2]),
         );
-      case 12:
+      case 13:
         return IrcEvent_FileOffered(
           channel: dco_decode_String(raw[1]),
           from: dco_decode_String(raw[2]),
           offer: dco_decode_box_autoadd_dcc_offer(raw[3]),
         );
-      case 13:
+      case 14:
         return IrcEvent_Error(
           message: dco_decode_String(raw[1]),
           fatal: dco_decode_bool(raw[2]),
@@ -1112,12 +1124,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MemberView dco_decode_member_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return MemberView(
       nick: dco_decode_String(arr[0]),
       prefix: dco_decode_opt_String(arr[1]),
       away: dco_decode_bool(arr[2]),
+      sortKey: dco_decode_String(arr[3]),
     );
   }
 
@@ -1131,6 +1144,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   LocalServerInfo? dco_decode_opt_box_autoadd_local_server_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_local_server_info(raw);
+  }
+
+  @protected
+  MemberView? dco_decode_opt_box_autoadd_member_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_member_view(raw);
   }
 
   @protected
@@ -1385,6 +1404,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  MemberView sse_decode_box_autoadd_member_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_member_view(deserializer));
+  }
+
+  @protected
   ProxyConfig sse_decode_box_autoadd_proxy_config(
     SseDeserializer deserializer,
   ) {
@@ -1598,6 +1623,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return IrcEvent_MemberList(channel: var_channel, members: var_members);
       case 10:
         var var_channel = sse_decode_String(deserializer);
+        var var_previous = sse_decode_String(deserializer);
+        var var_member = sse_decode_opt_box_autoadd_member_view(deserializer);
+        return IrcEvent_MemberChanged(
+          channel: var_channel,
+          previous: var_previous,
+          member: var_member,
+        );
+      case 11:
+        var var_channel = sse_decode_String(deserializer);
         var var_by = sse_decode_opt_String(deserializer);
         var var_affected = sse_decode_list_String(deserializer);
         return IrcEvent_ModeChanged(
@@ -1605,11 +1639,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           by: var_by,
           affected: var_affected,
         );
-      case 11:
+      case 12:
         var var_channel = sse_decode_opt_String(deserializer);
         var var_count = sse_decode_u_64(deserializer);
         return IrcEvent_MessagesDropped(channel: var_channel, count: var_count);
-      case 12:
+      case 13:
         var var_channel = sse_decode_String(deserializer);
         var var_from = sse_decode_String(deserializer);
         var var_offer = sse_decode_box_autoadd_dcc_offer(deserializer);
@@ -1618,7 +1652,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           from: var_from,
           offer: var_offer,
         );
-      case 13:
+      case 14:
         var var_message = sse_decode_String(deserializer);
         var var_fatal = sse_decode_bool(deserializer);
         return IrcEvent_Error(message: var_message, fatal: var_fatal);
@@ -1708,7 +1742,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_nick = sse_decode_String(deserializer);
     var var_prefix = sse_decode_opt_String(deserializer);
     var var_away = sse_decode_bool(deserializer);
-    return MemberView(nick: var_nick, prefix: var_prefix, away: var_away);
+    var var_sortKey = sse_decode_String(deserializer);
+    return MemberView(
+      nick: var_nick,
+      prefix: var_prefix,
+      away: var_away,
+      sortKey: var_sortKey,
+    );
   }
 
   @protected
@@ -1730,6 +1770,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_local_server_info(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  MemberView? sse_decode_opt_box_autoadd_member_view(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_member_view(deserializer));
     } else {
       return null;
     }
@@ -2048,6 +2101,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_member_view(
+    MemberView self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_member_view(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_proxy_config(
     ProxyConfig self,
     SseSerializer serializer,
@@ -2237,17 +2299,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_i_32(9, serializer);
         sse_encode_String(channel, serializer);
         sse_encode_list_member_view(members, serializer);
+      case IrcEvent_MemberChanged(
+        channel: final channel,
+        previous: final previous,
+        member: final member,
+      ):
+        sse_encode_i_32(10, serializer);
+        sse_encode_String(channel, serializer);
+        sse_encode_String(previous, serializer);
+        sse_encode_opt_box_autoadd_member_view(member, serializer);
       case IrcEvent_ModeChanged(
         channel: final channel,
         by: final by,
         affected: final affected,
       ):
-        sse_encode_i_32(10, serializer);
+        sse_encode_i_32(11, serializer);
         sse_encode_String(channel, serializer);
         sse_encode_opt_String(by, serializer);
         sse_encode_list_String(affected, serializer);
       case IrcEvent_MessagesDropped(channel: final channel, count: final count):
-        sse_encode_i_32(11, serializer);
+        sse_encode_i_32(12, serializer);
         sse_encode_opt_String(channel, serializer);
         sse_encode_u_64(count, serializer);
       case IrcEvent_FileOffered(
@@ -2255,12 +2326,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         from: final from,
         offer: final offer,
       ):
-        sse_encode_i_32(12, serializer);
+        sse_encode_i_32(13, serializer);
         sse_encode_String(channel, serializer);
         sse_encode_String(from, serializer);
         sse_encode_box_autoadd_dcc_offer(offer, serializer);
       case IrcEvent_Error(message: final message, fatal: final fatal):
-        sse_encode_i_32(13, serializer);
+        sse_encode_i_32(14, serializer);
         sse_encode_String(message, serializer);
         sse_encode_bool(fatal, serializer);
     }
@@ -2350,6 +2421,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.nick, serializer);
     sse_encode_opt_String(self.prefix, serializer);
     sse_encode_bool(self.away, serializer);
+    sse_encode_String(self.sortKey, serializer);
   }
 
   @protected
@@ -2372,6 +2444,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_local_server_info(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_member_view(
+    MemberView? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_member_view(self, serializer);
     }
   }
 

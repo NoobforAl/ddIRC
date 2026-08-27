@@ -220,10 +220,24 @@ sealed class IrcEvent with _$IrcEvent {
     required String topic,
     String? setBy,
   }) = IrcEvent_TopicChanged;
+
+  /// The whole roster, for the two moments that need one: the end of a
+  /// `NAMES` burst, and our own join.
   const factory IrcEvent.memberList({
     required String channel,
     required List<MemberView> members,
   }) = IrcEvent_MemberList;
+
+  /// One person arrived, left, was renamed, was opped, or went away.
+  ///
+  /// Applied to the roster the UI already holds: find the row filed under
+  /// `previous`, and put `member` where it now belongs — or remove it, when
+  /// `member` is null because they are gone.
+  const factory IrcEvent.memberChanged({
+    required String channel,
+    required String previous,
+    MemberView? member,
+  }) = IrcEvent_MemberChanged;
   const factory IrcEvent.modeChanged({
     required String channel,
     String? by,
@@ -261,10 +275,23 @@ class MemberView {
   final String? prefix;
   final bool away;
 
-  const MemberView({required this.nick, this.prefix, required this.away});
+  /// Where this member belongs in the list, as an opaque string to compare.
+  ///
+  /// Carried so the UI can place one arriving nick without owning a second
+  /// copy of the ordering rule. Never displayed; its contents are not a
+  /// promise, only that comparing two of them gives the core's own order.
+  final String sortKey;
+
+  const MemberView({
+    required this.nick,
+    this.prefix,
+    required this.away,
+    required this.sortKey,
+  });
 
   @override
-  int get hashCode => nick.hashCode ^ prefix.hashCode ^ away.hashCode;
+  int get hashCode =>
+      nick.hashCode ^ prefix.hashCode ^ away.hashCode ^ sortKey.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -273,7 +300,8 @@ class MemberView {
           runtimeType == other.runtimeType &&
           nick == other.nick &&
           prefix == other.prefix &&
-          away == other.away;
+          away == other.away &&
+          sortKey == other.sortKey;
 }
 
 /// A SOCKS5 proxy to dial through.

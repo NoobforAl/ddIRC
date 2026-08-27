@@ -89,6 +89,64 @@ class Conversation {
     unread = 0;
     unreadMentions = 0;
   }
+
+  /// Apply one change to the roster, keeping it in the order the core sorts.
+  ///
+  /// [previous] is the nick the row is currently filed under and [member] what
+  /// belongs there now — null when they have gone. A rename is not a special
+  /// case here: it is a row removed from one place and put back in another,
+  /// which is also exactly what being opped is.
+  ///
+  /// The order comes from [MemberView.sortKey], which the core computes with
+  /// the same rule it sorts a whole roster by. Deciding where a nick goes here
+  /// would mean a second copy of that rule, in another language, drifting from
+  /// the first the day either changes.
+  void applyMemberChange(String previous, MemberView? member) {
+    final at = _indexOf(previous);
+    if (at == null && member == null) return;
+
+    // A new list rather than a mutation, because `MemberList` compares list
+    // identity to decide whether anything moved. Mutating in place would leave
+    // it looking at a list it believes it has already seen — and copying a few
+    // hundred references is far less than the roster this event exists to
+    // avoid sending.
+    final next = List<MemberView>.of(members);
+    if (at != null) next.removeAt(at);
+    if (member != null) next.insert(_placeFor(next, member.sortKey), member);
+    members = next;
+  }
+
+  /// Where the row for [nick] is, if it is here at all.
+  ///
+  /// Exact first, because the core sends the spelling the roster was given.
+  /// The case-insensitive second pass is the belt to that brace: nicks are
+  /// case-insensitive on IRC, and a row that could not be found would be a
+  /// duplicate a moment later.
+  int? _indexOf(String nick) {
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].nick == nick) return i;
+    }
+    final folded = nick.toLowerCase();
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].nick.toLowerCase() == folded) return i;
+    }
+    return null;
+  }
+
+  /// The index [key] sorts to in an already-ordered [list].
+  static int _placeFor(List<MemberView> list, String key) {
+    var low = 0;
+    var high = list.length;
+    while (low < high) {
+      final mid = (low + high) ~/ 2;
+      if (list[mid].sortKey.compareTo(key) < 0) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    return low;
+  }
 }
 
 /// Owns everything the UI renders for one server connection.
@@ -482,9 +540,24 @@ class SessionModel extends ChangeNotifier {
         );
 
       case IrcEvent_MemberList(:final channel, :final members):
-        // A full roster, not a delta — replacing wholesale keeps the UI from
-        // drifting out of sync with the core.
+        // A whole roster, which the core sends only when there is one to
+        // replace: the end of a NAMES burst, and our own join. Replacing
+        // wholesale is what makes those two moments authoritative.
         _conversationFor(channel, isChannel: true).members = members;
+
+      case IrcEvent_MemberChanged(
+        :final channel,
+        :final previous,
+        :final member,
+      ):
+        // Everything after that arrives one person at a time — an arrival, a
+        // departure, a rename, an op, an away. The roster used to be told
+        // about none of these, so a channel's member list was whatever it was
+        // at the moment you walked in.
+        _conversationFor(
+          channel,
+          isChannel: true,
+        ).applyMemberChange(previous, member);
 
       case IrcEvent_ModeChanged(:final channel, :final by, :final affected):
         _addLine(
@@ -527,7 +600,7 @@ class SessionModel extends ChangeNotifier {
             now,
             SystemKind.connection,
           ),
-          isChannel: channel.startsWith('#'),
+          isChannel: _looksLikeChannel(channel),
         );
 
       case IrcEvent_Error(:final message):
@@ -536,6 +609,16 @@ class SessionModel extends ChangeNotifier {
     }
     _queueNotify();
   }
+
+  /// Whether a routing target is a channel rather than a person.
+  ///
+  /// Only ever asked about a DCC offer, and only to decide the shape of a
+  /// conversation that does not exist yet — every other event says which it is,
+  /// because the core already knows. `#` is not the whole answer: `&`, `+` and
+  /// `!` are channel prefixes too, and a `&channel` offer filed as a private
+  /// message would open a second conversation for a room already on screen.
+  static bool _looksLikeChannel(String target) =>
+      target.isNotEmpty && '#&+!'.contains(target[0]);
 
   /// One line for a file someone has offered.
   ///

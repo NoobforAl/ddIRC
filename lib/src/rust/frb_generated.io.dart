@@ -55,6 +55,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   LocalServerInfo dco_decode_box_autoadd_local_server_info(dynamic raw);
 
   @protected
+  MemberView dco_decode_box_autoadd_member_view(dynamic raw);
+
+  @protected
   ProxyConfig dco_decode_box_autoadd_proxy_config(dynamic raw);
 
   @protected
@@ -116,6 +119,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LocalServerInfo? dco_decode_opt_box_autoadd_local_server_info(dynamic raw);
+
+  @protected
+  MemberView? dco_decode_opt_box_autoadd_member_view(dynamic raw);
 
   @protected
   ProxyConfig? dco_decode_opt_box_autoadd_proxy_config(dynamic raw);
@@ -207,6 +213,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  MemberView sse_decode_box_autoadd_member_view(SseDeserializer deserializer);
+
+  @protected
   ProxyConfig sse_decode_box_autoadd_proxy_config(SseDeserializer deserializer);
 
   @protected
@@ -270,6 +279,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LocalServerInfo? sse_decode_opt_box_autoadd_local_server_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  MemberView? sse_decode_opt_box_autoadd_member_view(
     SseDeserializer deserializer,
   );
 
@@ -384,6 +398,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_member_view(
+    MemberView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_proxy_config(
     ProxyConfig self,
     SseSerializer serializer,
@@ -467,6 +487,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_local_server_info(
     LocalServerInfo? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_member_view(
+    MemberView? self,
     SseSerializer serializer,
   );
 

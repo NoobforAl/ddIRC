@@ -13,7 +13,10 @@ import 'package:ddirc/src/theme.dart';
 import 'package:ddirc/src/ui/member_list.dart';
 
 MemberView _member(String nick, {bool away = false}) =>
-    MemberView(nick: nick, away: away);
+    // The key the core would have given an unprivileged member: rank first,
+    // then the nick folded. Written out rather than faked, so a list built
+    // here sorts the way one off the wire does.
+    MemberView(nick: nick, away: away, sortKey: 'ffff${nick.toLowerCase()}');
 
 Future<void> _pump(WidgetTester tester, List<String> nicks) {
   return tester.pumpWidget(

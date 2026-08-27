@@ -37,6 +37,18 @@ const MAX_CAPABILITY_BYTES: usize = 8 * 1024;
 /// bytes, with an empty chunk (`+`) terminating an exact multiple.
 const AUTHENTICATE_CHUNK: usize = 400;
 
+/// Capabilities worth having that are not SASL, requested when offered.
+///
+/// Deliberately a short list, and every entry has to earn its place by being
+/// something the client already does something with. `away-notify` is here
+/// because the member list has an away state it can render and, without this,
+/// no way of ever being told about one: away is not in `NAMES` and there is no
+/// other unsolicited notification of it.
+///
+/// Nothing here changes registration. If a server offers none of them the
+/// exchange is exactly what it was.
+const EXTRA_CAPABILITIES: &[&str] = &["away-notify"];
+
 /// Credentials for SASL PLAIN.
 ///
 /// The password is wrapped in [`Zeroizing`] so it is wiped from memory when the
@@ -132,6 +144,18 @@ pub struct SaslNegotiator {
     credentials: Option<Credentials>,
     /// Capabilities accumulated across `CAP LS` continuation lines.
     offered: String,
+    /// Whether the request that is in flight included `sasl`.
+    ///
+    /// A request can now carry capabilities that have nothing to do with
+    /// authentication, so an ACK is no longer proof that SASL is about to
+    /// start — and this is what tells the two apart.
+    requested_sasl: bool,
+    /// What to report if the exchange ends without SASL having been attempted.
+    ///
+    /// Decided when the capability list arrives rather than when negotiation
+    /// ends, because that is the moment both halves of the answer are known:
+    /// whether there were credentials, and whether the server offered `sasl`.
+    without_sasl: NotAttempted,
 }
 
 impl SaslNegotiator {
@@ -140,6 +164,8 @@ impl SaslNegotiator {
             state: State::New,
             credentials,
             offered: String::new(),
+            requested_sasl: false,
+            without_sasl: NotAttempted::NoCredentials,
         }
     }
 
@@ -200,8 +226,21 @@ impl SaslNegotiator {
                 self.request_sasl_or_finish()
             }
             CapSubCommand::ACK if self.state == State::AwaitingAck => {
+                // An acknowledgement that is not about SASL ends negotiation
+                // rather than starting an exchange. That is the ordinary case
+                // for a server offering `away-notify` to a connection with no
+                // credentials — the capability is on, and there was never
+                // going to be an AUTHENTICATE.
+                if !self.requested_sasl {
+                    self.state = State::Finished;
+                    return SaslStep::finish(SaslOutcome::NotAttempted {
+                        reason: self.without_sasl,
+                    });
+                }
                 if !contains_capability(payload, "sasl") {
-                    // ACK for something we did not ask for; treat as refusal.
+                    // SASL was asked for and something else was granted. Not a
+                    // capability set worth continuing on: the exchange about to
+                    // start has not been agreed to.
                     self.state = State::Finished;
                     return SaslStep::finish(SaslOutcome::Rejected {
                         reason: "server acknowledged unexpected capabilities".to_owned(),
@@ -212,6 +251,13 @@ impl SaslNegotiator {
             }
             CapSubCommand::NAK if self.state == State::AwaitingAck => {
                 self.state = State::Finished;
+                if !self.requested_sasl {
+                    // Refusing a capability that was only ever a nicety is not
+                    // a failure to report; nothing was going to depend on it.
+                    return SaslStep::finish(SaslOutcome::NotAttempted {
+                        reason: self.without_sasl,
+                    });
+                }
                 SaslStep::finish(SaslOutcome::Rejected {
                     reason: "server refused the sasl capability".to_owned(),
                 })
@@ -222,17 +268,34 @@ impl SaslNegotiator {
 
     /// Decide what to do once the full capability list is known.
     fn request_sasl_or_finish(&mut self) -> SaslStep {
-        let Some(_) = self.credentials.as_ref() else {
-            self.state = State::Finished;
-            return SaslStep::finish(SaslOutcome::NotAttempted {
-                reason: NotAttempted::NoCredentials,
-            });
+        // Why SASL is decided first: it is the only capability here whose
+        // absence the caller has to act on, by falling back to NickServ. The
+        // answer is settled now and carried, so that whichever way the request
+        // below is answered, what is reported about authentication is the same
+        // as it would have been before any of this existed.
+        self.without_sasl = if self.credentials.is_none() {
+            NotAttempted::NoCredentials
+        } else {
+            NotAttempted::Unsupported
         };
+        self.requested_sasl =
+            self.credentials.is_some() && contains_capability(&self.offered, "sasl");
 
-        if !contains_capability(&self.offered, "sasl") {
+        let mut wanted: Vec<&str> = Vec::new();
+        if self.requested_sasl {
+            wanted.push("sasl");
+        }
+        wanted.extend(
+            EXTRA_CAPABILITIES
+                .iter()
+                .copied()
+                .filter(|cap| contains_capability(&self.offered, cap)),
+        );
+
+        if wanted.is_empty() {
             self.state = State::Finished;
             return SaslStep::finish(SaslOutcome::NotAttempted {
-                reason: NotAttempted::Unsupported,
+                reason: self.without_sasl,
             });
         }
 
@@ -241,7 +304,7 @@ impl SaslNegotiator {
             None,
             CapSubCommand::REQ,
             None,
-            Some("sasl".to_owned()),
+            Some(wanted.join(" ")),
         ))
     }
 
@@ -416,17 +479,69 @@ mod tests {
         assert!(step.send.is_empty());
         assert!(step.outcome.is_none());
 
-        // `sasl` only appears in the final line.
+        // `sasl` only appears in the final line, and the request covers what
+        // was offered across both — `away-notify` came from the first.
         let step = n.advance(&msg("CAP * LS :sasl account-tag\r\n"));
-        assert_eq!(rendered(&step)[0].trim_end(), "CAP REQ sasl");
+        assert_eq!(
+            rendered(&step)[0].trim_end(),
+            "CAP REQ :sasl away-notify",
+            "sasl leads, and the accumulated list is what is asked for"
+        );
     }
 
     #[test]
-    fn missing_sasl_capability_ends_negotiation_cleanly() {
+    fn missing_sasl_capability_still_takes_what_is_useful() {
         let mut n = SaslNegotiator::new(Some(creds()));
         n.start();
+        // No `sasl`, so authentication is already decided — but `away-notify`
+        // is worth having on its own, and asking for it costs one round trip.
         let step = n.advance(&msg("CAP * LS :multi-prefix away-notify\r\n"));
+        assert_eq!(rendered(&step)[0].trim_end(), "CAP REQ away-notify");
+        assert!(
+            step.outcome.is_none(),
+            "nothing is concluded until answered"
+        );
 
+        let step = n.advance(&msg("CAP * ACK :away-notify\r\n"));
+        // The answer about authentication is the one it would always have
+        // been: the server does not do SASL, so NickServ is the fallback.
+        assert_eq!(
+            step.outcome,
+            Some(SaslOutcome::NotAttempted {
+                reason: NotAttempted::Unsupported
+            })
+        );
+        assert_eq!(rendered(&step)[0].trim_end(), "CAP END");
+        assert!(n.is_finished());
+    }
+
+    #[test]
+    fn a_refused_extra_is_not_reported_as_a_sasl_failure() {
+        let mut n = SaslNegotiator::new(Some(creds()));
+        n.start();
+        let _ = n.advance(&msg("CAP * LS :away-notify\r\n"));
+
+        // Nothing depended on it, so a refusal is not a failure to report —
+        // and it must not become one, or every server that says no to a
+        // nicety would look like a server that refused to authenticate us.
+        let step = n.advance(&msg("CAP * NAK :away-notify\r\n"));
+        assert_eq!(
+            step.outcome,
+            Some(SaslOutcome::NotAttempted {
+                reason: NotAttempted::Unsupported
+            })
+        );
+        assert_eq!(rendered(&step)[0].trim_end(), "CAP END");
+    }
+
+    #[test]
+    fn a_server_offering_nothing_we_want_ends_in_one_step() {
+        let mut n = SaslNegotiator::new(Some(creds()));
+        n.start();
+        let step = n.advance(&msg("CAP * LS :multi-prefix account-tag\r\n"));
+
+        // No request at all, so no extra round trip against a server that has
+        // nothing this client can use.
         assert_eq!(
             step.outcome,
             Some(SaslOutcome::NotAttempted {
@@ -449,6 +564,25 @@ mod tests {
             })
         );
         assert_eq!(rendered(&step)[0].trim_end(), "CAP END");
+    }
+
+    #[test]
+    fn away_notify_is_taken_without_credentials_and_says_so_correctly() {
+        let mut n = SaslNegotiator::new(None);
+        n.start();
+        let step = n.advance(&msg("CAP * LS :sasl away-notify\r\n"));
+        assert_eq!(rendered(&step)[0].trim_end(), "CAP REQ away-notify");
+
+        // `sasl` is offered and deliberately not asked for: there is nothing
+        // to authenticate with, and requesting it would start an exchange that
+        // could only be abandoned.
+        let step = n.advance(&msg("CAP * ACK :away-notify\r\n"));
+        assert_eq!(
+            step.outcome,
+            Some(SaslOutcome::NotAttempted {
+                reason: NotAttempted::NoCredentials
+            })
+        );
     }
 
     #[test]

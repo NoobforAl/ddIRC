@@ -1036,6 +1036,17 @@ impl SseDecode for crate::api::types::IrcEvent {
             }
             10 => {
                 let mut var_channel = <String>::sse_decode(deserializer);
+                let mut var_previous = <String>::sse_decode(deserializer);
+                let mut var_member =
+                    <Option<crate::api::types::MemberView>>::sse_decode(deserializer);
+                return crate::api::types::IrcEvent::MemberChanged {
+                    channel: var_channel,
+                    previous: var_previous,
+                    member: var_member,
+                };
+            }
+            11 => {
+                let mut var_channel = <String>::sse_decode(deserializer);
                 let mut var_by = <Option<String>>::sse_decode(deserializer);
                 let mut var_affected = <Vec<String>>::sse_decode(deserializer);
                 return crate::api::types::IrcEvent::ModeChanged {
@@ -1044,7 +1055,7 @@ impl SseDecode for crate::api::types::IrcEvent {
                     affected: var_affected,
                 };
             }
-            11 => {
+            12 => {
                 let mut var_channel = <Option<String>>::sse_decode(deserializer);
                 let mut var_count = <u64>::sse_decode(deserializer);
                 return crate::api::types::IrcEvent::MessagesDropped {
@@ -1052,7 +1063,7 @@ impl SseDecode for crate::api::types::IrcEvent {
                     count: var_count,
                 };
             }
-            12 => {
+            13 => {
                 let mut var_channel = <String>::sse_decode(deserializer);
                 let mut var_from = <String>::sse_decode(deserializer);
                 let mut var_offer = <crate::api::types::DccOffer>::sse_decode(deserializer);
@@ -1062,7 +1073,7 @@ impl SseDecode for crate::api::types::IrcEvent {
                     offer: var_offer,
                 };
             }
-            13 => {
+            14 => {
                 let mut var_message = <String>::sse_decode(deserializer);
                 let mut var_fatal = <bool>::sse_decode(deserializer);
                 return crate::api::types::IrcEvent::Error {
@@ -1157,10 +1168,12 @@ impl SseDecode for crate::api::types::MemberView {
         let mut var_nick = <String>::sse_decode(deserializer);
         let mut var_prefix = <Option<String>>::sse_decode(deserializer);
         let mut var_away = <bool>::sse_decode(deserializer);
+        let mut var_sortKey = <String>::sse_decode(deserializer);
         return crate::api::types::MemberView {
             nick: var_nick,
             prefix: var_prefix,
             away: var_away,
+            sort_key: var_sortKey,
         };
     }
 }
@@ -1183,6 +1196,17 @@ impl SseDecode for Option<crate::api::server::LocalServerInfo> {
             return Some(<crate::api::server::LocalServerInfo>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::types::MemberView> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::types::MemberView>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -1692,19 +1716,30 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::IrcEvent {
                 members.into_into_dart().into_dart(),
             ]
             .into_dart(),
+            crate::api::types::IrcEvent::MemberChanged {
+                channel,
+                previous,
+                member,
+            } => [
+                10.into_dart(),
+                channel.into_into_dart().into_dart(),
+                previous.into_into_dart().into_dart(),
+                member.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
             crate::api::types::IrcEvent::ModeChanged {
                 channel,
                 by,
                 affected,
             } => [
-                10.into_dart(),
+                11.into_dart(),
                 channel.into_into_dart().into_dart(),
                 by.into_into_dart().into_dart(),
                 affected.into_into_dart().into_dart(),
             ]
             .into_dart(),
             crate::api::types::IrcEvent::MessagesDropped { channel, count } => [
-                11.into_dart(),
+                12.into_dart(),
                 channel.into_into_dart().into_dart(),
                 count.into_into_dart().into_dart(),
             ]
@@ -1714,14 +1749,14 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::IrcEvent {
                 from,
                 offer,
             } => [
-                12.into_dart(),
+                13.into_dart(),
                 channel.into_into_dart().into_dart(),
                 from.into_into_dart().into_dart(),
                 offer.into_into_dart().into_dart(),
             ]
             .into_dart(),
             crate::api::types::IrcEvent::Error { message, fatal } => [
-                13.into_dart(),
+                14.into_dart(),
                 message.into_into_dart().into_dart(),
                 fatal.into_into_dart().into_dart(),
             ]
@@ -1769,6 +1804,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::MemberView {
             self.nick.into_into_dart().into_dart(),
             self.prefix.into_into_dart().into_dart(),
             self.away.into_into_dart().into_dart(),
+            self.sort_key.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -2180,18 +2216,28 @@ impl SseEncode for crate::api::types::IrcEvent {
                 <String>::sse_encode(channel, serializer);
                 <Vec<crate::api::types::MemberView>>::sse_encode(members, serializer);
             }
+            crate::api::types::IrcEvent::MemberChanged {
+                channel,
+                previous,
+                member,
+            } => {
+                <i32>::sse_encode(10, serializer);
+                <String>::sse_encode(channel, serializer);
+                <String>::sse_encode(previous, serializer);
+                <Option<crate::api::types::MemberView>>::sse_encode(member, serializer);
+            }
             crate::api::types::IrcEvent::ModeChanged {
                 channel,
                 by,
                 affected,
             } => {
-                <i32>::sse_encode(10, serializer);
+                <i32>::sse_encode(11, serializer);
                 <String>::sse_encode(channel, serializer);
                 <Option<String>>::sse_encode(by, serializer);
                 <Vec<String>>::sse_encode(affected, serializer);
             }
             crate::api::types::IrcEvent::MessagesDropped { channel, count } => {
-                <i32>::sse_encode(11, serializer);
+                <i32>::sse_encode(12, serializer);
                 <Option<String>>::sse_encode(channel, serializer);
                 <u64>::sse_encode(count, serializer);
             }
@@ -2200,13 +2246,13 @@ impl SseEncode for crate::api::types::IrcEvent {
                 from,
                 offer,
             } => {
-                <i32>::sse_encode(12, serializer);
+                <i32>::sse_encode(13, serializer);
                 <String>::sse_encode(channel, serializer);
                 <String>::sse_encode(from, serializer);
                 <crate::api::types::DccOffer>::sse_encode(offer, serializer);
             }
             crate::api::types::IrcEvent::Error { message, fatal } => {
-                <i32>::sse_encode(13, serializer);
+                <i32>::sse_encode(14, serializer);
                 <String>::sse_encode(message, serializer);
                 <bool>::sse_encode(fatal, serializer);
             }
@@ -2282,6 +2328,7 @@ impl SseEncode for crate::api::types::MemberView {
         <String>::sse_encode(self.nick, serializer);
         <Option<String>>::sse_encode(self.prefix, serializer);
         <bool>::sse_encode(self.away, serializer);
+        <String>::sse_encode(self.sort_key, serializer);
     }
 }
 
@@ -2301,6 +2348,16 @@ impl SseEncode for Option<crate::api::server::LocalServerInfo> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::server::LocalServerInfo>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::types::MemberView> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::types::MemberView>::sse_encode(value, serializer);
         }
     }
 }

@@ -64,6 +64,12 @@ pub struct MemberView {
     /// Highest-privilege prefix, e.g. `@` or `+`.
     pub prefix: Option<String>,
     pub away: bool,
+    /// Where this member belongs in the list, as an opaque string to compare.
+    ///
+    /// Carried so the UI can place one arriving nick without owning a second
+    /// copy of the ordering rule. Never displayed; its contents are not a
+    /// promise, only that comparing two of them gives the core's own order.
+    pub sort_key: String,
 }
 
 /// Where a message was addressed.
@@ -133,9 +139,21 @@ pub enum IrcEvent {
         topic: String,
         set_by: Option<String>,
     },
+    /// The whole roster, for the two moments that need one: the end of a
+    /// `NAMES` burst, and our own join.
     MemberList {
         channel: String,
         members: Vec<MemberView>,
+    },
+    /// One person arrived, left, was renamed, was opped, or went away.
+    ///
+    /// Applied to the roster the UI already holds: find the row filed under
+    /// `previous`, and put `member` where it now belongs — or remove it, when
+    /// `member` is null because they are gone.
+    MemberChanged {
+        channel: String,
+        previous: String,
+        member: Option<MemberView>,
     },
     ModeChanged {
         channel: String,
@@ -300,6 +318,7 @@ impl From<types::MemberView> for MemberView {
             nick: member.nick,
             prefix: member.prefix,
             away: member.away,
+            sort_key: member.sort_key,
         }
     }
 }
@@ -400,6 +419,15 @@ impl From<events::IrcEvent> for IrcEvent {
             events::IrcEvent::MemberList { channel, members } => Self::MemberList {
                 channel,
                 members: members.into_iter().map(Into::into).collect(),
+            },
+            events::IrcEvent::MemberChanged {
+                channel,
+                previous,
+                member,
+            } => Self::MemberChanged {
+                channel,
+                previous,
+                member: member.map(Into::into),
             },
             events::IrcEvent::ModeChanged {
                 channel,
