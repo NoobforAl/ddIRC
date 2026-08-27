@@ -52,15 +52,19 @@ class _FileTransferSectionState extends State<FileTransferSection> {
           description:
               'IRC sends files over a direct connection between the two '
               'clients, not through the server. Off, offers are not shown at '
-              'all. On, they are shown and you choose one at a time — nothing '
-              'is ever accepted for you.',
+              'all. On, an offer appears as a line saying who offered what — '
+              'and stops there, because accepting is not built yet.',
           value: on,
           onChanged: (v) => _set(settings, v),
         ),
         if (on) ...[
-          SettingsReadout(
+          // Said plainly rather than left to be discovered by looking for a
+          // button that is not there. What this switch decides today is
+          // whether an offer is *displayed*; the rest of what it will mean is
+          // in the dialog that turned it on.
+          const SettingsReadout(
             label: 'Accepting',
-            value: 'One at a time, by you. Never automatic',
+            value: 'Not built yet — an offer is shown, never answered',
           ),
           SettingsReadout(
             label: 'Filenames',
@@ -108,9 +112,9 @@ class _RiskDialog extends StatelessWidget {
     ),
     (
       'You connect to an address a stranger chose',
-      'Accepting means dialling the host and port in their message. ddIRC '
-          'will not do that on its own — but when you accept, that is what '
-          'happens.',
+      'Accepting means dialling the host and port in their message. That '
+          'part is not built yet, so nothing here will do it today — but it '
+          'is what accepting will be when it is.',
     ),
     (
       'The file is not checked',
@@ -168,8 +172,9 @@ class _RiskDialog extends StatelessWidget {
         const SizedBox(height: 6),
         const SettingsNote(
           text:
-              'Nothing is ever accepted for you. Turning this on means offers '
-              'are shown; each one is still a decision.',
+              'Today this only decides whether an offer is shown. There is no '
+              'way to accept one yet, and nothing is ever accepted for you. '
+              'The facts above are what accepting will mean when it is built.',
         ),
         SettingsActions(
           children: [

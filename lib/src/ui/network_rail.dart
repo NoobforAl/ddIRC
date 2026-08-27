@@ -120,10 +120,52 @@ class _RailEntry extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onEdit;
 
-  bool get connected => session != null;
+  /// Whether this network is actually on its server right now.
+  ///
+  /// Not `session != null`, which is what this used to be and is a different
+  /// question — that one asks whether a connection object exists, and one
+  /// exists throughout a reconnect. A network that dropped ten minutes ago and
+  /// is waiting out its backoff was showing the same green dot as one carrying
+  /// traffic, which is the failure this codebase goes out of its way to catch
+  /// everywhere else: believing you are connected when you are not.
+  bool get connected => session?.isConnected ?? false;
+
+  /// Trying, either because nothing has been opened yet or because what was
+  /// open is being opened again.
+  bool get inProgress =>
+      connecting ||
+      switch (session?.status) {
+        ConnectionStatus_Connecting() ||
+        ConnectionStatus_Registering() ||
+        ConnectionStatus_Reconnecting() => true,
+        _ => false,
+      };
+
+  /// Nothing is on the wire and nothing is trying: either the last attempt
+  /// failed, or a connection that existed has gone and given up.
+  ///
+  /// The second half is why this is not just [failed]. A session sitting in
+  /// `Disconnected` has no workspace failure recorded against it — that is for
+  /// an attempt that never became a session — and it would otherwise show no
+  /// mark at all, which reads as "idle" for a network that dropped.
+  bool get lost => failed || (session != null && !connected && !inProgress);
 
   @override
   Widget build(BuildContext context) {
+    // Rebuilt when *this* session changes, rather than by the whole rail being
+    // repainted from above. The workspace deliberately stopped forwarding
+    // every session notification — it draws two numbers off a session and a
+    // message in a channel you are reading changes neither — so the status a
+    // session knows has to be listened for where it is drawn.
+    final session = this.session;
+    if (session == null) return _build(context);
+    return ListenableBuilder(
+      listenable: session,
+      builder: (context, _) => _build(context),
+    );
+  }
+
+  Widget _build(BuildContext context) {
     final t = context.tokens;
     final m = context.motion;
     return Padding(
@@ -161,8 +203,8 @@ class _RailEntry extends StatelessWidget {
                     profile: profile,
                     connected: connected,
                     selected: selected,
-                    connecting: connecting,
-                    failed: failed,
+                    connecting: inProgress,
+                    failed: lost,
                     unread: unread,
                     mentions: mentions,
                     touch: touch,
@@ -386,12 +428,3 @@ class _RailButton extends StatelessWidget {
     );
   }
 }
-
-/// The connection status of one session, for the rail and the header.
-Color statusColor(ConnectionStatus status, Tokens t) => switch (status) {
-  ConnectionStatus_Connected() => t.ok,
-  ConnectionStatus_Connecting() => t.warn,
-  ConnectionStatus_Registering() => t.warn,
-  ConnectionStatus_Reconnecting() => t.warn,
-  ConnectionStatus_Disconnected() => t.bad,
-};
