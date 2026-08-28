@@ -183,6 +183,43 @@ impl SaslNegotiator {
         Command::CAP(None, CapSubCommand::LS, Some("302".to_owned()), None)
     }
 
+    /// Give up on negotiation and close it, without waiting for the server.
+    ///
+    /// For the caller that has run out of patience: a server may answer `CAP LS`
+    /// slowly, wrongly, or never, and this state machine has no clock of its own
+    /// to notice. The commands returned end capability negotiation, so
+    /// registration continues unauthenticated rather than stopping — an
+    /// unanswered `CAP` is a reason to stop asking, not a reason to hang up.
+    ///
+    /// Reporting the outcome honestly is the whole difficulty. Past the
+    /// capability list, `without_sasl` already holds the true answer for a
+    /// connection that was never going to authenticate anyway; before it, the
+    /// only thing known is whether there were credentials that now will not be
+    /// used, which is a fallback to NickServ rather than an anonymous
+    /// connection.
+    pub fn abandon(&mut self) -> SaslStep {
+        if self.state == State::Finished {
+            return SaslStep::nothing();
+        }
+
+        let unanswered = matches!(self.state, State::New | State::AwaitingCapabilities);
+        let outcome = if self.requested_sasl || (unanswered && self.credentials.is_some()) {
+            SaslOutcome::Rejected {
+                reason: "server did not finish capability negotiation in time".to_owned(),
+            }
+        } else {
+            SaslOutcome::NotAttempted {
+                reason: self.without_sasl,
+            }
+        };
+
+        self.state = State::Finished;
+        // Nothing further will be sent, so the password stops being needed here
+        // exactly as it does on the paths that succeed or fail outright.
+        self.credentials = None;
+        SaslStep::finish(outcome)
+    }
+
     /// Feed one incoming message through the state machine.
     pub fn advance(&mut self, message: &Message) -> SaslStep {
         // Once finished, ignore everything. Without this a server could replay a
@@ -583,6 +620,89 @@ mod tests {
                 reason: NotAttempted::NoCredentials
             })
         );
+    }
+
+    #[test]
+    fn abandoning_an_unanswered_cap_ls_closes_negotiation() {
+        // The case the deadline exists for: `CAP LS 302` went out and the
+        // server said nothing at all, ever.
+        let mut n = SaslNegotiator::new(Some(creds()));
+        n.start();
+
+        let step = n.abandon();
+        assert_eq!(
+            rendered(&step)[0].trim_end(),
+            "CAP END",
+            "registration has to be let through, not left waiting"
+        );
+        assert!(n.is_finished());
+        assert!(
+            matches!(step.outcome, Some(SaslOutcome::Rejected { .. })),
+            "credentials that went unused are a NickServ fallback, not an \
+             anonymous connection"
+        );
+    }
+
+    #[test]
+    fn abandoning_without_credentials_is_not_reported_as_a_failure() {
+        // Nothing was going to be authenticated here, so a silent server is
+        // not a thing to warn anyone about — it is the ordinary outcome,
+        // reached late.
+        let mut n = SaslNegotiator::new(None);
+        n.start();
+
+        let step = n.abandon();
+        assert_eq!(
+            step.outcome,
+            Some(SaslOutcome::NotAttempted {
+                reason: NotAttempted::NoCredentials
+            })
+        );
+        assert_eq!(rendered(&step)[0].trim_end(), "CAP END");
+    }
+
+    #[test]
+    fn abandoning_mid_exchange_is_a_rejection() {
+        // Asked for `sasl`, was granted it, and then the challenge never came.
+        let mut n = negotiator_awaiting_challenge();
+
+        let step = n.abandon();
+        assert!(matches!(step.outcome, Some(SaslOutcome::Rejected { .. })));
+        assert_eq!(rendered(&step)[0].trim_end(), "CAP END");
+        assert!(n.is_finished());
+    }
+
+    #[test]
+    fn abandoning_keeps_the_answer_it_already_had() {
+        // Past the capability list the truth is already known: this server does
+        // not do SASL. A timeout waiting for the `away-notify` acknowledgement
+        // must not overwrite that with one about a deadline.
+        let mut n = SaslNegotiator::new(Some(creds()));
+        n.start();
+        let _ = n.advance(&msg("CAP * LS :away-notify\r\n"));
+
+        let step = n.abandon();
+        assert_eq!(
+            step.outcome,
+            Some(SaslOutcome::NotAttempted {
+                reason: NotAttempted::Unsupported
+            })
+        );
+    }
+
+    #[test]
+    fn abandoning_a_finished_negotiation_sends_nothing() {
+        // The deadline may land on an exchange that has just completed. A
+        // second `CAP END` after registration is a stray command to the server
+        // and a second outcome to the UI; neither should happen.
+        let mut n = SaslNegotiator::new(Some(creds()));
+        n.start();
+        let _ = n.advance(&msg("CAP * LS :multi-prefix\r\n"));
+        assert!(n.is_finished());
+
+        let step = n.abandon();
+        assert!(step.send.is_empty());
+        assert!(step.outcome.is_none());
     }
 
     #[test]

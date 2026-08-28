@@ -10,7 +10,7 @@
 //! before SASL could run. See [`crate::conn::sasl`].
 
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use irc::client::data::ProxyType;
@@ -39,6 +39,14 @@ const EVENT_QUEUE: usize = 1024;
 /// Cap on a single outgoing message, below the 512-byte IRC line limit with
 /// room for the command envelope the server adds.
 const MAX_MESSAGE_CHARS: usize = 400;
+
+/// How long capability negotiation may take before it is abandoned.
+///
+/// Matched to the grace the local server gives a client to register
+/// (`REGISTRATION_GRACE`), because it is the same question asked from the other
+/// end of the socket. Generous by design: it exists to catch a server that has
+/// stopped answering, not to hurry a slow one.
+const CAP_NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Requests from the UI into the actor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,6 +320,14 @@ impl Actor {
         let mut outgoing: VecDeque<Irc> = VecDeque::new();
         let mut send_limiter = SendLimiter::new(Instant::now());
 
+        // Capability negotiation is the one exchange here where the server sets
+        // the pace and nothing bounds it: `CAP LS 302` goes out unconditionally
+        // and a server that simply never answers it holds the connection at
+        // "Registering" for as long as it cares to. This is that bound, and it
+        // is the same 30 seconds the local server grants a client of its own.
+        let negotiation_deadline = sleep(CAP_NEGOTIATION_TIMEOUT);
+        tokio::pin!(negotiation_deadline);
+
         loop {
             // Arm a timer only when something is waiting to go out, so a quiet
             // client never wakes up needlessly.
@@ -319,6 +335,22 @@ impl Actor {
 
             tokio::select! {
                 biased;
+
+                // Out of patience with negotiation. Close it and let
+                // registration finish unauthenticated: the connection is not at
+                // fault, the capability exchange is, and dropping the one over
+                // the other would cost the user a working connection they could
+                // have had. Disabled once negotiation ends, by whichever route,
+                // so this fires at most once.
+                () = &mut negotiation_deadline, if !sasl.is_finished() => {
+                    let step = sasl.abandon();
+                    for command in step.send {
+                        sender.send(command)?;
+                    }
+                    if let Some(outcome) = step.outcome {
+                        auth = self.auth_outcome(outcome);
+                    }
+                }
 
                 // Flush one queued command when the rate limiter allows.
                 () = async {
