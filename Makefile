@@ -42,6 +42,20 @@ FLUTTER ?= $(shell command -v flutter 2>/dev/null || echo "$$HOME/flutter/bin/fl
 DART    ?= $(shell command -v dart    2>/dev/null || echo "$$HOME/flutter/bin/dart")
 CARGO   ?= cargo
 
+# Inno Setup's compiler, for `make installer`. Not part of any other target and
+# not needed to build or run the app; only to package it. Unlike Flutter above
+# there is no sensible fallback path to guess at, so an empty value here is what
+# the target checks for and explains.
+# Kept to one line each, and free of backslashes: this Make strips a backslash
+# out of a $(shell) body before the shell ever sees it, so `sed 's/x\(y\)/.../'`
+# silently becomes a different expression and the variable comes out empty.
+ISCC    ?= $(shell command -v iscc 2>/dev/null || ls "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" 2>/dev/null || ls "/c/Program Files/Inno Setup 6/ISCC.exe" 2>/dev/null)
+
+# `1.0.0+1` in pubspec.yaml is one version for Dart and two for everyone else:
+# the part before `+` is what Windows shows and compares, and the build number
+# after it means nothing there. Take the first part only.
+APP_VERSION := $(shell grep '^version:' pubspec.yaml | sed 's/^version:[[:space:]]*//; s/+.*//')
+
 # The native core is a Cargo workspace of its own, one level down.
 RUST     := irc-core
 MANIFEST := --manifest-path $(RUST)/Cargo.toml
@@ -61,7 +75,8 @@ COMPOSE ?= docker compose -f dev/compose.yaml
 PROFILES ?= --profile proxy --profile tor
 
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test test-integration build build-linux build-macos build-ios codegen icons clean \
+.PHONY: help fix fmt lint test test-integration build build-release installer check-iscc \
+        build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
         dev-proxy dev-tor dev-tor-logs dev-onion-cert
 
@@ -74,6 +89,8 @@ help:
 	@echo "  make test     run the Dart and Rust test suites (hermetic)"
 	@echo "  make test-integration  end-to-end, needs make dev-server"
 	@echo "  make build    debug build for Windows"
+	@echo "  make build-release     release build for Windows"
+	@echo "  make installer         wrap it in a per-user .exe (needs Inno Setup)"
 	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
@@ -144,6 +161,34 @@ build-macos:
 
 build-ios:
 	$(FLUTTER) build ios --debug --no-codesign
+
+## A Windows release build, and an installer around it.
+#
+# `make build` above is the debug build, which is what you want while working.
+# This is the one that gets shipped, and `installer` depends on it because an
+# installer wrapping a debug build is a mistake that only shows up in the hands
+# of whoever downloaded it.
+build-release:
+	$(FLUTTER) build windows --release
+
+## Package the release build as a per-user .exe installer.
+#
+# Needs Inno Setup 6.3+, which is a dependency of nothing else here - override
+# ISCC if it lives somewhere unusual. Output lands in build/installer/.
+#
+# The check for it is a prerequisite rather than the first line of the recipe,
+# so a missing Inno Setup is reported now instead of after a release build has
+# finished and there is nothing left to do with it.
+installer: check-iscc build-release
+	"$(ISCC)" /DAppVersion=$(APP_VERSION) windows/installer/ddirc.iss
+	@echo "-> build/installer/ddIRC-$(APP_VERSION)-windows-x64-setup.exe"
+
+check-iscc:
+	@if [ -z "$(ISCC)" ]; then \
+	    echo "ISCC.exe not found. Install Inno Setup 6.3+ (https://jrsoftware.org/isdl.php),"; \
+	    echo "or point at it: make installer ISCC=/path/to/ISCC.exe"; \
+	    exit 1; \
+	fi
 
 # Needs `flutter` on PATH: the generator shells out to it by name.
 codegen:

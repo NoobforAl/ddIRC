@@ -21,10 +21,25 @@ class Workspace extends ChangeNotifier {
     required this.profiles,
     required this.settings,
     required this.proxies,
+    this.onLine,
+    this.onRead,
   });
 
   final ProfileStore profiles;
   final AppSettings settings;
+
+  /// Passed down to every session, with the session added so a listener can
+  /// tell which network a line arrived on.
+  ///
+  /// Injected from above rather than acted on here. What is done with a line —
+  /// deciding whether it is worth a notification, wording one, raising it on
+  /// whichever platform this is — needs to know things a model has no business
+  /// knowing, starting with whether the window is in front. So this class
+  /// carries the hook and none of the judgement.
+  final void Function(SessionModel, Conversation, ChatLine)? onLine;
+
+  /// The same, for a conversation being opened and therefore seen.
+  final void Function(SessionModel, Conversation)? onRead;
 
   /// The app-wide proxy. Read at connect time rather than held, so changing it
   /// applies to the next connection without needing to touch live ones.
@@ -184,11 +199,18 @@ class Workspace extends ChangeNotifier {
       }
       final id = await core.connect(config: config);
 
-      final session = SessionModel(
+      late final SessionModel session;
+      session = SessionModel(
         connectionId: id,
         profileId: profile.id,
         config: config,
         settings: settings,
+        onLine: onLine == null
+            ? null
+            : (conversation, line) => onLine!(session, conversation, line),
+        onRead: onRead == null
+            ? null
+            : (conversation) => onRead!(session, conversation),
       )..start();
       // One listener per session, forwarded so the whole workspace repaints
       // when any network has news — that is what the rail badges read, and

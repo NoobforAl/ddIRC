@@ -125,12 +125,51 @@ pub enum IrcEvent {
     /// so the filename is safe to create and the address is an `IpAddr` rather
     /// than a string. Everything else about it is still the sender's claim.
     FileOffered {
+        /// Names this offer for as long as it is worth answering. Passed back
+        /// to accept it, so the UI never has to hand the core an address a
+        /// stranger chose — it refers to the offer the core already parsed.
+        id: u64,
         /// The conversation it arrived in, so it can be shown in place. A
         /// channel name, or the sender's nick for a direct message.
         channel: String,
         /// Who offered it.
         from: String,
         offer: Box<DccOffer>,
+    },
+
+    /// Bytes are about to move, in either direction.
+    ///
+    /// The point at which a transfer becomes real: for an incoming one the
+    /// connection is up, and for an outgoing one somebody accepted. Carries
+    /// what the UI needs to draw a row, so nothing after this has to repeat it.
+    FileTransferStarted {
+        id: u64,
+        /// Where to show it — the conversation the offer belongs to.
+        channel: String,
+        filename: String,
+        /// True when the file is arriving, false when it is leaving.
+        incoming: bool,
+        /// What the sender claims, which for an outgoing transfer is a fact.
+        total: Option<u64>,
+    },
+
+    /// How far a transfer has got. Dropped rather than queued when the UI is
+    /// behind, so a progress number can never stall the transfer it describes.
+    FileTransferProgress { id: u64, transferred: u64 },
+
+    /// A transfer finished, one way or the other.
+    ///
+    /// One event for both outcomes because the UI does the same thing with
+    /// them — replaces the progress row with a result — and two events would
+    /// mean two ways to forget to remove it.
+    FileTransferEnded {
+        id: u64,
+        channel: String,
+        filename: String,
+        /// Where it was saved, for an incoming transfer that succeeded.
+        path: Option<String>,
+        /// Why it stopped, when it did not succeed. `None` is success.
+        error: Option<String>,
     },
 
     /// A server error or a protocol-level problem worth showing the user.
@@ -150,7 +189,14 @@ impl IrcEvent {
             | Self::MemberChanged { channel, .. }
             | Self::ModeChanged { channel, .. } => Some(channel),
             Self::Message(message) => Some(message.target.name()),
-            Self::FileOffered { channel, .. } => Some(channel),
+            Self::FileOffered { channel, .. }
+            | Self::FileTransferStarted { channel, .. }
+            | Self::FileTransferEnded { channel, .. } => Some(channel),
+            // Progress carries no channel of its own: it is only ever read
+            // against a transfer the UI already placed when it started, and
+            // repeating the name on every chunk would be a name to keep in
+            // step for no gain.
+            Self::FileTransferProgress { .. } => None,
             Self::MessagesDropped { channel, .. } => channel.as_deref(),
             Self::Status { .. }
             | Self::Registered { .. }

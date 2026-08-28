@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -256085206;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -911605833;
 
 // Section: executor
 
@@ -47,6 +47,76 @@ flutter_rust_bridge::frb_generated_default_handler!();
 
 // Section: wire_funcs
 
+fn wire__crate__api__client__accept_file_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "accept_file",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u64>::sse_decode(&mut deserializer);
+            let api_transfer_id = <u64>::sse_decode(&mut deserializer);
+            let api_directory = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok =
+                        crate::api::client::accept_file(api_id, api_transfer_id, api_directory)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__client__cancel_transfer_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "cancel_transfer",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u64>::sse_decode(&mut deserializer);
+            let api_transfer_id = <u64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::client::cancel_transfer(api_id, api_transfer_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__client__clean_media_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -478,6 +548,41 @@ fn wire__crate__api__client__send_action_impl(
             move |context| {
                 transform_result_sse::<_, String>((move || {
                     let output_ok = crate::api::client::send_action(api_id, api_target, api_text)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__client__send_file_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "send_file",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <u64>::sse_decode(&mut deserializer);
+            let api_target = <String>::sse_decode(&mut deserializer);
+            let api_path = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::client::send_file(api_id, api_target, api_path)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -1064,16 +1169,54 @@ impl SseDecode for crate::api::types::IrcEvent {
                 };
             }
             13 => {
+                let mut var_id = <u64>::sse_decode(deserializer);
                 let mut var_channel = <String>::sse_decode(deserializer);
                 let mut var_from = <String>::sse_decode(deserializer);
                 let mut var_offer = <crate::api::types::DccOffer>::sse_decode(deserializer);
                 return crate::api::types::IrcEvent::FileOffered {
+                    id: var_id,
                     channel: var_channel,
                     from: var_from,
                     offer: var_offer,
                 };
             }
             14 => {
+                let mut var_id = <u64>::sse_decode(deserializer);
+                let mut var_channel = <String>::sse_decode(deserializer);
+                let mut var_filename = <String>::sse_decode(deserializer);
+                let mut var_incoming = <bool>::sse_decode(deserializer);
+                let mut var_total = <Option<u64>>::sse_decode(deserializer);
+                return crate::api::types::IrcEvent::FileTransferStarted {
+                    id: var_id,
+                    channel: var_channel,
+                    filename: var_filename,
+                    incoming: var_incoming,
+                    total: var_total,
+                };
+            }
+            15 => {
+                let mut var_id = <u64>::sse_decode(deserializer);
+                let mut var_transferred = <u64>::sse_decode(deserializer);
+                return crate::api::types::IrcEvent::FileTransferProgress {
+                    id: var_id,
+                    transferred: var_transferred,
+                };
+            }
+            16 => {
+                let mut var_id = <u64>::sse_decode(deserializer);
+                let mut var_channel = <String>::sse_decode(deserializer);
+                let mut var_filename = <String>::sse_decode(deserializer);
+                let mut var_path = <Option<String>>::sse_decode(deserializer);
+                let mut var_error = <Option<String>>::sse_decode(deserializer);
+                return crate::api::types::IrcEvent::FileTransferEnded {
+                    id: var_id,
+                    channel: var_channel,
+                    filename: var_filename,
+                    path: var_path,
+                    error: var_error,
+                };
+            }
+            17 => {
                 let mut var_message = <String>::sse_decode(deserializer);
                 let mut var_fatal = <bool>::sse_decode(deserializer);
                 return crate::api::types::IrcEvent::Error {
@@ -1438,25 +1581,28 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        1 => wire__crate__api__client__clean_media_impl(port, ptr, rust_vec_len, data_len),
-        2 => wire__crate__api__client__connect_impl(port, ptr, rust_vec_len, data_len),
-        4 => wire__crate__api__client__disconnect_impl(port, ptr, rust_vec_len, data_len),
-        5 => wire__crate__api__client__event_stream_impl(port, ptr, rust_vec_len, data_len),
-        6 => wire__crate__api__init_app_impl(port, ptr, rust_vec_len, data_len),
-        7 => wire__crate__api__client__join_impl(port, ptr, rust_vec_len, data_len),
-        8 => wire__crate__api__server__local_server_info_impl(port, ptr, rust_vec_len, data_len),
-        9 => wire__crate__api__server__local_server_start_impl(port, ptr, rust_vec_len, data_len),
-        10 => wire__crate__api__server__local_server_stop_impl(port, ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__client__part_impl(port, ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__client__reconnect_impl(port, ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__client__send_action_impl(port, ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__client__send_message_impl(port, ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__client__set_nick_impl(port, ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__client__set_topic_impl(port, ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__tor__tor_port_impl(port, ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__tor__tor_start_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__tor__tor_status_stream_impl(port, ptr, rust_vec_len, data_len),
-        21 => wire__crate__api__tor__tor_stop_impl(port, ptr, rust_vec_len, data_len),
+        1 => wire__crate__api__client__accept_file_impl(port, ptr, rust_vec_len, data_len),
+        2 => wire__crate__api__client__cancel_transfer_impl(port, ptr, rust_vec_len, data_len),
+        3 => wire__crate__api__client__clean_media_impl(port, ptr, rust_vec_len, data_len),
+        4 => wire__crate__api__client__connect_impl(port, ptr, rust_vec_len, data_len),
+        6 => wire__crate__api__client__disconnect_impl(port, ptr, rust_vec_len, data_len),
+        7 => wire__crate__api__client__event_stream_impl(port, ptr, rust_vec_len, data_len),
+        8 => wire__crate__api__init_app_impl(port, ptr, rust_vec_len, data_len),
+        9 => wire__crate__api__client__join_impl(port, ptr, rust_vec_len, data_len),
+        10 => wire__crate__api__server__local_server_info_impl(port, ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__server__local_server_start_impl(port, ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__server__local_server_stop_impl(port, ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__client__part_impl(port, ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__client__reconnect_impl(port, ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__client__send_action_impl(port, ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__client__send_file_impl(port, ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__client__send_message_impl(port, ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__client__set_nick_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__client__set_topic_impl(port, ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__tor__tor_port_impl(port, ptr, rust_vec_len, data_len),
+        22 => wire__crate__api__tor__tor_start_impl(port, ptr, rust_vec_len, data_len),
+        23 => wire__crate__api__tor__tor_status_stream_impl(port, ptr, rust_vec_len, data_len),
+        24 => wire__crate__api__tor__tor_stop_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1469,8 +1615,8 @@ fn pde_ffi_dispatcher_sync_impl(
 ) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        3 => wire__crate__api__client__default_tls_port_impl(ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__client__tor_socks_port_impl(ptr, rust_vec_len, data_len),
+        5 => wire__crate__api__client__default_tls_port_impl(ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__client__tor_socks_port_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1745,18 +1891,56 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::IrcEvent {
             ]
             .into_dart(),
             crate::api::types::IrcEvent::FileOffered {
+                id,
                 channel,
                 from,
                 offer,
             } => [
                 13.into_dart(),
+                id.into_into_dart().into_dart(),
                 channel.into_into_dart().into_dart(),
                 from.into_into_dart().into_dart(),
                 offer.into_into_dart().into_dart(),
             ]
             .into_dart(),
-            crate::api::types::IrcEvent::Error { message, fatal } => [
+            crate::api::types::IrcEvent::FileTransferStarted {
+                id,
+                channel,
+                filename,
+                incoming,
+                total,
+            } => [
                 14.into_dart(),
+                id.into_into_dart().into_dart(),
+                channel.into_into_dart().into_dart(),
+                filename.into_into_dart().into_dart(),
+                incoming.into_into_dart().into_dart(),
+                total.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::types::IrcEvent::FileTransferProgress { id, transferred } => [
+                15.into_dart(),
+                id.into_into_dart().into_dart(),
+                transferred.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::types::IrcEvent::FileTransferEnded {
+                id,
+                channel,
+                filename,
+                path,
+                error,
+            } => [
+                16.into_dart(),
+                id.into_into_dart().into_dart(),
+                channel.into_into_dart().into_dart(),
+                filename.into_into_dart().into_dart(),
+                path.into_into_dart().into_dart(),
+                error.into_into_dart().into_dart(),
+            ]
+            .into_dart(),
+            crate::api::types::IrcEvent::Error { message, fatal } => [
+                17.into_dart(),
                 message.into_into_dart().into_dart(),
                 fatal.into_into_dart().into_dart(),
             ]
@@ -2242,17 +2426,52 @@ impl SseEncode for crate::api::types::IrcEvent {
                 <u64>::sse_encode(count, serializer);
             }
             crate::api::types::IrcEvent::FileOffered {
+                id,
                 channel,
                 from,
                 offer,
             } => {
                 <i32>::sse_encode(13, serializer);
+                <u64>::sse_encode(id, serializer);
                 <String>::sse_encode(channel, serializer);
                 <String>::sse_encode(from, serializer);
                 <crate::api::types::DccOffer>::sse_encode(offer, serializer);
             }
-            crate::api::types::IrcEvent::Error { message, fatal } => {
+            crate::api::types::IrcEvent::FileTransferStarted {
+                id,
+                channel,
+                filename,
+                incoming,
+                total,
+            } => {
                 <i32>::sse_encode(14, serializer);
+                <u64>::sse_encode(id, serializer);
+                <String>::sse_encode(channel, serializer);
+                <String>::sse_encode(filename, serializer);
+                <bool>::sse_encode(incoming, serializer);
+                <Option<u64>>::sse_encode(total, serializer);
+            }
+            crate::api::types::IrcEvent::FileTransferProgress { id, transferred } => {
+                <i32>::sse_encode(15, serializer);
+                <u64>::sse_encode(id, serializer);
+                <u64>::sse_encode(transferred, serializer);
+            }
+            crate::api::types::IrcEvent::FileTransferEnded {
+                id,
+                channel,
+                filename,
+                path,
+                error,
+            } => {
+                <i32>::sse_encode(16, serializer);
+                <u64>::sse_encode(id, serializer);
+                <String>::sse_encode(channel, serializer);
+                <String>::sse_encode(filename, serializer);
+                <Option<String>>::sse_encode(path, serializer);
+                <Option<String>>::sse_encode(error, serializer);
+            }
+            crate::api::types::IrcEvent::Error { message, fatal } => {
+                <i32>::sse_encode(17, serializer);
                 <String>::sse_encode(message, serializer);
                 <bool>::sse_encode(fatal, serializer);
             }

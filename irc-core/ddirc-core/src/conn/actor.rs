@@ -9,7 +9,8 @@
 //! sends `CAP END` before `NICK`/`USER` and so closes capability negotiation
 //! before SASL could run. See [`crate::conn::sasl`].
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -29,6 +30,8 @@ use crate::conn::diagnose;
 use crate::conn::ratelimit::{ReceiveLimiter, SendLimiter};
 use crate::conn::reconnect::Backoff;
 use crate::conn::sasl::{Credentials, NotAttempted, SaslNegotiator, SaslOutcome};
+use crate::dcc::transfer::{self, Progress, TransferError, TransferEvent};
+use crate::dcc::DccOffer;
 use crate::state::{limits, truncate, Session};
 use crate::text::format;
 
@@ -47,6 +50,23 @@ const MAX_MESSAGE_CHARS: usize = 400;
 /// end of the socket. Generous by design: it exists to catch a server that has
 /// stopped answering, not to hurry a slow one.
 const CAP_NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How many times to try a connection that has never once worked.
+///
+/// Automatic reconnection earns its place for a connection that *was* working:
+/// a tunnel, a handoff between Wi-Fi and cellular, a server bouncing. Resuming
+/// those without being asked is the whole point.
+///
+/// A connection that has never registered is a different thing. A wrong
+/// address, a firewall, a proxy that cannot reach the host — retrying those
+/// every five minutes for ever is not persistence, it is a loop nobody asked
+/// for that goes on producing "reconnecting" while the reason it failed sits
+/// unread. So the first connection gets a few attempts, which covers a laptop
+/// whose network is not up yet at launch, and then stops and waits to be
+/// asked.
+///
+/// Three, with the default backoff, is roughly fourteen seconds of trying.
+const MAX_ATTEMPTS_BEFORE_FIRST_SUCCESS: u32 = 3;
 
 /// Requests from the UI into the actor.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +109,30 @@ pub enum ClientCommand {
     /// Disconnect and stop reconnecting.
     Disconnect {
         reason: Option<String>,
+    },
+
+    /// Offer a file to someone, over DCC.
+    ///
+    /// The path is read by the core, not the UI: a file streamed from disk is
+    /// never held whole in memory and never crosses the FFI boundary.
+    SendFile {
+        target: String,
+        path: String,
+    },
+
+    /// Take up an offer that arrived, saving it into `directory`.
+    ///
+    /// Refers to the offer by the id it was announced with rather than by its
+    /// contents, so the UI never hands back an address a stranger chose — the
+    /// core answers only offers it parsed itself.
+    AcceptFile {
+        id: u64,
+        directory: String,
+    },
+
+    /// Stop a transfer, or decline an offer that has not started.
+    CancelTransfer {
+        id: u64,
     },
 }
 
@@ -178,6 +222,43 @@ struct Actor {
     recv_limiter: ReceiveLimiter,
     /// Events dropped because the UI was not keeping up.
     dropped_events: u64,
+    /// Whether this connection has ever completed registration.
+    ///
+    /// The difference between "reconnect me automatically" and "tell me it did
+    /// not work". Set once and never cleared: a network that worked this
+    /// morning is one worth resuming this afternoon, however long it has been
+    /// down in between.
+    ever_registered: bool,
+    /// Offers and transfers, by the id they were announced with.
+    transfers: Transfers,
+}
+
+/// Offers waiting for an answer, and transfers already running.
+///
+/// Kept on the actor rather than inside the transfer module because the ids
+/// are the vocabulary the UI speaks: an offer is announced with one, accepted
+/// by one, and cancelled by one. The transfers themselves run as their own
+/// tasks and are only reachable from here through their cancel channel.
+#[derive(Default)]
+struct Transfers {
+    next_id: u64,
+    /// Announced, not yet answered. Holds the offer so accepting never has to
+    /// take one back from the UI.
+    offers: HashMap<u64, PendingOffer>,
+    /// Running, and how to stop each one.
+    running: HashMap<u64, mpsc::Sender<()>>,
+}
+
+struct PendingOffer {
+    channel: String,
+    offer: DccOffer,
+}
+
+impl Transfers {
+    fn next(&mut self) -> u64 {
+        self.next_id = self.next_id.wrapping_add(1);
+        self.next_id
+    }
 }
 
 impl Actor {
@@ -189,6 +270,8 @@ impl Actor {
             session,
             recv_limiter: ReceiveLimiter::new(Instant::now()),
             dropped_events: 0,
+            ever_registered: false,
+            transfers: Transfers::default(),
         }
     }
 
@@ -250,6 +333,30 @@ impl Actor {
 
             // The session is per-connection; membership does not survive a drop.
             self.session = Session::new(self.config.nickname.clone());
+
+            // Stop, rather than retry, when nothing has ever worked here and
+            // the patience above is spent. The actor deliberately stays alive:
+            // exiting would close the command channel and take the UI's own
+            // "Try again" with it, which is the one thing the user is being
+            // asked to do.
+            if !self.ever_registered && backoff.attempt() >= MAX_ATTEMPTS_BEFORE_FIRST_SUCCESS {
+                self.status(ConnectionStatus::Disconnected, Some(reason));
+                loop {
+                    match commands.recv().await {
+                        Some(ClientCommand::Reconnect) => break,
+                        Some(ClientCommand::Disconnect { .. }) | None => {
+                            self.status(ConnectionStatus::Disconnected, None);
+                            return;
+                        }
+                        // Anything else has nowhere to go while offline.
+                        Some(_) => {}
+                    }
+                }
+                // Asked for by hand, so the delays start over rather than
+                // resuming at the five minutes the last attempt had reached.
+                backoff.reset();
+                continue;
+            }
 
             let delay = backoff.next_delay();
             self.status(
@@ -379,7 +486,23 @@ impl Actor {
                         )));
                         return Ok(Disposition::UserQuit);
                     }
-                    self.queue(&mut outgoing, command);
+                    // The file commands are handled here rather than in
+                    // `queue` because two of them are async — binding a port
+                    // and asking the routing table for an address — and
+                    // because only one of the three produces a protocol
+                    // message at all.
+                    match command {
+                        ClientCommand::SendFile { target, path } => {
+                            self.send_file(&mut outgoing, target, path).await;
+                        }
+                        ClientCommand::AcceptFile { id, directory } => {
+                            self.accept_file(id, directory);
+                        }
+                        ClientCommand::CancelTransfer { id } => {
+                            self.cancel_transfer(id);
+                        }
+                        other => self.queue(&mut outgoing, other),
+                    }
                 }
 
                 message = stream.next() => {
@@ -537,6 +660,13 @@ impl Actor {
             ClientCommand::Reconnect => {}
             // Handled before reaching the queue.
             ClientCommand::Disconnect { .. } => {}
+            // Also handled before reaching the queue: two of the three are
+            // async, and only one of them produces a protocol message at all.
+            // Listed rather than caught by a wildcard, so that a command added
+            // later cannot be silently dropped here.
+            ClientCommand::SendFile { .. }
+            | ClientCommand::AcceptFile { .. }
+            | ClientCommand::CancelTransfer { .. } => {}
         }
     }
 
@@ -794,6 +924,10 @@ impl Actor {
             outgoing.push_back(Irc::JOIN(channel.clone(), None, None));
         }
 
+        // From here on, a lost connection is one worth resuming without
+        // being asked. See `MAX_ATTEMPTS_BEFORE_FIRST_SUCCESS`.
+        self.ever_registered = true;
+
         self.emit(IrcEvent::Registered {
             nick: self.session.nick().to_owned(),
             network: self.session.isupport.network.clone(),
@@ -875,11 +1009,180 @@ impl Actor {
             target.to_owned()
         };
 
+        // Remembered here so that accepting can name the offer rather than
+        // describe it. The UI never gets to hand an address back to the core —
+        // it answers an offer the core parsed, or it answers nothing.
+        let id = self.transfers.next();
+        self.transfers.offers.insert(
+            id,
+            PendingOffer {
+                channel: channel.clone(),
+                offer: offer.clone(),
+            },
+        );
+
         self.emit(IrcEvent::FileOffered {
+            id,
             channel,
             from: sender.to_owned(),
             offer: Box::new(offer),
         });
+    }
+
+    /// Take up an offer that arrived.
+    ///
+    /// The transfer runs as its own task: a file takes minutes, and the IRC
+    /// socket has to go on answering pings throughout.
+    fn accept_file(&mut self, id: u64, directory: String) {
+        let Some(pending) = self.transfers.offers.remove(&id) else {
+            // Already answered, or left over from a previous connection.
+            // Silence is right: nothing was promised and nothing is owed.
+            return;
+        };
+
+        let (cancel_tx, mut cancel_rx) = mpsc::channel(1);
+        self.transfers.running.insert(id, cancel_tx);
+
+        let events = self.events.clone();
+        let proxy = self.config.proxy.clone();
+        let channel = pending.channel;
+        let filename = pending.offer.filename.clone();
+        let offer = pending.offer;
+
+        tokio::spawn(async move {
+            let started = IrcEvent::FileTransferStarted {
+                id,
+                channel: channel.clone(),
+                filename: filename.clone(),
+                incoming: true,
+                total: offer.size,
+            };
+            if events.send(started).await.is_err() {
+                return;
+            }
+
+            let (progress, forwarder) = forward_progress(events.clone(), id);
+            let result = transfer::accept(
+                &offer,
+                std::path::Path::new(&directory),
+                proxy.as_ref(),
+                progress,
+                &mut cancel_rx,
+            )
+            .await;
+            forwarder.abort();
+
+            let _ = events
+                .send(ended(
+                    id,
+                    channel,
+                    filename,
+                    result.map(|path| Some(path.to_string_lossy().into_owned())),
+                ))
+                .await;
+        });
+    }
+
+    /// Offer a file to someone, and serve it when they take it up.
+    ///
+    /// Async, and answered from the actor rather than from the spawned task,
+    /// because the offer itself is an IRC message: it has to go out on the
+    /// connection's own sender, in order, behind the same rate limiter as
+    /// everything else. Only the serving is spawned.
+    async fn send_file(&mut self, outgoing: &mut VecDeque<Irc>, target: String, path: String) {
+        let id = self.transfers.next();
+        let filename = PathBuf::from(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".to_owned());
+
+        // The rule this whole module exists to keep. Behind a proxy a normal
+        // offer would publish the address the proxy is there to hide, and the
+        // honest alternative — a reverse offer, where they listen and we dial
+        // out through the proxy — is not built yet. Refusing is the only
+        // remaining answer that does not quietly undo the setting.
+        if self.config.proxy.is_some() {
+            self.emit(ended(
+                id,
+                target,
+                filename,
+                Err(TransferError::WouldDiscloseAddressBySending),
+            ));
+            return;
+        }
+
+        let prepared = async {
+            let size = tokio::fs::metadata(&path).await?.len();
+            if size > transfer::MAX_TRANSFER_BYTES {
+                return Err(TransferError::TooLarge(
+                    transfer::MAX_TRANSFER_BYTES / (1024 * 1024 * 1024),
+                ));
+            }
+            let advertised = transfer::routable_address(&self.config.host)
+                .await
+                .ok_or(TransferError::NoRoutableAddress)?;
+            let (listener, listening) = transfer::listen().await?;
+            Ok::<_, TransferError>((size, advertised, listener, listening))
+        }
+        .await;
+
+        let (size, advertised, listener, listening) = match prepared {
+            Ok(parts) => parts,
+            Err(e) => {
+                self.emit(ended(id, target, filename, Err(e)));
+                return;
+            }
+        };
+
+        outgoing.push_back(Irc::PRIVMSG(
+            target.clone(),
+            format!(
+                "\u{01}DCC SEND {} {} {} {}\u{01}",
+                transfer::quote_filename(&filename),
+                advertised,
+                listening.port,
+                size
+            ),
+        ));
+
+        self.emit(IrcEvent::FileTransferStarted {
+            id,
+            channel: target.clone(),
+            filename: filename.clone(),
+            incoming: false,
+            total: Some(size),
+        });
+
+        let (cancel_tx, mut cancel_rx) = mpsc::channel(1);
+        self.transfers.running.insert(id, cancel_tx);
+        let events = self.events.clone();
+
+        tokio::spawn(async move {
+            let (progress, forwarder) = forward_progress(events.clone(), id);
+            let result = transfer::serve(
+                listener,
+                std::path::Path::new(&path),
+                progress,
+                &mut cancel_rx,
+            )
+            .await;
+            forwarder.abort();
+
+            let _ = events
+                .send(ended(id, target, filename, result.map(|_| None)))
+                .await;
+        });
+    }
+
+    /// Stop a transfer, or turn down an offer that never started.
+    fn cancel_transfer(&mut self, id: u64) {
+        // An offer declined before it began needs no task stopped and no event
+        // sent. Nothing was ever said to the other side, which is exactly what
+        // "reported, never answered" buys: declining is silent.
+        self.transfers.offers.remove(&id);
+        if let Some(cancel) = self.transfers.running.remove(&id) {
+            let _ = cancel.try_send(());
+        }
     }
 
     /// Handle a PRIVMSG or NOTICE.
@@ -1024,6 +1327,62 @@ fn is_error_numeric(response: Response) -> bool {
     (400..600).contains(&code)
 }
 
+/// Forward a transfer's own progress onto the connection's event stream.
+///
+/// Two channels rather than one because the transfer module knows nothing
+/// about `IrcEvent` — it reports bytes, and this puts an id on them. The
+/// returned handle is aborted when the transfer ends, which is what stops the
+/// forwarder rather than leaving a task per transfer alive for ever.
+fn forward_progress(
+    events: mpsc::Sender<IrcEvent>,
+    id: u64,
+) -> (Progress, tokio::task::JoinHandle<()>) {
+    let (tx, mut rx) = mpsc::channel(32);
+    let handle = tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            let mapped = match event {
+                // The start is announced by the actor, which knows the
+                // filename and the direction; the transfer's own `Started` is
+                // the same news arriving later and carrying less of it.
+                TransferEvent::Started { .. } => continue,
+                TransferEvent::Progress { transferred } => {
+                    IrcEvent::FileTransferProgress { id, transferred }
+                }
+            };
+            // Dropped rather than awaited: a progress number nobody read is
+            // worth nothing, and blocking here would stall the transfer it
+            // describes.
+            let _ = events.try_send(mapped);
+        }
+    });
+    (Progress::new(tx), handle)
+}
+
+/// The one event both outcomes of a transfer produce.
+fn ended(
+    id: u64,
+    channel: String,
+    filename: String,
+    result: Result<Option<String>, TransferError>,
+) -> IrcEvent {
+    match result {
+        Ok(path) => IrcEvent::FileTransferEnded {
+            id,
+            channel,
+            filename,
+            path,
+            error: None,
+        },
+        Err(e) => IrcEvent::FileTransferEnded {
+            id,
+            channel,
+            filename,
+            path: None,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -1135,6 +1494,90 @@ mod tests {
                 Ok(Some(_)) => {}
             }
         }
+    }
+
+    /// Wait until the actor stops trying, returning the reason it gave.
+    ///
+    /// Distinguished from the backoff wait by the status: `Reconnecting` means
+    /// it intends to try again, `Disconnected` means it has stopped and is
+    /// waiting to be asked.
+    async fn wait_for_giving_up(rx: &mut mpsc::Receiver<IrcEvent>) -> String {
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(30), rx.recv())
+                .await
+                .expect("the actor should give up")
+                .expect("the actor should still be running");
+            if let IrcEvent::Status {
+                status: ConnectionStatus::Disconnected,
+                detail,
+            } = event
+            {
+                return detail.unwrap_or_default();
+            }
+        }
+    }
+
+    /// A connection that has never worked stops asking, rather than retrying a
+    /// wrong address every five minutes for the rest of the session.
+    #[tokio::test]
+    async fn a_connection_that_never_worked_gives_up_and_waits() {
+        // Held, not dropped: releasing the handle closes the command channel,
+        // which ends the actor and would make this pass for the wrong reason.
+        let (_handle, mut rx) = failing_actor();
+
+        let reason = wait_for_giving_up(&mut rx).await;
+        assert!(
+            !reason.is_empty(),
+            "giving up should say why, or the user has nothing to act on"
+        );
+
+        // And it must stay silent afterwards. This is the actual complaint:
+        // attempts continuing without anybody asking for them.
+        assert!(
+            !attempts_again(&mut rx, Duration::from_secs(2)).await,
+            "it must not keep trying once it has given up"
+        );
+    }
+
+    /// Giving up must not take the way back with it.
+    ///
+    /// The actor stays alive on purpose: returning would close the command
+    /// channel, and the UI's "Try again" button sends a command down it. A
+    /// version of this that exited would look correct and leave the user with
+    /// a button that does nothing.
+    #[tokio::test]
+    async fn giving_up_still_answers_the_retry_button() {
+        let (handle, mut rx) = failing_actor();
+        wait_for_giving_up(&mut rx).await;
+
+        handle
+            .send(ClientCommand::Reconnect)
+            .await
+            .expect("the actor must still be listening after giving up");
+
+        assert!(
+            attempts_again(&mut rx, Duration::from_secs(2)).await,
+            "asking by hand should start another attempt"
+        );
+    }
+
+    /// And it is still possible to close a session that has given up.
+    #[tokio::test]
+    async fn a_session_that_gave_up_can_still_be_disconnected() {
+        let (handle, mut rx) = failing_actor();
+        wait_for_giving_up(&mut rx).await;
+
+        handle
+            .send(ClientCommand::Disconnect { reason: None })
+            .await
+            .expect("the actor must still be listening");
+
+        // The actor ends, which closes the event stream.
+        let closed = tokio::time::timeout(Duration::from_secs(5), async {
+            while rx.recv().await.is_some() {}
+        })
+        .await;
+        assert!(closed.is_ok(), "disconnect should end the actor");
     }
 
     #[tokio::test]
@@ -1593,6 +2036,7 @@ mod tests {
                     channel,
                     from,
                     offer,
+                    ..
                 } => Some((channel, from, offer)),
                 _ => None,
             })
@@ -1710,6 +2154,43 @@ mod tests {
         let text: String = messages[0].spans.iter().map(|s| s.text.as_str()).collect();
         assert_eq!(text, "waves");
         assert!(outgoing.is_empty(), "no CTCP reply was queued");
+    }
+
+    /// The `irc` crate must not be built with its `ctcp` feature.
+    ///
+    /// This is a test about a manifest, which is unusual, and the reason is
+    /// that the behaviour it guards cannot be reached from here. With `ctcp`
+    /// enabled the crate answers CTCP itself, inside
+    /// `ClientStream::poll_next`, using its own `Sender` — so the reply never
+    /// touches the actor, never appears in `outgoing`, and the test above
+    /// passes while the client is answering `VERSION`, `FINGER` and `TIME` to
+    /// anyone who asks. `TIME` is the bad one: it is `Local::now()` as RFC
+    /// 2822, which gives away the machine's clock and its UTC offset.
+    ///
+    /// Catching that needs either a live socket or the manifest. The manifest
+    /// is cheaper, is hermetic, and fails with the reason attached.
+    #[test]
+    fn the_irc_crate_is_not_built_with_its_ctcp_auto_responder() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("ddirc-core sits inside the workspace")
+            .join("Cargo.toml");
+        let text = std::fs::read_to_string(&manifest).expect("workspace manifest is readable");
+
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("irc = "))
+            .expect("the workspace still declares the irc dependency");
+
+        assert!(
+            !line.contains("\"ctcp\""),
+            "the `ctcp` feature is enabled on the irc crate. It does not mean \
+             'understand CTCP', it means 'reply to CTCP automatically', and it \
+             would make this client disclose its real name, its version and its \
+             local time and timezone on request. See the note above it in \
+             {}.",
+            manifest.display(),
+        );
     }
 
     #[test]

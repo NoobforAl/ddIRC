@@ -172,11 +172,40 @@ pub enum IrcEvent {
     /// connection has been made. Accepting means dialling an address a
     /// stranger chose, or listening for them, and that is the user's call.
     FileOffered {
+        /// Names the offer for as long as it is worth answering. Passed back
+        /// to accept or decline it, so the UI refers to an offer the core
+        /// parsed rather than handing an address back across this boundary.
+        id: u64,
         /// Where it arrived: a channel, or the sender's nick for a direct
         /// message.
         channel: String,
         from: String,
         offer: DccOffer,
+    },
+    /// Bytes are about to move: an offer was accepted, in one direction or the
+    /// other. Carries everything a progress row needs, so nothing after it has
+    /// to repeat itself.
+    FileTransferStarted {
+        id: u64,
+        channel: String,
+        filename: String,
+        /// True when the file is arriving, false when it is leaving.
+        incoming: bool,
+        total: Option<u64>,
+    },
+    /// How far it has got. Dropped rather than queued when the UI is behind.
+    FileTransferProgress {
+        id: u64,
+        transferred: u64,
+    },
+    /// It finished, one way or the other. `error` is `None` on success, and
+    /// `path` is where an arriving file was saved.
+    FileTransferEnded {
+        id: u64,
+        channel: String,
+        filename: String,
+        path: Option<String>,
+        error: Option<String>,
     },
     Error {
         message: String,
@@ -442,13 +471,44 @@ impl From<events::IrcEvent> for IrcEvent {
                 Self::MessagesDropped { channel, count }
             }
             events::IrcEvent::FileOffered {
+                id,
                 channel,
                 from,
                 offer,
             } => Self::FileOffered {
+                id,
                 channel,
                 from,
                 offer: (*offer).into(),
+            },
+            events::IrcEvent::FileTransferStarted {
+                id,
+                channel,
+                filename,
+                incoming,
+                total,
+            } => Self::FileTransferStarted {
+                id,
+                channel,
+                filename,
+                incoming,
+                total,
+            },
+            events::IrcEvent::FileTransferProgress { id, transferred } => {
+                Self::FileTransferProgress { id, transferred }
+            }
+            events::IrcEvent::FileTransferEnded {
+                id,
+                channel,
+                filename,
+                path,
+                error,
+            } => Self::FileTransferEnded {
+                id,
+                channel,
+                filename,
+                path,
+                error,
             },
             events::IrcEvent::Error { message, fatal } => Self::Error { message, fatal },
         }

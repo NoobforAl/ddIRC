@@ -27,6 +27,19 @@ void main() {
     expect(SlashCommand.matching('zzz'), isEmpty);
   });
 
+  // /msg and /query are neighbours in the list and one keystroke apart, which
+  // is the point: they do the two halves of the same errand, and someone who
+  // wants to open a conversation without saying anything yet should find the
+  // second while reaching for the first.
+  test('/query is offered beside /msg and takes only a nick', () {
+    expect(SlashCommand.matching('q'), [SlashCommand.query]);
+    expect(SlashCommand.query.usageLine, '/query <nick>');
+    expect(
+      SlashCommand.matching('').indexOf(SlashCommand.query),
+      SlashCommand.matching('').indexOf(SlashCommand.msg) + 1,
+    );
+  });
+
   test('matching is case-insensitive, since typing /JOIN is not an error', () {
     expect(SlashCommand.matching('JO'), [SlashCommand.join]);
   });

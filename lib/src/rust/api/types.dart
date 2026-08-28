@@ -257,12 +257,46 @@ sealed class IrcEvent with _$IrcEvent {
   /// connection has been made. Accepting means dialling an address a
   /// stranger chose, or listening for them, and that is the user's call.
   const factory IrcEvent.fileOffered({
+    /// Names the offer for as long as it is worth answering. Passed back
+    /// to accept or decline it, so the UI refers to an offer the core
+    /// parsed rather than handing an address back across this boundary.
+    required BigInt id,
+
     /// Where it arrived: a channel, or the sender's nick for a direct
     /// message.
     required String channel,
     required String from,
     required DccOffer offer,
   }) = IrcEvent_FileOffered;
+
+  /// Bytes are about to move: an offer was accepted, in one direction or the
+  /// other. Carries everything a progress row needs, so nothing after it has
+  /// to repeat itself.
+  const factory IrcEvent.fileTransferStarted({
+    required BigInt id,
+    required String channel,
+    required String filename,
+
+    /// True when the file is arriving, false when it is leaving.
+    required bool incoming,
+    BigInt? total,
+  }) = IrcEvent_FileTransferStarted;
+
+  /// How far it has got. Dropped rather than queued when the UI is behind.
+  const factory IrcEvent.fileTransferProgress({
+    required BigInt id,
+    required BigInt transferred,
+  }) = IrcEvent_FileTransferProgress;
+
+  /// It finished, one way or the other. `error` is `None` on success, and
+  /// `path` is where an arriving file was saved.
+  const factory IrcEvent.fileTransferEnded({
+    required BigInt id,
+    required String channel,
+    required String filename,
+    String? path,
+    String? error,
+  }) = IrcEvent_FileTransferEnded;
   const factory IrcEvent.error({required String message, required bool fatal}) =
       IrcEvent_Error;
 }

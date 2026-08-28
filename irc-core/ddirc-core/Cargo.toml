@@ -11,7 +11,9 @@ crate-type = ["cdylib", "staticlib", "lib"]
 
 [dependencies]
 irc.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
+# `net`, `io-util` and `fs` are for DCC transfers: their own sockets, and
+# streaming a file to or from one without holding it all in memory.
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util", "fs"] }
 futures-util.workspace = true
 thiserror.workspace = true
 tokio-socks.workspace = true

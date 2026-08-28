@@ -21,11 +21,28 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "dev.ddirc.ddirc"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // API 29, Android 10, pinned rather than left to flutter.minSdkVersion,
+        // which is whatever the installed Flutter happens to default to and so
+        // moves under the project without a commit.
+        //
+        // 29 because two things this app relies on begin there:
+        //
+        //  - `android:foregroundServiceType`, which ConnectionService declares
+        //    in the manifest, is an API 29 attribute. Older Android ignores it,
+        //    which means staying connected in the background — the entire point
+        //    of that service — is not something this app can honestly claim to
+        //    support below 29.
+        //  - TLS 1.3 is enabled by default from Android 10. Every connection
+        //    this client is meant to make is a TLS one, and the platform's own
+        //    stack is what makes it.
+        //
+        // Raising it again wants the same treatment: a reason, written here,
+        // that someone can weigh against the devices it excludes.
+        //
+        // `rust_builder/android/build.gradle` sets the same floor for the
+        // native library. The two have to agree.
+        minSdk = 29
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

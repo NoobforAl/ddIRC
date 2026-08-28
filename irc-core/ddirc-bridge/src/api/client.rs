@@ -209,6 +209,43 @@ pub fn set_topic(id: u64, channel: String, topic: String) -> Result<(), String> 
     send(id, ClientCommand::SetTopic { channel, topic })
 }
 
+/// Offer a file to someone, over DCC.
+///
+/// `path` is read by the core, so the bytes never cross this boundary: a file
+/// is streamed from disk to the socket, and a large one costs no more memory
+/// than a small one.
+///
+/// Fails immediately, as a `FileTransferEnded` event carrying a reason, if a
+/// proxy is configured — a normal DCC offer names the address the proxy exists
+/// to hide, and there is no safe way to make one from behind Tor. See
+/// `dcc::transfer`.
+pub fn send_file(id: u64, target: String, path: String) -> Result<(), String> {
+    send(id, ClientCommand::SendFile { target, path })
+}
+
+/// Take up an offer, saving it into `directory`.
+///
+/// `transfer_id` is the id the offer arrived with. Deliberately not the offer
+/// itself: the core answers offers it parsed, so nothing the sender wrote can
+/// be handed back to it as an address to dial.
+pub fn accept_file(id: u64, transfer_id: u64, directory: String) -> Result<(), String> {
+    send(
+        id,
+        ClientCommand::AcceptFile {
+            id: transfer_id,
+            directory,
+        },
+    )
+}
+
+/// Stop a running transfer, or decline an offer that never started.
+///
+/// Declining is silent: nothing was ever sent to whoever offered, which is
+/// what "reported, never answered" buys.
+pub fn cancel_transfer(id: u64, transfer_id: u64) -> Result<(), String> {
+    send(id, ClientCommand::CancelTransfer { id: transfer_id })
+}
+
 /// Stop waiting out the reconnect backoff and try again now.
 ///
 /// Does nothing unless the connection is actually waiting, so it is safe to

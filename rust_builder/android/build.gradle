@@ -45,7 +45,13 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 19
+        // Matches `minSdk` in android/app/build.gradle.kts, which carries the
+        // reasoning for 29. It has to be set here too and not only there:
+        // cargokit reads this module's value (plugin.gradle) to pick the NDK
+        // API level the Rust library is compiled against, so leaving 19 would
+        // build the native half for a platform the Kotlin half refuses to
+        // install on.
+        minSdkVersion 29
     }
 }
 

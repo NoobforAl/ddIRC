@@ -17,8 +17,8 @@
 //! paid once at build time rather than every launch.
 //!
 //! It is a large dependency and that should be said plainly: a little over
-//! five hundred crates, and a few megabytes of binary. See `TODO.md` for the
-//! measurements.
+//! five hundred crates, and a few megabytes of binary. The README's layout
+//! section says what that buys and why this crate is kept behind its own door.
 //!
 //! # Why it still speaks SOCKS to us
 //!

@@ -48,12 +48,12 @@ class _FileTransferSectionState extends State<FileTransferSection> {
       beta: true,
       children: [
         SettingsSwitch(
-          label: 'Allow files to be offered to you',
+          label: 'File transfers',
           description:
               'IRC sends files over a direct connection between the two '
               'clients, not through the server. Off, offers are not shown at '
-              'all. On, an offer appears as a line saying who offered what — '
-              'and stops there, because accepting is not built yet.',
+              'all and there is no way to send one. On, you can accept what '
+              'is offered to you and attach a file of your own.',
           value: on,
           onChanged: (v) => _set(settings, v),
         ),
@@ -63,8 +63,12 @@ class _FileTransferSectionState extends State<FileTransferSection> {
           // whether an offer is *displayed*; the rest of what it will mean is
           // in the dialog that turned it on.
           const SettingsReadout(
-            label: 'Accepting',
-            value: 'Not built yet — an offer is shown, never answered',
+            label: 'Received files',
+            value: 'Saved inside ddIRC, not in your Downloads folder',
+          ),
+          const SettingsReadout(
+            label: 'Sending',
+            value: 'The offer carries your address — you are asked each time',
           ),
           SettingsReadout(
             label: 'Filenames',
@@ -75,11 +79,11 @@ class _FileTransferSectionState extends State<FileTransferSection> {
           if (proxies.overridesProfiles)
             const SettingsNote(
               text:
-                  'Built-in Tor is on. A file transfer is a direct connection '
-                  'and does not go through it, so accepting one would show '
-                  'the sender your address. Sending is not built yet; when it '
-                  'is, this is the case it has to answer.',
-              isError: true,
+                  'Built-in Tor is on, and file transfers follow it. Accepting '
+                  'an offer dials the sender through the proxy, so it is your '
+                  'exit that reaches them and not you. Sending is refused '
+                  'while a proxy is on, because an offer has to name an '
+                  'address and there is no honest one to give.',
             ),
         ],
       ],
@@ -105,16 +109,16 @@ class _RiskDialog extends StatelessWidget {
 
   static const _risks = [
     (
-      'Your address is exposed',
-      'A transfer is a direct connection between the two machines. Whoever '
-          'is at the other end learns your IP address, and so does anyone '
-          'who can see their traffic.',
+      'Sending gives away where you are',
+      'An offer has to name an address for the other client to dial, and on '
+          'a channel everyone present sees it. You are asked before every '
+          'send, and told who will learn it.',
     ),
     (
       'You connect to an address a stranger chose',
-      'Accepting means dialling the host and port in their message. That '
-          'part is not built yet, so nothing here will do it today — but it '
-          'is what accepting will be when it is.',
+      'Accepting means dialling the host and port in their message. Nothing '
+          'is dialled until you press Accept, and declining sends nothing at '
+          'all — so an offer you ignore tells them nothing.',
     ),
     (
       'The file is not checked',
@@ -122,9 +126,11 @@ class _RiskDialog extends StatelessWidget {
           'not facts. A file that says it is a 4 KB image may be neither.',
     ),
     (
-      'It does not go through Tor or your proxy',
-      'Those cover connections to IRC servers. A direct transfer is not one, '
-          'so it travels outside them.',
+      'With no proxy, it is a direct connection',
+      'Whoever is at the other end learns your address, and so does anyone '
+          'who can see their traffic. With a proxy or Tor configured a '
+          'transfer follows it instead, and sending is refused rather than '
+          'quietly going around it.',
     ),
   ];
 

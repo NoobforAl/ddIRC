@@ -117,6 +117,42 @@ Off by default. SOCKS5 only, and every property below is a deliberate one.
   anything about a person, and removing them would alter what the recipient
   sees.
 
+### File transfers
+
+Off by default. With the setting off, no offer is shown and there is no way to
+send one.
+
+- **A DCC offer carries an address, and that is stated rather than hidden.**
+  Sending asks every time, names who will learn the address, and says plainly
+  that offering to a channel tells everyone in it. The dialog cannot be
+  suppressed, because the property it reports never stops being true.
+- **A transfer discloses no more than the connection that negotiated it.** With
+  a proxy configured, an incoming offer is dialled *through* the proxy, and
+  anything that would require us to listen — an incoming reverse offer, or
+  sending at all — is **refused with a reason**. There is no direct-connection
+  fallback anywhere on this path, for the same reason there is none on the IRC
+  path: a fallback is what would defeat the proxy at the moment it mattered.
+- **Declining is silent.** Nothing is sent back, so a stranger fishing for a
+  live client learns nothing from being refused.
+- **The UI never hands an address back to the core.** An offer is accepted by
+  the id it was announced with, so the only addresses ever dialled are ones the
+  core parsed itself.
+- **Nothing is overwritten.** A name already taken is an error. Incoming files
+  are written under a `.part` name and renamed only once whole, so a failed
+  transfer cannot be mistaken for the file it was going to be, and filenames go
+  through `safe_filename` so a sender cannot escape the directory.
+- **Received files land in app-private storage**, beside the logs — not the
+  system Downloads folder. A file somebody else chose does not belong among the
+  ones the user fetched themselves, and on Android shared storage is readable
+  by anything holding the storage permission.
+- **The size in an offer is the sender's claim.** The 4 GB ceiling is enforced
+  against the bytes that actually arrive, so an understated size cannot become
+  permission to fill a disk.
+- Sending runs the file through the metadata stripper above first, and the
+  confirmation reports what was actually removed from *that* file. A cleaned
+  copy that cannot be written means the send is refused, never that the
+  original goes instead.
+
 ### Untrusted server data
 
 - **Control codes are stripped in Rust, not Dart.** `text/format.rs` parses mIRC
@@ -148,11 +184,63 @@ Off by default. SOCKS5 only, and every property below is a deliberate one.
 - Nicknames containing whitespace or control characters are **rejected at config
   validation**, closing the same injection vector during registration.
 
+### Unsolicited messages
+
+Anyone on IRC can message anyone. A first message from a nick with no
+conversation is therefore treated as a **request**: it is stored and shown, but
+it opens no tab, never takes the screen, and the composer is replaced by
+*Accept* and *Decline* until it is answered.
+
+The reason the composer is shut rather than merely discouraged is that **any**
+reply — including a refusal — confirms a live client on the other end, which is
+most of what an unsolicited message is fishing for. Declining sends nothing.
+
+Declining blocks that nick on that network. The check runs in
+`SessionModel._onEvent` before anything else, so a blocked message never reaches
+a conversation, an unread count, or a log file — a block that left a trace would
+be one the user has to tidy up after. Blocks are per profile and folded to lower
+case, because IRC nicks are case-insensitive and a block `Alice` could step
+around by capitalising is not a block.
+
+### Notifications
+
+A notification is drawn by the operating system, may persist on a lock screen,
+and cannot be taken back once shown. So what it is allowed to say is a privacy
+decision, not a presentation one.
+
+- **Sender and network only, by default.** The message text is behind a setting
+  that is **off**, matching how chat logs are treated: content the app cannot
+  retrieve is not written anywhere without being asked for.
+- **Never a stranger's words.** A request from an unaccepted nick shows only
+  that they want to message you, even with the preview setting on. Otherwise an
+  unsolicited message would be read on the lock screen regardless of the answer.
+- **Never ordinary channel traffic.** Only a direct message or a mention of the
+  nickname; a per-conversation level can narrow that further but never widen it.
+- Nothing is sent anywhere to make one. Both paths are local — the platform's
+  own API on desktop, and `MainActivity`'s own `NotificationManager` on Android.
+  There is no push service, no token, and no third party involved.
+
 ### CTCP
 
 Only `ACTION` is treated as chat. Every other CTCP request — `VERSION`, `TIME`,
-`PING`, `FINGER` — is **ignored rather than answered**. Replying would leak
-client version, platform, and local timezone to anyone who asks.
+`PING`, `FINGER`, `SOURCE`, `USERINFO` — is **ignored rather than answered**.
+Replying would leak client version, platform, and local timezone to anyone who
+asks.
+
+`DCC SEND` is the one request that is recognised, and recognising it is not
+answering it: an offer becomes an event for the user to decide about. Nothing is
+sent back and no connection is made.
+
+This holds in two places, and it has to hold in both. Our own handler
+(`conn::actor::on_ctcp`) drops everything else in silence — but the `irc` crate
+underneath has a `ctcp` feature which, when enabled, answers CTCP *itself* from
+inside `ClientStream::poll_next`, using its own sender, before our code is
+reached. It was enabled, and it was replying: `FINGER` with the real name and
+username, `VERSION` with the crate's version string, and `TIME` with
+`Local::now()` in RFC 2822 — the machine's wall clock and its UTC offset, handed
+to anyone who sent a `PRIVMSG`. The feature is now off, nothing in this
+workspace needs it, and a test asserts it stays off, because the leak lives
+below the layer the behavioural tests can see.
 
 ### Rate limiting
 

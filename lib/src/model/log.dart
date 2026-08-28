@@ -35,7 +35,13 @@ class AppLog {
 
   /// Rotated at this size, keeping one previous file. Chat logs grow without
   /// any natural bound, and a log that quietly eats a disk is a bug of its own.
-  static const _maxBytes = 5 * 1024 * 1024;
+  ///
+  /// Fixed at 10 MB rather than offered as a setting. A size limit is not a
+  /// preference — nobody opens a settings screen wanting to choose one — and
+  /// the number only has to be large enough to hold a useful amount of history
+  /// and small enough that two of them cannot matter on any disk this app runs
+  /// on. With one rotated copy kept, the ceiling for each log is twice this.
+  static const maxLogBytes = 10 * 1024 * 1024;
 
   Directory? _directory;
   final _pending = <_Target, StringBuffer>{};
@@ -177,7 +183,7 @@ class AppLog {
       final file = File(
         '${directory.path}${Platform.pathSeparator}${target.filename}',
       );
-      if (await file.exists() && await file.length() > _maxBytes) {
+      if (await file.exists() && await file.length() > maxLogBytes) {
         // One generation kept. Two files with a known ceiling is a bound the
         // user can reason about; an ever-growing numbered series is not.
         final previous = File('${file.path}.1');

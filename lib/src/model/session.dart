@@ -7,7 +7,9 @@ import 'package:flutter/scheduler.dart';
 import '../rust/api/client.dart' as core;
 import '../rust/api/types.dart';
 import 'log.dart';
+import 'notice.dart';
 import 'settings.dart';
+import 'transfer.dart';
 
 /// How many lines to retain per conversation.
 ///
@@ -43,14 +45,35 @@ class ChatLine {
 
 /// A channel or a direct message, with its own scrollback and unread count.
 class Conversation {
-  Conversation({required this.name, required this.isChannel});
+  Conversation({
+    required this.name,
+    required this.isChannel,
+    this.pending = false,
+  });
 
   final String name;
   final bool isChannel;
 
+  /// A first message from someone we have never spoken to, not yet answered
+  /// for.
+  ///
+  /// It is a real conversation with real lines in it — the message has already
+  /// arrived and pretending otherwise would mean losing it — but it has not
+  /// been let in: no tab, never made active on its own, and the composer stays
+  /// shut until it is accepted. On IRC anyone can message anyone, so an inbox
+  /// that opens itself on demand is a thing other people control.
+  bool pending;
+
   final List<ChatLine> lines = [];
   List<MemberView> members = const [];
   String? topic;
+
+  /// Offers waiting to be answered, and transfers in flight.
+  ///
+  /// Held apart from [lines] because they are not lines: they change while you
+  /// look at them, and the scrollback is a record of what was said. Only the
+  /// outcome of a transfer becomes a line, once it has stopped moving.
+  final List<FileTransfer> transfers = [];
 
   /// Messages since this conversation was last looked at.
   int unread = 0;
@@ -162,6 +185,7 @@ class Conversation {
 enum SlashCommand {
   join('join', '<#channel>', 'Join a channel'),
   msg('msg', '<nick> <message>', 'Send someone a private message'),
+  query('query', '<nick>', 'Open a conversation with someone, saying nothing'),
   me('me', '<action>', 'Say what you are doing, in the third person'),
   nick('nick', '<nickname>', 'Change your nickname'),
   topic('topic', '<text>', 'Set the topic of this channel'),
@@ -202,7 +226,24 @@ class SessionModel extends ChangeNotifier {
     required this.profileId,
     required this.config,
     required this.settings,
+    this.onLine,
+    this.onRead,
   }) : _nick = config.nickname;
+
+  /// Called for every line filed into a conversation, if anyone is listening.
+  ///
+  /// Injected rather than reached for, like [settings] beside it, so this class
+  /// stays testable without a window, a platform or a notification service —
+  /// and so that nothing about whether the app is in front leaks down here.
+  final void Function(Conversation, ChatLine)? onLine;
+
+  /// Called when a conversation is opened, and so has been seen.
+  ///
+  /// The counterpart to [onLine], and the reason it exists separately: a
+  /// notification that has been acted on should stop asking. Reading a message
+  /// on the desktop while the phone is in a pocket is exactly the case where
+  /// one screen has to take back what another is still showing.
+  final void Function(Conversation)? onRead;
 
   final BigInt connectionId;
 
@@ -233,14 +274,48 @@ class SessionModel extends ChangeNotifier {
 
   String _nick;
   String? _active;
+
+  /// The one thing the app is currently telling the user, if any.
+  ///
+  /// On the model rather than on the screen, because the things worth saying
+  /// no longer all originate from a button press: a transfer fails minutes
+  /// after it was started, and a screen-local `String? _error` had nowhere for
+  /// that to arrive.
+  Notice? _notice;
+
+  /// Clears [_notice] once it has been up long enough. Held so it can be
+  /// cancelled — by the next notice, by a dismissal, or by disposal.
+  Timer? _noticeTimer;
   String? _network;
   ConnectionStatus _status = const ConnectionStatus.connecting();
+
+  /// Why the connection is in the state it is, when the core said.
+  ///
+  /// Kept because "Disconnected" on its own stopped being enough the moment
+  /// the core learned to give up: a connection that has stopped trying has to
+  /// say what went wrong, or the user is looking at a retry button with no
+  /// idea whether pressing it can possibly help.
+  String? _statusDetail;
   AuthOutcome? _auth;
   StreamSubscription<IrcEvent>? _subscription;
 
   String get nick => _nick;
   String? get network => _network;
   ConnectionStatus get status => _status;
+
+  /// The reason behind [status], if there was one.
+  String? get statusDetail => _statusDetail;
+
+  /// Whether this connection goes through a proxy.
+  ///
+  /// Read by the transfer rows, because it changes what an offer can do: a
+  /// reverse offer asks us to listen, listening means disclosing an address,
+  /// and the core refuses that behind a proxy. Better to say so on the row
+  /// than to offer an Accept button whose only outcome is a refusal.
+  bool get usesProxy => config.proxy != null;
+
+  /// What to show above the composer, or null for nothing.
+  Notice? get notice => _notice;
   AuthOutcome? get auth => _auth;
 
   /// Conversations in the order they were opened.
@@ -328,6 +403,7 @@ class SessionModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _noticeTimer?.cancel();
     _subscription?.cancel();
     core.disconnect(id: connectionId, reason: 'ddIRC');
     super.dispose();
@@ -337,15 +413,28 @@ class SessionModel extends ChangeNotifier {
   /// one channel, and the server may use either casing at different times.
   String _key(String name) => name.toLowerCase();
 
-  Conversation _conversationFor(String name, {required bool isChannel}) {
+  Conversation _conversationFor(
+    String name, {
+    required bool isChannel,
+    bool pending = false,
+  }) {
     final key = _key(name);
     final existing = _conversations[key];
     if (existing != null) return existing;
 
-    final created = Conversation(name: name, isChannel: isChannel);
+    final created = Conversation(
+      name: name,
+      isChannel: isChannel,
+      pending: pending,
+    );
     _conversations[key] = created;
     _order.add(key);
     _invalidateLists();
+    // A request does neither of the two things below. Both are courtesies to
+    // somewhere the user chose to be, and being messaged by a stranger is not
+    // a choice they made — a tab opening and the screen changing under them is
+    // exactly the control this is taking back.
+    if (pending) return created;
     // Arriving somewhere opens it. A channel joined from /join or from the
     // profile's autojoin list that did not appear in the strip would be
     // invisible until the user went looking for it in the list.
@@ -355,6 +444,86 @@ class SessionModel extends ChangeNotifier {
     _active ??= key;
     return created;
   }
+
+  /// Open a conversation with a person, without sending them anything.
+  ///
+  /// The counterpart to `/msg`, which only opens one as a side effect of
+  /// saying something. Deciding to talk to someone and deciding what to say
+  /// are two acts, and there is no reason the first should require the second.
+  void openDirect(String nick) {
+    final trimmed = nick.trim();
+    if (trimmed.isEmpty) return;
+    // Choosing to talk to someone answers, in advance, the question a request
+    // would have asked — and unblocks them if they had been turned away
+    // before. Without this, opening a conversation with a blocked nick would
+    // give an empty room where nothing they said ever arrived, which is a
+    // worse answer than either blocking or not.
+    settings.accept(profileId, trimmed);
+    final conversation = _conversationFor(trimmed, isChannel: false);
+    conversation.pending = false;
+    select(trimmed);
+  }
+
+  /// Let a stranger in.
+  void acceptDirect(String nick) {
+    final conversation = _conversations[_key(nick)];
+    if (conversation == null || !conversation.pending) return;
+    _accept(conversation);
+  }
+
+  void _accept(Conversation conversation) {
+    conversation.pending = false;
+    settings.accept(profileId, conversation.name);
+    select(conversation.name);
+  }
+
+  /// Turn a stranger away, and stop being asked about them.
+  ///
+  /// The conversation goes rather than sitting in the list as a decision the
+  /// user has already made. Blocking is what makes declining mean something:
+  /// without it the same person simply asks again, and a refusal you have to
+  /// repeat is not a refusal.
+  void declineDirect(String nick) {
+    final conversation = _conversations[_key(nick)];
+    if (conversation == null || !conversation.pending) return;
+    settings.block(profileId, conversation.name);
+    // Answered, so anything still asking about it should stop. Declining is as
+    // much a decision as accepting, and a notification left behind would go on
+    // demanding one that has already been made.
+    onRead?.call(conversation);
+    _close(conversation.name);
+    notifyListeners();
+  }
+
+  /// Say something to the user. Replaces whatever was there.
+  ///
+  /// One at a time, deliberately: a stack of notices above the composer is a
+  /// wall nobody reads, and the most recent is almost always the relevant one.
+  void raiseNotice(Notice? notice) {
+    // Restarted even for an identical notice, because the same failure
+    // happening twice is news the second time and should get its full ten
+    // seconds rather than inheriting whatever was left of the first.
+    _noticeTimer?.cancel();
+    _noticeTimer = null;
+
+    final changed = _notice != notice;
+    _notice = notice;
+
+    if (notice != null) {
+      _noticeTimer = Timer(noticeLifetime, () {
+        _noticeTimer = null;
+        // Guarded: the session may have been disposed while this was pending,
+        // and notifying listeners after that throws.
+        if (_disposed) return;
+        _notice = null;
+        notifyListeners();
+      });
+    }
+
+    if (changed) notifyListeners();
+  }
+
+  void dismissNotice() => raiseNotice(null);
 
   void select(String name) {
     final key = _key(name);
@@ -366,7 +535,9 @@ class SessionModel extends ChangeNotifier {
       _invalidateLists();
     }
     _active = key;
-    _conversations[key]!.markRead();
+    final conversation = _conversations[key]!;
+    conversation.markRead();
+    onRead?.call(conversation);
     notifyListeners();
   }
 
@@ -388,14 +559,29 @@ class SessionModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _addLine(String name, ChatLine line, {required bool isChannel}) {
-    final conversation = _conversationFor(name, isChannel: isChannel);
+  void _addLine(
+    String name,
+    ChatLine line, {
+    required bool isChannel,
+    bool pending = false,
+  }) {
+    final conversation = _conversationFor(
+      name,
+      isChannel: isChannel,
+      pending: pending,
+    );
     conversation.add(
       line,
       active: _key(name) == _active,
       notify: settings.notifyFor(profileId, name),
     );
     _log(name, line);
+    // Handed on with the conversation it landed in, so whoever is listening
+    // can see whether it is a request, whether it is the one on screen, and
+    // what the network is called. Deciding whether it is worth interrupting
+    // someone for needs to know whether the app is even in front, which is not
+    // something a session can answer.
+    onLine?.call(conversation, line);
   }
 
   /// Mirror a line into the chat log, if one is being kept.
@@ -442,6 +628,7 @@ class SessionModel extends ChangeNotifier {
     switch (event) {
       case IrcEvent_Status(:final status, :final detail):
         _status = status;
+        _statusDetail = detail;
         final described = _describeStatus(status, detail);
         _addToActive(described);
         // The debug log's whole job: the sequence of connection states, and
@@ -466,7 +653,28 @@ class SessionModel extends ChangeNotifier {
           Target_Channel(:final name) => (name, true),
           Target_Direct(:final nick) => (nick, false),
         };
-        _addLine(name, ChatLine.message(message, now), isChannel: isChannel);
+        // A blocked nick is dropped here, before anything: no conversation, no
+        // unread count, no line in a log. Filtering later would mean the
+        // message still landed somewhere, and a block that leaves a trace is a
+        // block the user has to tidy up after.
+        if (!isChannel &&
+            !message.isSelf &&
+            settings.isBlocked(profileId, name)) {
+          return;
+        }
+        _addLine(
+          name,
+          ChatLine.message(message, now),
+          isChannel: isChannel,
+          // Only a stranger's opening line: someone with a conversation
+          // already, someone previously accepted, and our own echo are all
+          // people we have decided about. `_conversationFor` ignores this once
+          // the conversation exists, so it is only ever read on the first one.
+          pending:
+              !isChannel &&
+              !message.isSelf &&
+              !settings.isAccepted(profileId, name),
+        );
 
       case IrcEvent_Joined(:final channel, :final nick, :final isSelf):
         _addLine(
@@ -583,7 +791,12 @@ class SessionModel extends ChangeNotifier {
           );
         }
 
-      case IrcEvent_FileOffered(:final channel, :final from, :final offer):
+      case IrcEvent_FileOffered(
+        :final id,
+        :final channel,
+        :final from,
+        :final offer,
+      ):
         // Nothing has happened: the core reports an offer and never answers
         // one, so no connection exists and nothing has been sent back.
         //
@@ -602,10 +815,105 @@ class SessionModel extends ChangeNotifier {
           ),
           isChannel: _looksLikeChannel(channel),
         );
+        // The line above is the record; this is the thing with buttons on it.
+        // Both, because the line survives the decision and the row does not.
+        _conversationFor(
+          channel,
+          isChannel: _looksLikeChannel(channel),
+        ).transfers.add(
+          FileTransfer.offered(
+            id: id,
+            filename: offer.filename,
+            from: from,
+            total: offer.size,
+            isReverse: offer.port == null,
+          ),
+        );
 
-      case IrcEvent_Error(:final message):
+      case IrcEvent_FileTransferStarted(
+        :final id,
+        :final channel,
+        :final filename,
+        :final incoming,
+        :final total,
+      ):
+        final conversation = _conversationFor(
+          channel,
+          isChannel: _looksLikeChannel(channel),
+        );
+        // An accepted offer becomes the transfer it turned into rather than
+        // sitting beside it, so the row never shows both a decision already
+        // made and the thing it decided.
+        conversation.transfers.removeWhere((t) => t.id == id);
+        conversation.transfers.add(
+          FileTransfer.running(
+            id: id,
+            filename: filename,
+            incoming: incoming,
+            total: total,
+          ),
+        );
+
+      case IrcEvent_FileTransferProgress(:final id, :final transferred):
+        // Carries no channel — it is only ever read against a transfer that
+        // was already placed when it started. Searching every conversation is
+        // cheap next to the alternative of a name to keep in step.
+        for (final conversation in _conversations.values) {
+          for (final transfer in conversation.transfers) {
+            if (transfer.id == id) {
+              transfer.transferred = transferred;
+              break;
+            }
+          }
+        }
+
+      case IrcEvent_FileTransferEnded(
+        :final id,
+        :final channel,
+        :final filename,
+        :final path,
+        :final error,
+      ):
+        final conversation = _conversationFor(
+          channel,
+          isChannel: _looksLikeChannel(channel),
+        );
+        conversation.transfers.removeWhere((t) => t.id == id);
+        // Two places, because they answer different questions. The line is the
+        // record and will still make sense next week; the notice is the alert,
+        // and without it a transfer that failed after two minutes would be a
+        // muted grey line indistinguishable from someone joining.
+        raiseNotice(
+          noticeForTransfer(filename: filename, path: path, error: error),
+        );
+        // Now it is over it becomes a line, which is where something that has
+        // stopped changing belongs — and where it will still make sense later.
+        _addLine(
+          channel,
+          ChatLine.system(
+            FileTransfer.describeOutcome(
+              filename: filename,
+              path: path,
+              error: error,
+            ),
+            now,
+            SystemKind.connection,
+          ),
+          isChannel: _looksLikeChannel(channel),
+        );
+
+      case IrcEvent_Error(:final message, :final fatal):
         _addToActive('error: $message');
         AppLog.instance.debug('[${_network ?? config.host}] error: $message');
+        // Raised as well as logged. A server error used to be a muted grey
+        // line in the scrollback, which is where it belongs as a record and
+        // exactly the wrong place for it as an alert — being told the nick is
+        // taken should not look like someone joining.
+        raiseNotice(
+          fatal
+              ? Notice.error(message, detail: 'The connection cannot continue.')
+              : Notice.error(message),
+        );
     }
     _queueNotify();
   }
@@ -627,22 +935,14 @@ class SessionModel extends ChangeNotifier {
   /// times larger should not be able to say it was never warned about.
   String _describeOffer(String from, DccOffer offer) {
     final size = offer.size;
-    final howBig = size == null ? '' : ', says it is ${_bytes(size)}';
+    // The one byte formatter, shared with the transfer rows. Two of them
+    // meant the same file could be "2 KB" in the scrollback and "2.0 KB" in
+    // the row above it, which is the kind of difference that looks like a bug
+    // in the numbers rather than in the formatting.
+    final howBig = size == null
+        ? ''
+        : ', says it is ${FileTransfer.describeSize(size)}';
     return '$from offered you "${offer.filename}"$howBig';
-  }
-
-  /// Bytes, in the unit a person would use.
-  static String _bytes(BigInt count) {
-    const kb = 1024.0;
-    const mb = kb * 1024;
-    const gb = mb * 1024;
-    final n = count.toDouble();
-    return switch (n) {
-      < kb => '$count B',
-      < mb => '${(n / kb).toStringAsFixed(0)} KB',
-      < gb => '${(n / mb).toStringAsFixed(1)} MB',
-      _ => '${(n / gb).toStringAsFixed(1)} GB',
-    };
   }
 
   /// Leaving for real: the conversation is gone, so its tab goes with it.
@@ -696,6 +996,32 @@ class SessionModel extends ChangeNotifier {
         core.setTopic(id: connectionId, channel: channel, topic: topic.trim()),
   );
 
+  /// Offer a file to whoever this conversation is with.
+  ///
+  /// The path goes to the core, which reads it: the bytes never come back
+  /// through Dart, so sending a large file costs no more memory than a small
+  /// one. What comes back is a stream of progress events.
+  Future<String?> sendFile(String target, String path) =>
+      _run(() => core.sendFile(id: connectionId, target: target, path: path));
+
+  /// Take up an offer, saving it into [directory].
+  Future<String?> acceptTransfer(BigInt id, String directory) => _run(
+    () =>
+        core.acceptFile(id: connectionId, transferId: id, directory: directory),
+  );
+
+  /// Stop a transfer, or turn down an offer.
+  ///
+  /// Declining is silent — nothing is sent to whoever offered — so this is
+  /// also how an offer is dismissed without answering it.
+  Future<String?> cancelTransfer(BigInt id) {
+    for (final conversation in _conversations.values) {
+      conversation.transfers.removeWhere((t) => t.id == id);
+    }
+    notifyListeners();
+    return _run(() => core.cancelTransfer(id: connectionId, transferId: id));
+  }
+
   /// Leave a channel. The conversation closes when the server confirms.
   Future<String?> leave(String channel, {String? reason}) => _run(
     () => core.part_(
@@ -725,6 +1051,11 @@ class SessionModel extends ChangeNotifier {
     if (!text.startsWith('/')) {
       final target = active;
       if (target == null) return 'not in a channel';
+      // The composer is disabled while a request is unanswered, so this is the
+      // backstop rather than the gate. Answering someone you have not let in
+      // would decide the question by accident, and it would tell them you are
+      // there — which is most of what an unsolicited message is fishing for.
+      if (target.pending) return 'accept the request first';
       await core.sendMessage(id: connectionId, target: target.name, text: text);
       return null;
     }
@@ -781,11 +1112,28 @@ class SessionModel extends ChangeNotifier {
         case SlashCommand.msg:
           final gap = argument.indexOf(' ');
           if (gap == -1) return usage();
+          final target = argument.substring(0, gap);
+          // Saying something to someone is deciding about them, exactly as
+          // `/query` is. Without this, messaging a blocked nick would send
+          // fine and their reply would vanish.
+          if (!_looksLikeChannel(target)) {
+            settings.accept(profileId, target);
+          }
           await core.sendMessage(
             id: connectionId,
-            target: argument.substring(0, gap),
+            target: target,
             text: argument.substring(gap + 1),
           );
+        case SlashCommand.query:
+          if (argument.isEmpty) return usage();
+          // A nick, not a channel: `/query #chat` is someone reaching for
+          // `/join` and would otherwise open a conversation with a channel
+          // name, which the server would answer by ignoring us.
+          final nick = argument.split(' ').first;
+          if (_looksLikeChannel(nick)) {
+            return '$nick is a channel — use /join';
+          }
+          openDirect(nick);
       }
     } catch (e) {
       return '$e';

@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ddirc/src/rust/api/types.dart';
 import 'package:ddirc/src/theme.dart';
 import 'package:ddirc/src/ui/member_list.dart';
+import 'package:ddirc/src/ui/touchable.dart';
 
 MemberView _member(String nick, {bool away = false}) =>
     // The key the core would have given an unprivileged member: rank first,
@@ -97,5 +98,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('grace'), findsNothing);
     expect(find.text('1 member'), findsOneWidget);
+  });
+
+  // The whole reason to know who is in a channel is to be able to say
+  // something to one of them. Before this the roster was a list you could only
+  // read: no tap handler existed anywhere in it.
+  testWidgets('tapping a nick asks to open a conversation with them', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: Tokens.themeFor(Tokens.dark),
+        home: Scaffold(
+          body: MemberList(
+            members: [_member('ada'), _member('grace')],
+            onOpenDirect: opened.add,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('grace'));
+    await tester.pump();
+
+    // The nick that was tapped, not the one that happened to be first.
+    expect(opened, ['grace']);
+  });
+
+  testWidgets('a roster with nowhere to go does not pretend to be tappable', (
+    tester,
+  ) async {
+    await _pump(tester, ['ada']);
+    await tester.pumpAndSettle();
+
+    // `Touchable` reports `Touch.none` and refuses hover when it has no
+    // action, so a list built without a handler cannot light up under the
+    // pointer as though it were about to do something.
+    final touchable = tester.widget<Touchable>(
+      find
+          .ancestor(of: find.text('ada'), matching: find.byType(Touchable))
+          .first,
+    );
+    expect(touchable.onTap, isNull);
   });
 }

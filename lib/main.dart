@@ -20,6 +20,7 @@ import 'src/rust/frb_generated.dart';
 import 'src/theme.dart';
 import 'src/ui/background.dart';
 import 'src/ui/boot_screen.dart';
+import 'src/ui/notification_router.dart';
 import 'src/ui/window_chrome.dart';
 import 'src/ui/workspace_screen.dart';
 
@@ -114,7 +115,34 @@ class _DdIrcAppState extends State<DdIrcApp> {
     profiles: widget.profiles,
     settings: widget.settings,
     proxies: widget.proxies,
+    onLine: _notifications.router.onLine,
+    onRead: _notifications.router.onRead,
   );
+
+  /// Being told about a message while ddIRC is not the thing in front.
+  ///
+  /// Declared before [_workspace] is built because the workspace hands it every
+  /// line; `late final` is what lets the two refer to each other without either
+  /// having to be constructed first.
+  late final Notifications _notifications = Notifications.create(
+    settings: widget.settings,
+    profiles: widget.profiles,
+    onOpen: _openConversation,
+  );
+
+  /// Where a tapped notification lands.
+  ///
+  /// Selects the network before the conversation, because selecting a
+  /// conversation on a session that is not the one on screen would move
+  /// something the user cannot see. A network that has since disconnected is a
+  /// tap on a notification for a conversation that no longer exists, and the
+  /// honest response is to do nothing rather than to guess at a near miss.
+  void _openConversation(String profileId, String conversation) {
+    final session = _workspace.sessionFor(profileId);
+    if (session == null) return;
+    _workspace.select(profileId);
+    session.select(conversation);
+  }
 
   /// Built once, not per build.
   ///
@@ -153,6 +181,10 @@ class _DdIrcAppState extends State<DdIrcApp> {
     // Not awaited, and nothing waits on it: this arranges what a later close
     // will do, and nothing can be closed before the first frame.
     unawaited(_background.start());
+    // Same again. Registering with the platform's notification service is not
+    // something the first frame should wait behind, and a message cannot
+    // arrive before there is a connection to carry it.
+    unawaited(_notifications.start());
   }
 
   /// Bring up the core, then start the connections that were asked for.
@@ -184,6 +216,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
   void dispose() {
     _themeMode.dispose();
     _background.dispose();
+    _notifications.dispose();
     // Closes every live connection, so quitting never leaves a socket behind.
     // Already done by the time a tray quit reaches here, and idempotent for
     // exactly that reason.

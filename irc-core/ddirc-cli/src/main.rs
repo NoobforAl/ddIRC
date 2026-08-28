@@ -298,6 +298,7 @@ fn render(event: &IrcEvent) {
             channel,
             from,
             offer,
+            ..
         } => {
             // Printed, and that is all the harness does with it — the same
             // policy the core has. Accepting means dialling an address a
@@ -333,6 +334,36 @@ fn render(event: &IrcEvent) {
         IrcEvent::MessagesDropped { count, .. } => {
             println!("-- {count} message(s) dropped by flood protection --");
         }
+        // The harness offers no files and accepts none, so these only ever
+        // arrive if something else on this connection started a transfer.
+        // Printed rather than ignored, because a silent transfer is the one
+        // thing a diagnostic tool should never allow.
+        IrcEvent::FileTransferStarted {
+            filename,
+            incoming,
+            total,
+            ..
+        } => {
+            let direction = if *incoming { "receiving" } else { "sending" };
+            let size = match total {
+                Some(bytes) => format!(", {bytes} bytes"),
+                None => String::new(),
+            };
+            println!("-- {direction} \"{filename}\"{size} --");
+        }
+        IrcEvent::FileTransferProgress { .. } => {}
+        IrcEvent::FileTransferEnded {
+            filename,
+            path,
+            error,
+            ..
+        } => match error {
+            Some(reason) => println!("-- \"{filename}\" failed: {reason} --"),
+            None => match path {
+                Some(path) => println!("-- \"{filename}\" saved to {path} --"),
+                None => println!("-- \"{filename}\" sent --"),
+            },
+        },
         IrcEvent::Error { message, fatal } => {
             let label = if *fatal { "fatal" } else { "error" };
             eprintln!("-- {label}: {message} --");

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
 import 'motion.dart';
+import 'touchable.dart';
 
 /// Channel members, ordered by privilege then name (the core sorts them).
 ///
@@ -15,10 +16,21 @@ import 'motion.dart';
 /// change than it looks — and a nick vanishing is the less startling half of
 /// the pair, with the member count moving to confirm it.
 class MemberList extends StatefulWidget {
-  const MemberList({super.key, required this.members, this.onClose});
+  const MemberList({
+    super.key,
+    required this.members,
+    this.onClose,
+    this.onOpenDirect,
+  });
 
   final List<MemberView> members;
   final VoidCallback? onClose;
+
+  /// Open a conversation with one of them.
+  ///
+  /// A roster you can only read is a list of names; the whole reason to know
+  /// who is in a channel is to be able to say something to one of them.
+  final ValueChanged<String>? onOpenDirect;
 
   @override
   State<MemberList> createState() => _MemberListState();
@@ -130,6 +142,9 @@ class _MemberListState extends State<MemberList> {
                       key: ValueKey(members[i].nick),
                       member: members[i],
                       fresh: _fresh.contains(members[i].nick),
+                      onTap: widget.onOpenDirect == null
+                          ? null
+                          : () => widget.onOpenDirect!(members[i].nick),
                     ),
                   ),
           ),
@@ -140,10 +155,16 @@ class _MemberListState extends State<MemberList> {
 }
 
 class _MemberRow extends StatelessWidget {
-  const _MemberRow({super.key, required this.member, required this.fresh});
+  const _MemberRow({
+    super.key,
+    required this.member,
+    required this.fresh,
+    this.onTap,
+  });
 
   final MemberView member;
   final bool fresh;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -157,39 +178,45 @@ class _MemberRow extends StatelessWidget {
 
     return Arrive(
       play: fresh,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        child: Row(
-          children: [
-            // A fixed gutter keeps every nick left-aligned whether or not it
-            // carries a prefix, so the column reads cleanly.
-            SizedBox(
-              width: 12,
-              child: AnimatedDefaultTextStyle(
-                duration: fade,
-                curve: Motion.curve,
-                style: TextStyle(
-                  color: away ? t.faint : t.accent,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+      child: Touchable(
+        onTap: onTap,
+        builder: (context, touch) => Container(
+          // The row's own press and hover wash, as everywhere else — the theme
+          // removes Material's ripple, so feedback has to be painted here.
+          color: t.surfaceHover.withValues(alpha: touch.wash),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Row(
+            children: [
+              // A fixed gutter keeps every nick left-aligned whether or not it
+              // carries a prefix, so the column reads cleanly.
+              SizedBox(
+                width: 12,
+                child: AnimatedDefaultTextStyle(
+                  duration: fade,
+                  curve: Motion.curve,
+                  style: TextStyle(
+                    color: away ? t.faint : t.accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  child: Text(prefix ?? ''),
                 ),
-                child: Text(prefix ?? ''),
               ),
-            ),
-            Expanded(
-              child: AnimatedDefaultTextStyle(
-                duration: fade,
-                curve: Motion.curve,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: away ? t.faint : t.text,
-                  fontSize: 13,
-                  fontStyle: away ? FontStyle.italic : FontStyle.normal,
+              Expanded(
+                child: AnimatedDefaultTextStyle(
+                  duration: fade,
+                  curve: Motion.curve,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: away ? t.faint : t.text,
+                    fontSize: 13,
+                    fontStyle: away ? FontStyle.italic : FontStyle.normal,
+                  ),
+                  child: Text(member.nick),
                 ),
-                child: Text(member.nick),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

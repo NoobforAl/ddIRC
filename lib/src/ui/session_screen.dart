@@ -1,8 +1,13 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../model/profile.dart';
+import '../model/media.dart';
+import '../model/notice.dart';
 import '../model/session.dart';
+import '../model/transfer.dart';
+import '../model/settings.dart';
 import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
@@ -12,7 +17,10 @@ import 'layout.dart';
 import 'member_list.dart';
 import 'message_view.dart';
 import 'motion.dart';
+import 'notice_bar.dart';
+import 'send_file_sheet.dart';
 import 'touchable.dart';
+import 'transfer_bar.dart';
 import 'settings/app_settings_dialog.dart';
 import 'settings/channel_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
@@ -41,7 +49,6 @@ class _SessionScreenState extends State<SessionScreen> {
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _scaffold = GlobalKey<ScaffoldState>();
-  String? _error;
 
   /// Which suggestion the keyboard is on. Always a valid index into the
   /// current matches, because the list is recomputed on every keystroke.
@@ -160,7 +167,10 @@ class _SessionScreenState extends State<SessionScreen> {
     _composer.clear();
     final error = await session.submit(text);
     if (!mounted) return;
-    setState(() => _error = error);
+    // A rejected command is the user's own typing coming back at them, so it
+    // is an error rather than a warning — but it still goes through the
+    // classifier, because `submit` also relays failures from the core.
+    session.raiseNotice(error == null ? null : noticeForFailure(error));
     // Keep the caret where the user is typing — losing focus after a command
     // means reaching for the mouse to say the next thing.
     _composerFocus.requestFocus();
@@ -171,6 +181,77 @@ class _SessionScreenState extends State<SessionScreen> {
     // Picking a channel out of the drawer is the end of that errand, so the
     // drawer closes onto what was chosen. Nothing to close when it is pinned.
     if (!context.layout.channelsPinned) Navigator.of(context).maybePop();
+  }
+
+  /// Open a conversation with someone in the roster.
+  ///
+  /// The member panel is a drawer on a narrow screen, and it closes for the
+  /// same reason the channel drawer does: picking a name is the end of that
+  /// errand, and a panel left open would cover the conversation it just
+  /// opened.
+  void _openDirect(String nick) {
+    session.openDirect(nick);
+    if (!context.layout.membersPinned) Navigator.of(context).maybePop();
+  }
+
+  /// Pick a file and offer it to whoever this conversation is with.
+  ///
+  /// Four steps, and the order matters: pick, clean, confirm, send. The
+  /// cleaning happens before the confirmation so that the dialog can say what
+  /// was actually taken out of *this* file rather than what the setting
+  /// promises in general.
+  Future<void> _attachFile() async {
+    final conversation = session.active;
+    if (conversation == null) return;
+
+    final picked = await openFile();
+    if (picked == null || !mounted) return;
+
+    final cleaner = MediaCleaner(SettingsScope.of(context));
+    final prepared = await prepareForSending(cleaner, picked.path);
+    if (!mounted) return;
+    if (prepared == null) {
+      session.raiseNotice(
+        const Notice.error(
+          'Could not read that file',
+          detail: 'It may have moved, or be open in another program.',
+        ),
+      );
+      return;
+    }
+
+    final agreed = await SendFileSheet.ask(
+      context,
+      filename: picked.name,
+      target: conversation.name,
+      cleaned: prepared.cleaned,
+      sizeBytes: prepared.size,
+    );
+    if (!agreed || !mounted) return;
+
+    final error = await session.sendFile(conversation.name, prepared.path);
+    if (!mounted) return;
+    session.raiseNotice(error == null ? null : noticeForFailure(error));
+  }
+
+  /// Take up an offer, into the app's own received-files directory.
+  ///
+  /// Not the system Downloads folder — see `receivedFilesDirectory`. A file
+  /// somebody else chose does not belong among the ones the user fetched
+  /// themselves.
+  Future<void> _acceptTransfer(FileTransfer transfer) async {
+    final String directory;
+    try {
+      directory = (await receivedFilesDirectory()).path;
+    } catch (e) {
+      if (!mounted) return;
+      session.raiseNotice(Notice.error('Nowhere to save it', detail: '$e'));
+      return;
+    }
+    if (!mounted) return;
+    final error = await session.acceptTransfer(transfer.id, directory);
+    if (!mounted) return;
+    session.raiseNotice(error == null ? null : noticeForFailure(error));
   }
 
   /// Give up on the current attempt and dial again immediately.
@@ -225,6 +306,7 @@ class _SessionScreenState extends State<SessionScreen> {
             onClose: layout.membersPinned
                 ? null
                 : () => Navigator.of(context).maybePop(),
+            onOpenDirect: _openDirect,
           );
 
     return Scaffold(
@@ -303,7 +385,11 @@ class _SessionScreenState extends State<SessionScreen> {
         // Anything other than "connected" gets a bar of its own. The status
         // dot in the header can say something is wrong, but it has nowhere to
         // put the reason, the countdown, or a way to stop waiting.
-        _ConnectionBar(status: session.status, onRetry: _retry),
+        _ConnectionBar(
+          status: session.status,
+          detail: session.statusDetail,
+          onRetry: _retry,
+        ),
         ConversationTabs(
           session: session,
           onSelect: session.select,
@@ -337,9 +423,21 @@ class _SessionScreenState extends State<SessionScreen> {
                   ),
           ),
         ),
-        // Growing rather than appearing, so a rejected command never shoves
-        // the composer out from under a caret already being typed into.
-        Reveal(child: _error == null ? null : _ErrorBar(text: _error!)),
+        // Offers and transfers in flight, between the scrollback and the
+        // composer. Revealed rather than appearing, so a transfer starting
+        // does not shove the composer out from under a caret mid-word.
+        Reveal(
+          child: active == null || active.transfers.isEmpty
+              ? null
+              : TransferBar(
+                  session: session,
+                  conversation: active,
+                  onAccept: _acceptTransfer,
+                ),
+        ),
+        // Growing rather than appearing, so a notice never shoves the
+        // composer out from under a caret already being typed into.
+        NoticeReveal(notice: session.notice, onDismiss: session.dismissNotice),
         ListenableBuilder(
           listenable: _suggestionRevision,
           builder: (context, _) => _CommandSuggestions(
@@ -355,6 +453,17 @@ class _SessionScreenState extends State<SessionScreen> {
 
   Widget _composerBar(Tokens t, Conversation? active) {
     final g = context.layout.gutter;
+    // A request is answered, not replied to. Until it is accepted the composer
+    // is not a composer, because sending anything — even a refusal — tells
+    // whoever sent it that somebody is here, which is most of what an
+    // unsolicited message is fishing for.
+    if (active != null && active.pending) {
+      return _RequestBar(
+        nick: active.name,
+        onAccept: () => session.acceptDirect(active.name),
+        onDecline: () => session.declineDirect(active.name),
+      );
+    }
     return Container(
       padding: EdgeInsets.fromLTRB(g, 8, 8, 10),
       decoration: BoxDecoration(
@@ -393,6 +502,16 @@ class _SessionScreenState extends State<SessionScreen> {
               ),
             ),
           ),
+          // Only where there is somewhere to send it, and only when the
+          // setting is on. A button that opens a picker and then explains that
+          // the feature is off is a button that wasted the user's time.
+          if (active != null && SettingsScope.of(context).fileTransfers)
+            IconButton(
+              onPressed: _attachFile,
+              icon: const Icon(Icons.attach_file, size: 19),
+              color: t.muted,
+              tooltip: 'Send a file',
+            ),
           IconButton(
             onPressed: _submit,
             icon: const Icon(Icons.arrow_upward, size: 19),
@@ -707,20 +826,76 @@ class _TopicBar extends StatelessWidget {
 }
 
 /// Command errors show inline above the composer — never as a dialog.
-class _ErrorBar extends StatelessWidget {
-  const _ErrorBar({required this.text});
+/// Where the composer would be, while a stranger is waiting for an answer.
+///
+/// In the composer's place rather than above it, because the two are mutually
+/// exclusive: there is exactly one thing to do with a conversation you have not
+/// accepted, and it is not typing into it. Putting the buttons where the hands
+/// already are also means the decision cannot be missed by someone who scrolled
+/// past a banner.
+class _RequestBar extends StatelessWidget {
+  const _RequestBar({
+    required this.nick,
+    required this.onAccept,
+    required this.onDecline,
+  });
 
-  final String text;
+  final String nick;
+  final VoidCallback onAccept;
+  final VoidCallback onDecline;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
     final g = context.layout.gutter;
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.fromLTRB(g, 6, g, 6),
-      color: t.bad.withValues(alpha: 0.10),
-      child: Text(text, style: TextStyle(color: t.bad, fontSize: 12)),
+      padding: EdgeInsets.fromLTRB(g, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: t.surface,
+        border: Border(
+          top: BorderSide(color: t.rule, width: Tokens.hairline),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '$nick wants to message you',
+                  style: TextStyle(color: t.text, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                // Says what declining costs, because it is the destructive
+                // choice and the one that cannot be walked back from here.
+                Text(
+                  'Declining blocks them on this network.',
+                  style: TextStyle(color: t.faint, fontSize: 11),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: onDecline,
+            style: TextButton.styleFrom(foregroundColor: t.muted),
+            child: const Text('Decline'),
+          ),
+          const SizedBox(width: 4),
+          FilledButton(
+            onPressed: onAccept,
+            style: FilledButton.styleFrom(
+              backgroundColor: t.accent,
+              foregroundColor: t.onAccent,
+            ),
+            child: const Text('Accept'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -855,7 +1030,15 @@ class _SuggestionRow extends StatelessWidget {
 /// how long until the next attempt, and offers the one thing the user might
 /// reasonably want that waiting does not give them: start again now.
 class _ConnectionBar extends StatelessWidget {
-  const _ConnectionBar({required this.status, required this.onRetry});
+  const _ConnectionBar({
+    required this.status,
+    required this.detail,
+    required this.onRetry,
+  });
+
+  /// Why, when the core said. Shown only where the state alone does not
+  /// explain itself.
+  final String? detail;
 
   final ConnectionStatus status;
   final VoidCallback onRetry;
@@ -876,7 +1059,17 @@ class _ConnectionBar extends StatelessWidget {
         'Connection lost — retrying in ${retryInSecs}s (attempt $attempt)',
         true,
       ),
-      ConnectionStatus_Disconnected() => (t.bad, 'Disconnected', false),
+      // A session that has stopped trying has to say what stopped it. The
+      // core gives up after a few attempts on a connection that never
+      // worked, and "Disconnected" alone leaves the user guessing whether
+      // the retry button beside it can possibly help.
+      ConnectionStatus_Disconnected() => (
+        t.bad,
+        detail == null || detail!.isEmpty
+            ? 'Disconnected'
+            : 'Not connected — $detail',
+        false,
+      ),
     };
 
     return Reveal(

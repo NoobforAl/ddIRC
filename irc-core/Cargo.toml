@@ -9,7 +9,23 @@ rust-version = "1.91"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
-irc = { version = "1.1.0", default-features = false, features = ["tls-rust", "ctcp", "channel-lists", "proxy"] }
+# `ctcp` is deliberately NOT enabled, and adding it would be a privacy
+# regression rather than a feature. The name suggests it is what lets a client
+# understand CTCP; what it actually does is make the crate *answer* CTCP by
+# itself, from inside `ClientStream::poll_next`, before any of our code sees the
+# message. With it on, anyone on the network can send a `PRIVMSG` and get back
+# the real name and username (`FINGER`), the crate's version string
+# (`VERSION`), and — worst of the set — `Local::now()` formatted as RFC 2822
+# (`TIME`), which discloses the wall clock and the UTC offset of the machine
+# the client is running on. That is a location down to the hour, handed out on
+# request, and `SECURITY.md` promises the opposite.
+#
+# Nothing here needs it. `ACTION` is built and parsed by us
+# (`conn::actor::queue` and `on_ctcp`), and so is `DCC SEND`; the crate's
+# CTCP-gated senders are never called. With the feature off, the crate's
+# `handle_ctcp` compiles to a stub that returns `Ok(())`, which is the
+# behaviour that was always intended.
+irc = { version = "1.1.0", default-features = false, features = ["tls-rust", "channel-lists", "proxy"] }
 tokio = { version = "1", default-features = false }
 futures-util = "0.3"
 thiserror = "2"

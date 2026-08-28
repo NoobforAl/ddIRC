@@ -14,12 +14,13 @@
 //! message rate limit applies. It is also what other clients implement, so a
 //! transfer works with people who are not using ddIRC.
 //!
-//! # What is here so far
+//! # What is here
 //!
-//! Reading an offer, and nothing else. That is deliberate: an offer is a
+//! [`offer`] reads an offer, which was built first on purpose: an offer is a
 //! string written by someone else, and the first thing to get right is not
-//! being harmed by one. Connecting, listening and transferring come after, and
-//! come with a decision this module does not make — see below.
+//! being harmed by one. [`transfer`] moves the bytes — accepting an offer,
+//! serving a file, and the address rule below that decides which of those is
+//! allowed to happen.
 //!
 //! # The address problem, which bundled Tor changes
 //!
@@ -34,10 +35,20 @@
 //! out no address at all. It exists for senders behind NAT, and someone behind
 //! Tor is behind the strongest NAT there is.
 //!
-//! Which of those to use, and what to do when both ends are anonymous, is the
-//! open question in `TODO.md` item 3. Parsing an offer does not depend on the
-//! answer, which is why it could be built first.
+//! The answer, now settled, is one rule: **a transfer discloses no more than
+//! the connection that negotiated it.** With no proxy, offers name an address
+//! and transfers dial it. With a proxy, nothing of ours is ever advertised —
+//! an incoming offer is dialled *through* the proxy, and anything that would
+//! require us to listen is refused with a reason rather than performed
+//! quietly. [`transfer`] has the four cases in full.
+//!
+//! What that leaves undone is the sending half behind a proxy, which wants a
+//! reverse offer of our own and the token round-trip that goes with it.
+//! Sending is refused there rather than falling back to a direct offer,
+//! because a fallback is exactly the thing the rule exists to prevent.
 
 pub mod offer;
+pub mod transfer;
 
 pub use offer::{safe_filename, DccOffer};
+pub use transfer::{TransferError, TransferEvent};

@@ -1,5 +1,5 @@
 name: ddirc
-description: "A new Flutter project."
+description: "A minimal, modern IRC client, on a Rust core."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -54,9 +54,27 @@ dependencies:
   # other dependency.
   tray_manager: 0.5.3
 
+  # Desktop notifications, so a message can reach someone whose window is
+  # behind something else. Same family as window_manager and tray_manager
+  # above, and it covers Windows, macOS and Linux in one go.
+  #
+  # Android is deliberately not here: MainActivity already owns a MethodChannel
+  # and a notification permission flow for the foreground service, so a second
+  # notification is a channel id and a method, not a dependency. This package
+  # has no Android implementation and is inert there. Pinned like every other
+  # dependency.
+  local_notifier: 0.1.6
+
   # Profile passwords: Android Keystore, and DPAPI on Windows. Never
   # shared_preferences. Pinned like every other dependency.
   flutter_secure_storage: 11.0.0
+
+  # Picking a file to send, and choosing where a received one is saved.
+  # First-party, and it hands back a path rather than bytes — which is what the
+  # core wants: a file is streamed from disk to the socket and never crosses the
+  # FFI boundary, so sending a large one costs no more memory than a small one.
+  # Pinned like every other dependency.
+  file_selector: 1.1.0
 
   # Where log files may be written. Every platform answers this differently and
   # two of them (Android, iOS) can only be asked at runtime, so there is no

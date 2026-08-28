@@ -72,6 +72,51 @@ Future<void> setTopic({
   topic: topic,
 );
 
+/// Offer a file to someone, over DCC.
+///
+/// `path` is read by the core, so the bytes never cross this boundary: a file
+/// is streamed from disk to the socket, and a large one costs no more memory
+/// than a small one.
+///
+/// Fails immediately, as a `FileTransferEnded` event carrying a reason, if a
+/// proxy is configured — a normal DCC offer names the address the proxy exists
+/// to hide, and there is no safe way to make one from behind Tor. See
+/// `dcc::transfer`.
+Future<void> sendFile({
+  required BigInt id,
+  required String target,
+  required String path,
+}) => RustLib.instance.api.crateApiClientSendFile(
+  id: id,
+  target: target,
+  path: path,
+);
+
+/// Take up an offer, saving it into `directory`.
+///
+/// `transfer_id` is the id the offer arrived with. Deliberately not the offer
+/// itself: the core answers offers it parsed, so nothing the sender wrote can
+/// be handed back to it as an address to dial.
+Future<void> acceptFile({
+  required BigInt id,
+  required BigInt transferId,
+  required String directory,
+}) => RustLib.instance.api.crateApiClientAcceptFile(
+  id: id,
+  transferId: transferId,
+  directory: directory,
+);
+
+/// Stop a running transfer, or decline an offer that never started.
+///
+/// Declining is silent: nothing was ever sent to whoever offered, which is
+/// what "reported, never answered" buys.
+Future<void> cancelTransfer({required BigInt id, required BigInt transferId}) =>
+    RustLib.instance.api.crateApiClientCancelTransfer(
+      id: id,
+      transferId: transferId,
+    );
+
 /// Stop waiting out the reconnect backoff and try again now.
 ///
 /// Does nothing unless the connection is actually waiting, so it is safe to

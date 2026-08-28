@@ -55,9 +55,32 @@ class MainActivity : FlutterActivity() {
 
                 "requestNotifications" -> requestNotifications(result)
 
+                "notifyMessage" -> {
+                    MessageNotifications.show(
+                        context = this,
+                        key = call.argument("key") ?: "",
+                        profileId = call.argument("profileId") ?: "",
+                        conversation = call.argument("conversation") ?: "",
+                        title = call.argument("title") ?: "",
+                        body = call.argument("body") ?: "",
+                    )
+                    result.success(null)
+                }
+
+                "clearMessage" -> {
+                    MessageNotifications.clear(this, call.argument("key") ?: "")
+                    result.success(null)
+                }
+
                 else -> result.notImplemented()
             }
         }
+
+        // A notification tapped while the app was not running launches the
+        // activity, and the intent that did it is the one already sitting here.
+        // Delivered now that the channel exists; onNewIntent covers the case
+        // where the app was running already.
+        deliverConversation(intent)
 
         // The notification's Quit button, and a swipe from Recents, both arrive
         // in the service. Neither can say goodbye to a server on its own, so
@@ -75,6 +98,45 @@ class MainActivity : FlutterActivity() {
         channel?.setMethodCallHandler(null)
         channel = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    /**
+     * A message notification tapped while the app was already running.
+     *
+     * The activity is `singleTop`, so it is not started again — the intent
+     * arrives here instead, and setting it is what makes `getIntent()` return
+     * the new one rather than the launch intent for the rest of this instance's
+     * life.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        deliverConversation(intent)
+    }
+
+    /**
+     * Tell Dart which conversation a tap was about, if it was about one.
+     *
+     * The extras are cleared afterwards so that an activity recreated for an
+     * unrelated reason — a rotation, a configuration change — does not replay
+     * a tap that happened some time ago and jump the user somewhere they did
+     * not ask to go a second time.
+     */
+    private fun deliverConversation(intent: Intent?) {
+        if (intent == null) return
+        val profileId = intent.getStringExtra(MessageNotifications.EXTRA_PROFILE) ?: return
+        val conversation =
+            intent.getStringExtra(MessageNotifications.EXTRA_CONVERSATION) ?: return
+
+        intent.removeExtra(MessageNotifications.EXTRA_PROFILE)
+        intent.removeExtra(MessageNotifications.EXTRA_CONVERSATION)
+
+        runOnUiThread {
+            channel?.invokeMethod(
+                "openConversation",
+                mapOf("profileId" to profileId, "conversation" to conversation),
+            )
+        }
     }
 
     private fun send(action: String, status: String?) {

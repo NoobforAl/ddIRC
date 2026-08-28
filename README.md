@@ -5,7 +5,14 @@
 
 A minimal, modern IRC client. Android-first, built on a reusable native core.
 
-**Status:** Phases 1–4 complete.
+> **This is beta software.** It connects and it works, but it has not been
+> through a security review, it has not been run by many people, and the Android
+> build has never been started on a real device. Phases 5–6 below — the review
+> and release preparation — are outlined rather than done. Read the section on
+> the local server before turning it on, and treat this the way you would treat
+> any client you had just compiled yourself.
+
+**Status:** Phases 1–5 complete; Phase 6 started.
 
 - **Phase 1** — the Rust core connects, authenticates, and carries a
   conversation. 128 tests, clippy-clean, plus a live TLS connection to
@@ -18,14 +25,23 @@ A minimal, modern IRC client. Android-first, built on a reusable native core.
 - **Phases 3–4** — the real UI: saved network profiles with several
   connections live at once, channel list with unread and mention badges,
   member panel with `ISUPPORT` privilege prefixes, styled message view, and
-  settings dialogs for the app, the current channel, and the server.
+  settings dialogs for the app, the current channel, and the server. Since
+  then: direct messages with a request before a stranger can reach you,
+  notifications while the window is not in front, and DCC file transfers.
+
+- **Phase 5** — the disclosure audit, written up under *What gets sent about
+  you*. It found one real leak: the `irc` crate's `ctcp` feature was answering
+  `VERSION`, `FINGER` and `TIME` on our behalf, the last of those with the
+  machine's clock and UTC offset. Turned off, and a test fails if it returns.
+
+- **Phase 6** — a per-user Windows installer, a `CONTRIBUTING.md`, and the
+  licence decided rather than assumed. Code signing is the piece still open.
 
 **Verified running as a Windows desktop app** against Snoonet: connected over
 TLS, joined a channel, rendered the topic and member roster, sent messages and
 a `/me` action, changed preferences live, and disconnected cleanly. Android
-builds and installs, but has not yet been run on a device.
-
-Phases 5–6 (security review, release prep) are still outlined rather than built.
+builds and installs, but has not yet been run on a device — and the Kotlin
+added for message notifications has never been compiled. `TODO.md` says so.
 
 ## Networks
 
@@ -50,6 +66,35 @@ Right-click — long-press on touch — to edit it.
 Everything is scoped per network: `#chat` on one server is a different
 conversation, with its own notification level, from `#chat` on another.
 Disconnecting one leaves the rest connected.
+
+**Reconnection distinguishes two things that look alike.** A connection that
+*was* working and dropped — a tunnel, a handoff between Wi-Fi and cellular, a
+server bouncing — comes back on its own, with exponential backoff and jitter.
+A connection that has **never** registered gets three attempts, then stops,
+says why, and waits to be asked. A wrong address or a blocked port is not
+something persistence fixes, and retrying it every five minutes produces a
+countdown that never ends while the actual reason sits unread.
+
+### Talking to one person
+
+Tap a nick in the member list, or type `/query <nick>`, and a conversation with
+them opens having sent nothing. `/msg <nick> <text>` still works and still opens
+one; the difference is that deciding to talk to someone and deciding what to say
+are two acts, and the first should not require the second.
+
+**A first message from a stranger is a request, not a conversation.** On IRC
+anyone can message anyone, so an inbox that opens itself on demand is a thing
+other people control. Someone you have never spoken to does not get a tab, does
+not take the screen, and cannot be replied to until you say so — the composer is
+replaced by *Accept* and *Decline*, because sending anything at all, even a
+refusal, confirms that somebody is here.
+
+**Declining blocks them on that network.** Their later messages are dropped
+before they reach a conversation, an unread count or a log, and you are not
+asked again — a refusal you have to repeat every time is not a refusal. The
+block is per network and folded to lower case, since IRC nicks are
+case-insensitive and one that `Alice` could step around by capitalising would be
+no block at all. **Blocked** in the network's settings is where it is undone.
 
 ### Browse networks
 
@@ -141,7 +186,38 @@ still be connected this evening, that is not a limit but a silent failure.
 
 No new dependency for any of this: the notification and the permission are
 plain framework APIs behind version guards, and the channel between Dart and
-`MainActivity.kt` has five methods on it.
+`MainActivity.kt` carries a handful of methods.
+
+### Being told that something was said
+
+Staying connected is only half of it. The other half is finding out, which is a
+separate feature with a separate switch, on by default.
+
+**What it will interrupt you for: a direct message, or your nickname in a
+channel.** Never ordinary channel traffic — every line of every room is what
+makes people turn notifications off altogether, and one nobody has turned off
+is worth more than one that says everything. A conversation set to *Muted* or
+*Mentions only* in its own settings is quieter still; that setting can narrow
+this, never widen it.
+
+**What it says: who, and where.** *"ada — Libera.Chat"*, *"sent you a
+message"*. The text of the message is behind a second switch that is **off**,
+because a notification is drawn by the operating system and may sit on a lock
+screen — which puts what was said somewhere this app can no longer take back.
+A message from someone you have not accepted yet never shows its text at all,
+whatever that switch says.
+
+Nothing is raised for a conversation that is already on screen in a window that
+is already in front, and opening a conversation takes away any notification
+still asking about it.
+
+Desktop uses [`local_notifier`](https://pub.dev/packages/local_notifier), from
+the same family as the window and tray packages already here, so Windows, macOS
+and Linux are one dependency rather than three. Android needs no dependency at
+all: `MainActivity` already owned a channel and a notification permission, so a
+message notification is a second `NotificationChannel` — separate from the
+service's, and at a higher importance, so silencing the price of staying
+connected does not silence the point of it.
 
 ### iOS gets nothing, deliberately
 
@@ -299,12 +375,109 @@ file in this app that should be. The folder is shown in App settings *before*
 either switch is turned on, and nothing is created on disk until there is a
 line to write — a user who never enables logging never gets a stray folder.
 
-Each file is capped at 5 MB with one rotated copy kept, so the pair has a
+Each file is capped at 10 MB with one rotated copy kept, so the pair has a
 ceiling rather than growing until a disk fills. A redaction pass blanks
 anything shaped like a credential on the way into the debug log; it is a
 backstop rather than the defence, since the core strips secrets before they
 ever become events. Write failures are swallowed — a full disk must not
 interrupt a conversation over a diagnostic.
+
+## What gets sent about you
+
+Everything below was checked against the code rather than assumed, including
+the parts that turned out to be wrong.
+
+**On connect, the client sends exactly this**, in this order: `CAP LS 302`,
+`PASS` if a server password is configured, `NICK`, `USER`, then the SASL
+exchange if there are credentials and the server offered `sasl`, then `CAP END`.
+Nothing else. The registration burst is written out by hand in
+`conn::actor::connect_once` rather than delegated to the `irc` crate's
+`identify()`, which is what makes that list a closed one.
+
+- **`username` and `realname` are always the nickname.** Never a login name, a
+  machine name, or anything else the operating system knows about the person
+  running it. The core has fields for setting them independently; the app never
+  fills them in, and there is no setting that does, so in practice a server is
+  told the nickname three times and learns nothing from the repetition.
+- **No `WEBIRC`, no `SETNAME`, no version banner, no client tags.** Only two
+  capabilities are ever requested, and only when the server offers them: `sasl`,
+  and `away-notify` so the member list can show an away state it would otherwise
+  never be told about. Neither says anything about the person connecting.
+- **Nothing carries a clock or a locale.** No timestamp is generated by this
+  client and put on the wire; the `server-time` capability is not requested, and
+  timestamps shown in the UI come from the local clock but never leave it.
+
+**CTCP requests are answered by nothing.** `ACTION` is chat, `DCC SEND` becomes
+an offer for you to accept or refuse, and every other request — `VERSION`,
+`TIME`, `FINGER`, `SOURCE`, `USERINFO`, `PING` — is dropped in silence. This was
+not true until recently: the `irc` crate has a `ctcp` feature that makes the
+crate answer them itself, below our handler and invisible to it, and it was
+switched on. `TIME` in particular replied with the local wall clock and UTC
+offset. The feature is off, and a test now fails if it comes back. See
+`SECURITY.md`.
+
+**With a proxy configured, the server's hostname is not resolved here.** It is
+passed to the SOCKS5 proxy as a domain name and resolved at the far end, so no
+DNS query for the IRC server leaves this machine — which is the property that
+makes the proxy worth having, and the one that is easiest to lose by accident.
+The proxy's *own* address is resolved locally, necessarily; it is usually
+`127.0.0.1`. There is no direct-connection fallback: a proxy that cannot be
+reached is a connection that fails.
+
+**File transfers are the one exception, and they say so.** A DCC offer carries
+an address, because the other client has to connect to it — that is what makes
+it a *direct* transfer rather than one through the server. So sending asks every
+time, naming who will learn the address, and behind a proxy it is refused
+outright rather than quietly undoing the proxy. See below.
+
+**What is still worth doing.** The audit above covers what this client sends.
+It does not cover what a server can infer — connection timing, idle patterns,
+and the IP address itself, which is what the proxy and Tor support exist for.
+
+## Sending and receiving files
+
+IRC does not carry files through the server; two clients open a connection
+between themselves and send over that. ddIRC does the same, which is what lets a
+transfer work with someone who is not using it.
+
+It is off by default — **Settings → Connection → File transfers**. With it off
+no offer is even shown and there is no attach button.
+
+**Sending.** The paperclip beside the composer. Picking a file runs it through
+the metadata stripper first, so the confirmation can say what was actually taken
+out of *this* file rather than what the setting promises in general, and then
+asks. That dialog cannot be turned off, because one of the three things on it
+never stops being true:
+
+> The offer carries your address. Whoever accepts it connects to this machine,
+> so they learn it — and offered to a channel, everyone in it does.
+
+**Receiving.** An offer appears as a row with **Accept** and **Decline**.
+Declining is silent: nothing is sent back, so a stranger fishing for a live
+client learns nothing from being refused. Accepting saves into ddIRC's own
+directory beside the logs, deliberately **not** the system Downloads folder — a
+file somebody else chose does not belong among the ones you fetched yourself,
+and on Android shared storage is readable by anything holding the permission.
+
+Nothing overwrites. A name already taken is an error, and the file is written
+under a `.part` name and renamed only once it is whole, so a transfer that dies
+halfway cannot be mistaken for the file it was going to be. The size in an offer
+is the sender's claim and is labelled as one; the 4 GB ceiling is enforced
+against the bytes that actually arrive.
+
+**With a proxy configured**, the rule is that a transfer discloses no more than
+the connection that negotiated it:
+
+| | No proxy | Proxy configured |
+|---|---|---|
+| **Accepting** a normal offer | dial them directly | dial them **through the proxy** |
+| **Accepting** a reverse offer | listen, and tell them where | **refused** — listening means disclosing where you are |
+| **Sending** | listen, and offer your address | **refused** — see below |
+
+Sending from behind a proxy wants a reverse offer of our own, where they listen
+and we dial out, and that half is not built. It is refused rather than falling
+back to a direct offer, because a fallback is exactly the thing the rule exists
+to prevent.
 
 ## The local server
 
@@ -442,6 +615,8 @@ unchanged.
 | `conn/ratelimit.rs` | Token buckets for outgoing pacing and incoming flood protection. |
 | `conn/reconnect.rs` | Exponential backoff with equal jitter. |
 | `state/` | Channels, members, privileges; `ISUPPORT` and casemapping. |
+| `dcc/offer.rs` | Parses an incoming `DCC SEND`. Built before anything that acts on one, because an offer is a string a stranger wrote. |
+| `dcc/transfer.rs` | Moves the bytes, on its own socket and its own task. Holds the rule about what a transfer is allowed to disclose. |
 | `media/` | Removing metadata from images before they are sent. No codec: each format is rewritten as a container, pixels copied across untouched. |
 | `text/format.rs` | Parses mIRC formatting into styled spans and strips control codes. |
 
@@ -490,6 +665,17 @@ Once connected: `/join #channel`, `/part [reason]`, `/nick <new>`, `/me <action>
 
 ### Building the Android app
 
+**The minimum is Android 10, API 29.** It is pinned in
+`android/app/build.gradle.kts` rather than inherited from whatever the installed
+Flutter happens to default to, and set to the same number in
+`rust_builder/android/build.gradle` for the native library — cargokit reads that
+one to pick the NDK API level, so the two have to agree or the halves are built
+for different platforms. The reason for 29 is written next to it:
+`android:foregroundServiceType`, which `ConnectionService` declares and which
+staying connected in the background rests on, does not exist before it, and TLS
+1.3 is on by default from Android 10. Raising it again wants a reason in the
+same place.
+
 Flutter is not on `PATH` here; use `C:\Users\noobf\flutter` (3.44.2 stable).
 `C:\src\flutter` exists but has never been initialised — ignore it.
 
@@ -523,6 +709,35 @@ Needs Visual Studio with the C++ desktop workload (2026 18.9.1 works here).
 flutter build windows --debug     # → build/windows/x64/runner/Debug/ddirc.exe
 flutter run -d windows
 ```
+
+#### The installer
+
+A zip of a build directory is not a way to give someone an application, so
+`make installer` wraps the release build in one `.exe`. It needs
+[Inno Setup](https://jrsoftware.org/isdl.php) 6.3 or newer — the only tool in
+this project that is needed to *ship* rather than to build — and the script it
+compiles is `windows/installer/ddirc.iss`.
+
+```bash
+make installer                      # → build/installer/ddIRC-<version>-windows-x64-setup.exe
+make installer ISCC=/path/to/ISCC.exe
+```
+
+It installs **for the person running it**, into `%LOCALAPPDATA%\Programs\ddIRC`,
+and never asks for administrator rights. That is deliberate and not a
+convenience: nothing ddIRC does needs them, and an installer that asks for
+elevation is asking to be trusted with the whole machine in order to put a chat
+client on it. There is no "for all users" option to pick by accident — the
+script forbids it — so there is no UAC prompt on any path through it.
+
+Uninstalling removes the program and leaves `%APPDATA%\ddIRC` alone, so saved
+networks, settings and logs survive a reinstall. Deleting them is a thing to
+decide about, not something an uninstaller should do quietly.
+
+Still open: the installer is unsigned, which means SmartScreen warns the first
+person to run each release until enough of them have run it anyway. That is
+worth deciding about before a release rather than after someone is frightened by
+it.
 
 ### Building for Linux, macOS and iOS
 
@@ -794,6 +1009,13 @@ description to keep in step; it also puts the generated certificate in
 Lint and test are separate workflows so a formatting slip and a broken test
 report as two different failures.
 
+## Contributing
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md). The short version: AI assistance is used
+here and is welcome, unread output is not; run `make test` and `make fix` before
+opening anything; and put the reasoning for a change in the commit message,
+because that is where this project keeps it.
+
 ## Licence
 
 **GPL-3.0-or-later.** The full text is in `LICENSE`.
@@ -803,3 +1025,12 @@ Everything bundled is compatible with it: arti and its tree are
 permissive. The obligation runs the other way, which is the point of choosing
 it — a client whose job is to be checkable should be checkable by whoever ends
 up holding it.
+
+**One consequence, decided rather than discovered:** app stores are off the
+table while the licence stands. Store terms have historically conflicted with
+the GPL's redistribution rights — a store grants its own, narrower licence to
+whoever downloads a build, which is not a thing the GPL lets a distributor do —
+and Google Play is the store this would matter for, since iOS is deliberately
+out of scope. So Android is distributed as an APK, from releases, and the
+licence is what is being kept. If that ever needs to change it is a relicensing
+decision with contributors to ask, not a packaging detail.

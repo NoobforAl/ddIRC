@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/proxy.dart';
 import '../../model/session.dart';
+import '../../model/settings.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/types.dart';
 import '../../theme.dart';
@@ -216,6 +217,8 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
           ],
         ),
         const SettingsRule(),
+        _blocked(t),
+        const SettingsRule(),
         SettingsSection(
           label: 'Disconnect',
           children: [
@@ -238,6 +241,61 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
           ],
         ),
         const SizedBox(height: 6),
+      ],
+    );
+  }
+
+  /// Who has been turned away on this network, and how to let them back.
+  ///
+  /// Per network, because that is what a nick means: `alice` on one server is
+  /// not `alice` on another, and a list that pretended otherwise would block a
+  /// stranger somewhere the user has never met them.
+  ///
+  /// Shown even when empty. A block list nobody can find until it has something
+  /// in it is one the user has to already know about to look for, and this is
+  /// the only place declining a request can be undone.
+  Widget _blocked(Tokens t) {
+    final settings = SettingsScope.of(context);
+    final nicks = settings.blockedFor(session.profileId);
+
+    return SettingsSection(
+      label: 'Blocked',
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
+          child: Text(
+            nicks.isEmpty
+                ? 'Nobody. Declining someone’s first message blocks them '
+                      'here, and their later messages are dropped without a '
+                      'trace.'
+                : 'Their messages are dropped before they reach a '
+                      'conversation. Unblocking does not tell them anything.',
+            style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
+          ),
+        ),
+        for (final nick in nicks)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 0, 10, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    nick,
+                    style: TextStyle(color: t.text, fontSize: 12.5),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    settings.unblock(session.profileId, nick);
+                    setState(() {});
+                  },
+                  style: TextButton.styleFrom(foregroundColor: t.accent),
+                  child: const Text('Unblock'),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }

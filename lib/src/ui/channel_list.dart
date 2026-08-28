@@ -211,6 +211,23 @@ class _ChannelRow extends StatelessWidget {
                 child: Text(conversation.name, overflow: TextOverflow.ellipsis),
               ),
             ),
+            // A request is not somewhere you are, so it is not dressed as one.
+            // An unanswered question with a badge on it would read as a
+            // conversation with unread messages, which is precisely the
+            // impression this is meant to withhold until the user decides.
+            Appear(
+              child: conversation.pending
+                  ? Padding(
+                      key: const ValueKey('pending'),
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Icon(
+                        Icons.person_add_alt_1_outlined,
+                        size: 13,
+                        color: t.accent,
+                      ),
+                    )
+                  : null,
+            ),
             // The gaps live inside the switchers, so a row carrying neither
             // ornament closes up rather than holding an empty slot open.
             Appear(
@@ -227,7 +244,7 @@ class _ChannelRow extends StatelessWidget {
                   : null,
             ),
             Appear(
-              child: unread > 0
+              child: unread > 0 && !conversation.pending
                   ? Padding(
                       // Keyed on presence, not on the count: an active channel
                       // would otherwise re-scale the badge on every message.

@@ -10,6 +10,64 @@ import 'background.dart';
 /// The channel [ForegroundService] speaks over. See `MainActivity.kt`.
 const backgroundChannel = MethodChannel('dev.ddirc/background');
 
+/// Host-to-Dart calls on [backgroundChannel], fanned out to everyone listening.
+///
+/// A [MethodChannel] has exactly one handler, and there are now two things that
+/// want to hear from the host on this one: the foreground service, which is
+/// told to quit, and the notifier, which is told a notification was tapped.
+/// Whichever called `setMethodCallHandler` second would silently replace the
+/// first — a failure that would look like one feature working perfectly until
+/// the other was switched on, which is the worst shape a bug can have.
+final androidHostCalls = HostCallDispatcher(backgroundChannel);
+
+/// The dispatcher for [channel], one per channel name.
+///
+/// Exists because both classes that speak to the host take their channel as a
+/// parameter so a test can inject one, and two of them sharing an injected
+/// channel must share its dispatcher for the same reason they share the real
+/// one. Keyed by name rather than by identity: `MethodChannel` is const, and
+/// two `const MethodChannel('x')` are the same channel whether or not they are
+/// the same object.
+final Map<String, HostCallDispatcher> _dispatchers = {
+  backgroundChannel.name: androidHostCalls,
+};
+
+HostCallDispatcher hostCallsFor(MethodChannel channel) =>
+    _dispatchers.putIfAbsent(channel.name, () => HostCallDispatcher(channel));
+
+/// Lets more than one thing listen to a channel that allows one handler.
+class HostCallDispatcher {
+  HostCallDispatcher(this._channel);
+
+  final MethodChannel _channel;
+  final List<Future<dynamic> Function(MethodCall)> _handlers = [];
+
+  /// Registered lazily and torn down again when the last one goes, so a
+  /// platform channel is never left with a handler that answers nothing.
+  void add(Future<dynamic> Function(MethodCall) handler) {
+    if (_handlers.isEmpty) _channel.setMethodCallHandler(_dispatch);
+    _handlers.add(handler);
+  }
+
+  void remove(Future<dynamic> Function(MethodCall) handler) {
+    _handlers.remove(handler);
+    if (_handlers.isEmpty) _channel.setMethodCallHandler(null);
+  }
+
+  /// Every handler sees every call; the first non-null answer is the answer.
+  ///
+  /// Handlers are expected to ignore what is not theirs and return null, which
+  /// makes "nobody handled it" and "handled, nothing to say" the same result —
+  /// correct here, because the host asks for no return value.
+  Future<dynamic> _dispatch(MethodCall call) async {
+    for (final handler in List.of(_handlers)) {
+      final result = await handler(call);
+      if (result != null) return result;
+    }
+    return null;
+  }
+}
+
 /// Staying connected on Android, where the process is not ours to keep.
 ///
 /// Nothing here holds a connection. As on desktop, the connections live in the
@@ -62,7 +120,7 @@ class ForegroundService implements BackgroundKeeper {
 
   @override
   Future<void> start() async {
-    channel.setMethodCallHandler(_onHostCall);
+    hostCallsFor(channel).add(_onHostCall);
     settings.addListener(_onSettingsChanged);
     workspace.addListener(_onConnectionsChanged);
     await _sync();
@@ -72,7 +130,7 @@ class ForegroundService implements BackgroundKeeper {
   void dispose() {
     settings.removeListener(_onSettingsChanged);
     workspace.removeListener(_onConnectionsChanged);
-    channel.setMethodCallHandler(null);
+    hostCallsFor(channel).remove(_onHostCall);
   }
 
   /// The notification's Quit button, or a swipe from Recents.

@@ -17,4 +17,10 @@
          mechanism: nobody is looking for "foreground service". -->
     <string name="connection_channel_name">Connection</string>
     <string name="connection_channel_description">Shown while ddIRC stays connected in the background. Android requires it, and it is how you can tell the app is still running.</string>
+
+    <!-- A separate channel from the one above, so that silencing the price of
+         staying connected does not also silence the point of it. This is the
+         one allowed to make a sound. -->
+    <string name="message_channel_name">Messages</string>
+    <string name="message_channel_description">Someone has sent you a direct message, or said your nickname in a channel.</string>
 </resources>

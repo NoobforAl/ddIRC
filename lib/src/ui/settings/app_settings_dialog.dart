@@ -7,6 +7,7 @@ import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../background.dart';
 import '../motion.dart';
+import '../notifier.dart' show notificationsSupportedOn;
 import 'file_transfer_section.dart';
 import 'local_server_section.dart';
 import 'proxy_section.dart';
@@ -291,6 +292,33 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             ),
           ],
         ),
+      // Beside staying connected, because it is the other half of the same
+      // promise: one keeps the socket open while you are elsewhere, and this is
+      // how you find out that it caught something.
+      if (notificationsSupportedOn(defaultTargetPlatform))
+        SettingsSection(
+          label: 'Notifications',
+          children: [
+            SettingsSwitch(
+              label: 'Notify me about messages',
+              description:
+                  'A direct message, or your nickname in a channel, while '
+                  'ddIRC is not the window in front. Never ordinary channel '
+                  'traffic — a per-channel setting can quieten it further.',
+              value: settings.notifications,
+              onChanged: (v) => settings.notifications = v,
+            ),
+            SettingsSwitch(
+              label: 'Show the message in the notification',
+              description:
+                  'Off by default. A notification is drawn by the operating '
+                  'system and may sit on a lock screen, which puts what was '
+                  'said somewhere this app can no longer take it back from.',
+              value: settings.notifyPreview,
+              onChanged: (v) => settings.notifyPreview = v,
+            ),
+          ],
+        ),
       // Ordered by how far the connection travels: a server on this machine,
       // then Tor, then somewhere the user runs themselves.
       const LocalServerSection(),
@@ -332,6 +360,32 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             // know where the files would go before agreeing to them.
             value:
                 AppLog.instance.directoryPath ?? 'Unavailable on this platform',
+          ),
+          const SettingsReadout(
+            label: 'Size',
+            value: 'Rotated at 10 MB, one previous copy kept',
+          ),
+        ],
+      ),
+      // Beside the log folder, because it answers the same question — where
+      // does this end up — and because "are my settings actually saved?" has
+      // had no answer in the app short of going and looking for the file.
+      SettingsSection(
+        label: 'Settings',
+        children: [
+          FutureBuilder<String>(
+            future: settingsFileLocation(),
+            builder: (context, snapshot) => SettingsReadout(
+              label: 'Stored in',
+              value: snapshot.data ?? 'Looking…',
+            ),
+          ),
+          const SettingsReadout(
+            label: 'Not stored there',
+            // Worth saying in the same breath. Someone reading a settings path
+            // is entitled to assume it holds everything, and the one thing it
+            // deliberately does not hold is the thing that would matter most.
+            value: 'Passwords — those live in the platform keychain',
           ),
         ],
       ),
