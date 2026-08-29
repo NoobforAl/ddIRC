@@ -24,7 +24,7 @@ class NetworkRail extends StatelessWidget {
     required this.onSelect,
     required this.onAdd,
     required this.onBrowse,
-    required this.onEdit,
+    required this.onMenu,
     required this.onAppSettings,
   });
 
@@ -32,7 +32,9 @@ class NetworkRail extends StatelessWidget {
   final ValueChanged<Profile> onSelect;
   final VoidCallback onAdd;
   final VoidCallback onBrowse;
-  final ValueChanged<Profile> onEdit;
+
+  /// Right-click or long-press on a network, with the point to open at.
+  final void Function(Profile profile, Offset at) onMenu;
   final VoidCallback onAppSettings;
 
   @override
@@ -65,7 +67,7 @@ class NetworkRail extends StatelessWidget {
                   unread: workspace.unreadFor(profile.id),
                   mentions: workspace.mentionsFor(profile.id),
                   onTap: () => onSelect(profile),
-                  onEdit: () => onEdit(profile),
+                  onMenu: (at) => onMenu(profile, at),
                 );
               },
             ),
@@ -104,7 +106,7 @@ class _RailEntry extends StatelessWidget {
     required this.unread,
     required this.mentions,
     required this.onTap,
-    required this.onEdit,
+    required this.onMenu,
   });
 
   final Profile profile;
@@ -118,7 +120,7 @@ class _RailEntry extends StatelessWidget {
   final int unread;
   final int mentions;
   final VoidCallback onTap;
-  final VoidCallback onEdit;
+  final ValueChanged<Offset> onMenu;
 
   /// Whether this network is actually on its server right now.
   ///
@@ -180,10 +182,14 @@ class _RailEntry extends StatelessWidget {
           session?.config.proxy,
           live: connected,
         ),
+        // Hover only. A tooltip's own touch trigger is a long press, which is
+        // the gesture the context menu wants, and two long-press recognizers
+        // over one row is a coin toss. Hover is unaffected by this, so the
+        // pointer still gets the tooltip it always did.
+        triggerMode: TooltipTriggerMode.manual,
         child: Touchable(
           onTap: onTap,
-          onSecondaryTap: onEdit,
-          onLongPress: onEdit,
+          onContextMenu: onMenu,
           builder: (context, touch) => SizedBox(
             height: 42,
             child: Row(

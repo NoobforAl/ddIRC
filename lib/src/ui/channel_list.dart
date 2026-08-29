@@ -168,9 +168,9 @@ class _ChannelRow extends StatelessWidget {
     return Touchable(
       onTap: onTap,
       // Right-click on desktop, long-press on touch: the channel's own
-      // settings, without a per-row button cluttering the list.
-      onSecondaryTap: onSettings,
-      onLongPress: onSettings,
+      // settings, without a per-row button cluttering the list. The point the
+      // gesture landed on is not wanted here — a dialog opens centred.
+      onContextMenu: onSettings == null ? null : (_) => onSettings!(),
       builder: (context, touch) => AnimatedContainer(
         duration: m.normal,
         curve: Motion.curve,

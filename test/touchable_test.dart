@@ -15,7 +15,11 @@ void main() {
   /// The most recent state the builder was handed.
   late Touch latest;
 
-  Future<void> pump(WidgetTester tester, {VoidCallback? onTap}) {
+  Future<void> pump(
+    WidgetTester tester, {
+    VoidCallback? onTap,
+    ValueChanged<Offset>? onContextMenu,
+  }) {
     latest = Touch.none;
     return tester.pumpWidget(
       MaterialApp(
@@ -23,6 +27,7 @@ void main() {
           body: Center(
             child: Touchable(
               onTap: onTap,
+              onContextMenu: onContextMenu,
               builder: (context, touch) {
                 latest = touch;
                 return const SizedBox(width: 80, height: 40);
@@ -93,6 +98,51 @@ void main() {
     await pump(tester);
     await hover(tester);
     expect(latest, Touch.none);
+  });
+
+  group('the context gesture', () {
+    // Right-click and long-press are one question with two input devices, and
+    // the surface has to answer both the same way — including with a point,
+    // since a menu has to open somewhere.
+
+    testWidgets('a right-click reports where the pointer was', (tester) async {
+      Offset? at;
+      await pump(tester, onTap: () {}, onContextMenu: (o) => at = o);
+
+      final centre = tester.getCenter(find.byType(Touchable));
+      // Off-centre on purpose: a menu opens under the pointer, not under the
+      // middle of whatever the pointer happened to be over.
+      final point = centre + const Offset(20, 10);
+      await tester.tapAt(point, buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+
+      expect(at, point);
+    });
+
+    testWidgets('a long press reports the middle of the row', (tester) async {
+      Offset? at;
+      await pump(tester, onTap: () {}, onContextMenu: (o) => at = o);
+
+      final centre = tester.getCenter(find.byType(Touchable));
+      await tester.longPressAt(centre + const Offset(20, 10));
+      await tester.pumpAndSettle();
+
+      // Not where the finger was: a finger covers what it presses, so the
+      // menu is anchored to the row instead.
+      expect(at, centre);
+    });
+
+    testWidgets('a right-click is never mistaken for a tap', (tester) async {
+      var taps = 0;
+      await pump(tester, onTap: () => taps++);
+
+      await tester.tap(find.byType(Touchable), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+
+      // A surface with nothing to offer does nothing, rather than falling
+      // through to whatever the left button would have done.
+      expect(taps, 0);
+    });
   });
 
   test('press is a stronger wash than hover, and idle is none', () {

@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import '../../model/directory.dart';
 import '../../model/profile.dart';
 import '../../model/proxy.dart';
-import '../../model/settings.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/client.dart' as core;
 import '../../theme.dart';
 import '../motion.dart';
+import '../network_menu.dart';
 import '../touchable.dart';
 import 'network_picker_dialog.dart';
 import 'proxy_form.dart';
@@ -292,16 +292,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     final profile = widget.profile;
     if (profile == null) return;
 
-    final store = ProfileScope.of(context);
-    final workspace = WorkspaceScope.of(context);
-    final settings = SettingsScope.of(context);
-
-    // Order matters: drop the live connection before the profile it belongs
-    // to, so nothing is left holding a socket for a network that no longer
-    // exists.
-    workspace.forget(profile.id);
-    await settings.forgetProfile(profile.id);
-    await store.remove(profile.id);
+    await forgetNetwork(context, profile);
 
     if (!mounted) return;
     Navigator.of(context).pop(ProfileEditorResult.deleted);

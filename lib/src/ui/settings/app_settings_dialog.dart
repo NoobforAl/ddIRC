@@ -5,6 +5,7 @@ import '../../model/local_server.dart';
 import '../../model/log.dart';
 import '../../model/proxy.dart';
 import '../../model/settings.dart';
+import '../../version.dart';
 import '../background.dart';
 import '../motion.dart';
 import '../notifier.dart' show notificationsSupportedOn;
@@ -164,6 +165,18 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
         label: _Page.privacy.label,
         summary: _privacySummary(settings),
         onTap: () => _open(_Page.privacy),
+      ),
+      const SettingsRule(),
+      const SizedBox(height: 10),
+      // The empty screen says this too, but it is only reachable with nothing
+      // connected — which is not where anybody spends their time. Settings is
+      // the one surface that is always one click away.
+      const SettingsNote(
+        text:
+            '$appVersionLabel. It connects and it works, but it has not been '
+            'through a security review and it has not been run by many '
+            'people. Treat it the way you would treat any client you had just '
+            'compiled yourself.',
       ),
     ];
   }

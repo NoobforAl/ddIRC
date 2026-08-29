@@ -15,6 +15,7 @@ import 'channel_list.dart';
 import 'conversation_tabs.dart';
 import 'layout.dart';
 import 'member_list.dart';
+import 'menu.dart';
 import 'message_view.dart';
 import 'motion.dart';
 import 'notice_bar.dart';
@@ -670,10 +671,7 @@ class _SettingsMenu extends StatelessWidget {
       elevation: 0,
       tooltip: 'Settings',
       position: PopupMenuPosition.under,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: t.rule, width: Tokens.hairline),
-      ),
+      shape: menuShape(t),
       onSelected: (target) => switch (target) {
         _SettingsTarget.channel => onChannelSettings(),
         _SettingsTarget.server => onServerSettings(),
@@ -686,7 +684,7 @@ class _SettingsMenu extends StatelessWidget {
           // Disabled rather than hidden, so the menu never changes shape and
           // the reason is legible: there is no channel to configure.
           enabled: hasChannel,
-          child: _MenuRow(
+          child: MenuRow(
             icon: Icons.tag,
             label: channelName == null
                 ? 'Channel settings'
@@ -696,49 +694,18 @@ class _SettingsMenu extends StatelessWidget {
         ),
         const PopupMenuItem(
           value: _SettingsTarget.server,
-          child: _MenuRow(icon: Icons.dns_outlined, label: 'Server settings'),
+          child: MenuRow(icon: Icons.dns_outlined, label: 'Server settings'),
         ),
         const PopupMenuItem(
           value: _SettingsTarget.network,
-          child: _MenuRow(
+          child: MenuRow(
             icon: Icons.edit_outlined,
             label: 'Edit this network…',
           ),
         ),
         const PopupMenuItem(
           value: _SettingsTarget.app,
-          child: _MenuRow(icon: Icons.settings_outlined, label: 'App settings'),
-        ),
-      ],
-    );
-  }
-}
-
-class _MenuRow extends StatelessWidget {
-  const _MenuRow({
-    required this.icon,
-    required this.label,
-    this.enabled = true,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    final color = enabled ? t.text : t.faint;
-    return Row(
-      children: [
-        Icon(icon, size: 15, color: enabled ? t.muted : t.faint),
-        const SizedBox(width: 10),
-        Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: color, fontSize: 13),
-          ),
+          child: MenuRow(icon: Icons.settings_outlined, label: 'App settings'),
         ),
       ],
     );

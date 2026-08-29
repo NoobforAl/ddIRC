@@ -16,8 +16,8 @@ on every line written. Moving the core to safe Rust retires most of it outright:
 | Explicit lengths across the FFI boundary | Handled by generated bindings, not hand-written marshaling |
 | Validate null-termination before making strings | Rust strings carry their length |
 
-`ddirc-core` declares `#![forbid(unsafe_code)]`. Any `unsafe` the FFI layer needs
-in Phase 2 is confined to generated code.
+`ddirc-core` declares `#![forbid(unsafe_code)]`. Any `unsafe` the FFI layer
+needs is confined to generated code.
 
 ## What still requires care
 

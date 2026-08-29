@@ -37,7 +37,7 @@ class Touchable extends StatefulWidget {
     required this.builder,
     this.onTap,
     this.onSecondaryTap,
-    this.onLongPress,
+    this.onContextMenu,
     this.borderRadius,
   });
 
@@ -47,9 +47,20 @@ class Touchable extends StatefulWidget {
   /// looking clickable while it is not.
   final VoidCallback? onTap;
 
-  /// Right-click on desktop, and its long-press equivalent on touch.
+  /// Right-click on desktop, with no touch equivalent.
+  ///
+  /// For a surface that should also answer a long press, use [onContextMenu]
+  /// instead — this one is for the rare action that only makes sense with a
+  /// pointer.
   final VoidCallback? onSecondaryTap;
-  final VoidCallback? onLongPress;
+
+  /// Right-click on desktop, long-press on touch: the one gesture that means
+  /// "what else can I do with this?".
+  ///
+  /// Reported with a point in global coordinates for a menu to open at — the
+  /// pointer that right-clicked, or the middle of this surface when a finger
+  /// long-pressed it, since the finger is covering the spot it pressed.
+  final ValueChanged<Offset>? onContextMenu;
 
   /// Clips the focus and gesture area to a rounded surface, for the callers
   /// whose own decoration is rounded.
@@ -69,12 +80,23 @@ class _TouchableState extends State<Touchable> {
     return _hovered ? Touch.hover : Touch.none;
   }
 
+  /// The middle of this surface, in global coordinates.
+  Offset get _centre {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return Offset.zero;
+    return box.localToGlobal(box.size.center(Offset.zero));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final menu = widget.onContextMenu;
     return InkWell(
       onTap: widget.onTap,
-      onSecondaryTap: widget.onSecondaryTap,
-      onLongPress: widget.onLongPress,
+      onSecondaryTap: menu == null ? widget.onSecondaryTap : null,
+      // On the way up, which is where every desktop opens its context menu,
+      // and the only one of the pair that carries a position.
+      onSecondaryTapUp: menu == null ? null : (d) => menu(d.globalPosition),
+      onLongPress: menu == null ? null : () => menu(_centre),
       borderRadius: widget.borderRadius,
       onHover: (over) => setState(() => _hovered = over),
       onTapDown: (_) => setState(() => _pressed = true),

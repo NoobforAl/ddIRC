@@ -74,8 +74,8 @@ zeroize = { version = "1", features = ["derive"] }
 # without moving, the step never halves again, and the loop spins on one core
 # forever. `tor-netdoc` reaches it while date-checking a consensus, which is
 # exactly why bundled Tor never finished bootstrapping. See
-# `vendor/saturating-time/src/internal.rs` for the argument, and TODO.md item 1
-# for how it was found.
+# `vendor/saturating-time/src/internal.rs` for the argument, and the commit that
+# vendored it for how it was found.
 #
 # Vendored rather than forked: 546 lines, no dependencies, MIT OR Apache-2.0.
 # Delete the directory and this block together when a fixed release exists.

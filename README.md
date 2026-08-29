@@ -7,41 +7,40 @@ A minimal, modern IRC client. Android-first, built on a reusable native core.
 
 > **This is beta software.** It connects and it works, but it has not been
 > through a security review, it has not been run by many people, and the Android
-> build has never been started on a real device. Phases 5–6 below — the review
-> and release preparation — are outlined rather than done. Read the section on
-> the local server before turning it on, and treat this the way you would treat
-> any client you had just compiled yourself.
+> build has never been started on a real device. Read the section on the local
+> server before turning it on, and treat this the way you would treat any client
+> you had just compiled yourself.
 
-**Status:** Phases 1–5 complete; Phase 6 started.
+**How this was written.** I built ddIRC for myself. Some of the Rust core is
+mine, written by hand; most of the rest — the whole Flutter UI, and much of the
+code around the core — is vibe-coded with an AI assistant. It is tested and it
+is linted, and the reasoning behind each decision is in the commit that made it,
+but that is what it is. Weigh it accordingly before trusting the client with
+anything that matters.
 
-- **Phase 1** — the Rust core connects, authenticates, and carries a
-  conversation. 128 tests, clippy-clean, plus a live TLS connection to
-  Libera.Chat that reached registration.
-- **Phase 2** — the FFI boundary works end to end: `flutter_rust_bridge`
-  generates the bindings, the core builds for both Android and Windows, and
-  `libddirc_bridge.so` ships inside a built APK. Dart sees
-  `connect() → Future<int>` and `eventStream() → Stream<IrcEvent>`.
+**What is built.** The Rust core connects, authenticates and carries a
+conversation, and `flutter_rust_bridge` hands it to Flutter as
+`connect() → Future<int>` and `eventStream() → Stream<IrcEvent>`. On top of
+that: saved network profiles with several connections live at once, a channel
+list with unread and mention badges, a member panel with `ISUPPORT` privilege
+prefixes, a styled message view, settings for the app and for each channel and
+server, direct messages with a request before a stranger can reach you,
+notifications while the window is not in front, DCC file transfers, a bundled
+Tor, a local server, and a per-user Windows installer.
 
-- **Phases 3–4** — the real UI: saved network profiles with several
-  connections live at once, channel list with unread and mention badges,
-  member panel with `ISUPPORT` privilege prefixes, styled message view, and
-  settings dialogs for the app, the current channel, and the server. Since
-  then: direct messages with a request before a stranger can reach you,
-  notifications while the window is not in front, and DCC file transfers.
-
-- **Phase 5** — the disclosure audit, written up under *What gets sent about
-  you*. It found one real leak: the `irc` crate's `ctcp` feature was answering
-  `VERSION`, `FINGER` and `TIME` on our behalf, the last of those with the
-  machine's clock and UTC offset. Turned off, and a test fails if it returns.
-
-- **Phase 6** — a per-user Windows installer, a `CONTRIBUTING.md`, and the
-  licence decided rather than assumed. Code signing is the piece still open.
+**What is not.** The installer is unsigned, so SmartScreen warns the first
+person to run each release. Sending a file while a proxy is configured is
+refused rather than falling back to a direct offer — the fallback would publish
+the address the proxy exists to hide — which leaves reverse offers of our own
+still to write. macOS and Linux are configured and built by nobody.
 
 **Verified running as a Windows desktop app** against Snoonet: connected over
 TLS, joined a channel, rendered the topic and member roster, sent messages and
 a `/me` action, changed preferences live, and disconnected cleanly. Android
 builds and installs, but has not yet been run on a device — and the Kotlin
-added for message notifications has never been compiled. `TODO.md` says so.
+added for message notifications has never been compiled, because the toolchain
+it was written against could not be reached. Expect to fix something small
+there before anything else on Android is worth trying.
 
 ## Networks
 
@@ -593,7 +592,7 @@ ddIRC/
 ├─ rust_builder/      # cargokit glue that builds Rust during a Flutter build
 ├─ irc-core/          # the Cargo workspace
 │  ├─ ddirc-core/     # the reusable core — no Flutter awareness
-│  ├─ ddirc-cli/      # terminal harness; the Phase 1 acceptance gate
+│  ├─ ddirc-cli/      # terminal harness: the core with no Flutter in the way
 │  ├─ ddirc-server/   # the local IRC server: loopback only, TLS only
 │  ├─ ddirc-tor/      # the bundled Tor: arti behind a loopback SOCKS5 port
 │  └─ ddirc-bridge/   # ddirc_bridge — the frb binding crate
@@ -639,7 +638,7 @@ added no second way for a connection to leave.
 
 ## Building
 
-Requires Rust 1.82+. The Android targets are only needed for Phase 2.
+Requires Rust 1.82+. The Android targets are only needed for an Android build.
 
 ```bash
 cd irc-core

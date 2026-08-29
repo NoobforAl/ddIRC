@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 import '../model/profile.dart';
 import '../model/workspace.dart';
 import '../theme.dart';
+import '../version.dart';
 import 'app_mark.dart';
 import 'layout.dart';
 import 'motion.dart';
+import 'network_menu.dart';
 import 'network_rail.dart';
 import 'session_screen.dart';
 import 'settings/app_settings_dialog.dart';
 import 'settings/network_picker_dialog.dart';
+import 'settings/settings_chrome.dart';
 import 'settings/profile_editor_dialog.dart';
 import 'touchable.dart';
 
@@ -44,7 +47,7 @@ class WorkspaceScreen extends StatelessWidget {
               onSelect: (profile) => _select(context, workspace, profile),
               onAdd: () => _edit(context, workspace, null),
               onBrowse: () => _browse(context, workspace),
-              onEdit: (profile) => _edit(context, workspace, profile),
+              onMenu: (profile, at) => _menu(context, workspace, profile, at),
               onAppSettings: () => AppSettingsDialog.show(context),
             );
 
@@ -61,6 +64,7 @@ class WorkspaceScreen extends StatelessWidget {
                             onAdd: () => _edit(context, workspace, null),
                             onBrowse: () => _browse(context, workspace),
                             onConnect: (p) => _select(context, workspace, p),
+                            onMenu: (p, at) => _menu(context, workspace, p, at),
                             onAppSettings: () =>
                                 AppSettingsDialog.show(context),
                           )
@@ -96,6 +100,29 @@ class WorkspaceScreen extends StatelessWidget {
       return;
     }
     await workspace.connect(profile);
+  }
+
+  /// Right-click or long-press on a network: change it, or be done with it.
+  ///
+  /// Both surfaces that list networks route through here, so the two ways of
+  /// asking cannot answer differently.
+  static Future<void> _menu(
+    BuildContext context,
+    Workspace workspace,
+    Profile profile,
+    Offset at,
+  ) async {
+    final action = await showNetworkMenu(context, profile, at);
+    if (action == null || !context.mounted) return;
+
+    switch (action) {
+      case NetworkMenuAction.edit:
+        await _edit(context, workspace, profile);
+      case NetworkMenuAction.delete:
+        if (!await ForgetNetworkDialog.show(context, profile)) return;
+        if (!context.mounted) return;
+        await forgetNetwork(context, profile);
+    }
   }
 
   /// Pick one of the networks ddIRC ships knowing about, then edit it.
@@ -147,6 +174,7 @@ class _Empty extends StatelessWidget {
     required this.onAdd,
     required this.onBrowse,
     required this.onConnect,
+    required this.onMenu,
     required this.onAppSettings,
   });
 
@@ -155,6 +183,7 @@ class _Empty extends StatelessWidget {
   final VoidCallback onAdd;
   final VoidCallback onBrowse;
   final ValueChanged<Profile> onConnect;
+  final void Function(Profile profile, Offset at) onMenu;
   final VoidCallback onAppSettings;
 
   @override
@@ -179,15 +208,32 @@ class _Empty extends StatelessWidget {
             children: [
               const Center(child: AppMark(size: 44)),
               const SizedBox(height: 14),
+              // The wordmark carries the badge, because this is the screen a
+              // fresh install opens on and "it is a beta" is the first thing
+              // about this client worth knowing. The badge's tooltip says
+              // what that means; the version below says which beta.
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    'ddIRC',
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w600,
+                      color: t.text,
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const BetaBadge(),
+                ],
+              ),
+              const SizedBox(height: 4),
               Text(
-                'ddIRC',
+                'Version $appVersion',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w600,
-                  color: t.text,
-                  letterSpacing: -0.5,
-                ),
+                style: TextStyle(fontSize: 11.5, color: t.faint),
               ),
               const SizedBox(height: 6),
               Row(
@@ -195,9 +241,13 @@ class _Empty extends StatelessWidget {
                 children: [
                   Icon(Icons.lock_outline, size: 12, color: t.muted),
                   const SizedBox(width: 5),
-                  Text(
-                    'Every connection uses TLS.',
-                    style: TextStyle(fontSize: 12.5, color: t.muted),
+                  // Flexible because the column is capped at 340 points and
+                  // this line has no say in the reader's text scale.
+                  Flexible(
+                    child: Text(
+                      'Every connection uses TLS.',
+                      style: TextStyle(fontSize: 12.5, color: t.muted),
+                    ),
                   ),
                 ],
               ),
@@ -223,6 +273,7 @@ class _Empty extends StatelessWidget {
                     connecting: workspace.isConnecting(profile.id),
                     failure: workspace.failureFor(profile.id),
                     onTap: () => onConnect(profile),
+                    onMenu: (at) => onMenu(profile, at),
                   ),
                 const SizedBox(height: 14),
               ],
@@ -354,12 +405,14 @@ class _ProfileRow extends StatelessWidget {
     required this.connecting,
     required this.failure,
     required this.onTap,
+    required this.onMenu,
   });
 
   final Profile profile;
   final bool connecting;
   final String? failure;
   final VoidCallback onTap;
+  final ValueChanged<Offset> onMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -370,6 +423,11 @@ class _ProfileRow extends StatelessWidget {
         // A network already dialling is not a second target; it stops
         // reporting hover so it stops looking like one.
         onTap: connecting ? null : onTap,
+        // Editing and deleting stay available on a row that is mid-dial —
+        // a network that will not connect is exactly the one you want to
+        // change, and the row refusing a left click must not take the menu
+        // with it.
+        onContextMenu: onMenu,
         borderRadius: BorderRadius.circular(8),
         builder: (context, touch) => AnimatedContainer(
           duration: context.motion.fast,
