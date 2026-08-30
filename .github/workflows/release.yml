@@ -1,0 +1,107 @@
+# Builds the Android APK and publishes it to a GitHub Release when a tag is
+# pushed.
+#
+# The trigger pattern is `v0.*` rather than `v*`, and that is deliberate, not
+# an oversight: this project is beta (see the warning at the top of the
+# README), and a `v1.0.0` tag is a claim this pipeline should not be able to
+# make by accident. Staying on major version 0 is what tells that story in the
+# version number itself — semver already treats 0.x as "still finding its
+# shape" — so nothing needs a `-beta` suffix as well. When the project is
+# ready to leave beta, widening this pattern is itself the decision to make,
+# not something that should fall out of an unrelated tag.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v0.*"
+
+# One release build per tag; nothing here benefits from a second one racing
+# the first.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Gradle needs a JVM of its own; subosito/flutter-action only installs
+      # the Flutter SDK. 17 matches what the README asks for locally.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The three ABIs the README's manual build instructions target. Rust
+      # compiles once per ABI; Cargokit invokes cargo-ndk during the Gradle
+      # build, so nothing here calls it directly.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: irc-core
+
+      # No prebuilt binary for this one — taiki-e/install-action does not
+      # carry cargo-ndk — so this compiles from source. The cache above keeps
+      # that to the first run only.
+      - run: cargo install cargo-ndk --locked
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: stable
+          cache: true
+
+      # `ndkVersion = flutter.ndkVersion` in both build.gradle files means the
+      # exact NDK side-by-side version tracks whichever Flutter is pinned
+      # above — 27.0.12077973 for 3.44.2, the same one the README's manual
+      # instructions install. Bumping the Flutter version here without
+      # checking whether its default NDK moved is how this step quietly stops
+      # matching what Gradle asks for.
+      - name: Accept the Android SDK licences
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+      - name: Install the platform and NDK build.gradle asks for
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "ndk;27.0.12077973"
+
+      - run: flutter pub get
+
+      # Generated Dart under lib/src/rust/ is committed, so this needs no
+      # codegen toolchain — see the README's "Building the Android app".
+      #
+      # `--build-name` is the tag with its leading `v` stripped, so the tag
+      # `v0.1.0` becomes the version `0.1.0` shown to the user. `--build-number`
+      # is the workflow run number rather than anything parsed from the tag:
+      # Android's versionCode has to be a plain integer, and a run number is
+      # already unique and increasing across every release this pipeline ever
+      # makes.
+      - name: Build the APK
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          flutter build apk --release \
+            --build-name="$VERSION" \
+            --build-number="${{ github.run_number }}"
+          mkdir -p build/release
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "build/release/ddIRC-$VERSION.apk"
+
+      # `prerelease: true` throughout: nothing this pipeline can tag is
+      # anything else, per the trigger pattern above.
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "ddIRC ${{ github.ref_name }} (beta)"
+          prerelease: true
+          body: |
+            Beta build. See the warning at the top of the README before
+            trusting this with anything that matters.
+          files: build/release/*.apk

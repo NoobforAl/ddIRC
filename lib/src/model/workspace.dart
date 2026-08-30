@@ -181,16 +181,26 @@ class Workspace extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Read the password here and hand it straight to the core, which
-      // zeroizes it after SASL. It is never held on the profile.
+      // Read the secrets here and hand them straight to the core, which
+      // zeroizes each after it is used. None of them are ever held on the
+      // profile. The server password and NickServ password are read
+      // unconditionally — a missing key is just a fast null, and neither has
+      // a companion field to gate the read on the way SASL's account does.
       final password = profile.usesSasl
           ? await profiles.passwordFor(profile.id)
           : null;
+      final serverPassword = await profiles.serverPasswordFor(profile.id);
+      final nickservPassword = await profiles.nickservPasswordFor(profile.id);
       // Settled here, once, rather than inside the core: the choice between
       // the app-wide proxy and this server's own is the app's to make, and
       // the core is better off being handed an answer.
       final proxy = await resolveProxy(profile, proxies, profiles);
-      final config = profile.toConfig(saslPassword: password, proxy: proxy);
+      final config = profile.toConfig(
+        saslPassword: password,
+        serverPassword: serverPassword,
+        nickservPassword: nickservPassword,
+        proxy: proxy,
+      );
       if (proxy != null) {
         AppLog.instance.debug(
           '[${profile.host}] connecting through SOCKS5 '

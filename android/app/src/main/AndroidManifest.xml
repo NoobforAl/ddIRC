@@ -16,6 +16,11 @@
          is only being told that it is running. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
+    <!-- The optional app lock, off by default. Reads whatever biometrics are
+         already enrolled — this asks for nothing new from the user beyond
+         what unlocking the phone itself already required. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"

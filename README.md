@@ -5,6 +5,7 @@
 
 A minimal, modern IRC client. Android-first, built on a reusable native core.
 
+> [!WARNING]
 > **This is beta software.** It connects and it works, but it has not been
 > through a security review, it has not been run by many people, and the Android
 > build has never been started on a real device. Read the section on the local
@@ -1007,6 +1008,13 @@ description to keep in step; it also puts the generated certificate in
 
 Lint and test are separate workflows so a formatting slip and a broken test
 report as two different failures.
+
+`.github/workflows/release.yml` builds the Android APK and publishes it to a
+GitHub Release when a tag is pushed. It only ever fires on `v0.*` — not `v*` —
+because that is what marks a release as beta in the tag itself: a `v1.0.0`
+push is a claim this pipeline should not be able to make on its own, so
+widening the pattern is left as a deliberate change for when that claim is
+actually true.
 
 ## Contributing
 

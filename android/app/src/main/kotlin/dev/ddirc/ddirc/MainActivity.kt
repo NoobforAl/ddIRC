@@ -4,7 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -15,8 +15,13 @@ import io.flutter.plugin.common.MethodChannel
  * the setting and the connections it is about. What crosses this channel is
  * only what Dart cannot do for itself: start and stop a service, ask about a
  * permission, and hear that the notification's Quit button was pressed.
+ *
+ * A `FlutterFragmentActivity` rather than a plain `FlutterActivity` — the base
+ * class `local_auth_android` requires, since a biometric prompt is shown
+ * through a `DialogFragment`, which needs a `FragmentActivity` host to attach
+ * to. Everything below is otherwise unchanged.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
 
     private companion object {
         const val CHANNEL = "dev.ddirc/background"

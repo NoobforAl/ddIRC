@@ -69,6 +69,13 @@ dependencies:
   # shared_preferences. Pinned like every other dependency.
   flutter_secure_storage: 11.0.0
 
+  # Biometric/PIN app lock — Android Keystore biometrics, Face/Touch ID,
+  # Windows Hello. Federated: pulls in local_auth_android, local_auth_darwin
+  # and local_auth_windows on its own. No Linux implementation exists, so the
+  # lock toggle is hidden there rather than shown and unable to do anything.
+  # Pinned like every other dependency.
+  local_auth: 3.0.2
+
   # Picking a file to send, and choosing where a received one is saved.
   # First-party, and it hands back a path rather than bytes — which is what the
   # core wants: a file is streamed from disk to the socket and never crosses the

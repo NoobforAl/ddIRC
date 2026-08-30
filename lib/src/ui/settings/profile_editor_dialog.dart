@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../model/directory.dart';
@@ -48,7 +50,25 @@ class ProfileEditorDialog extends StatefulWidget {
   State<ProfileEditorDialog> createState() => _ProfileEditorDialogState();
 }
 
-enum _Input { name, host, port, nick, channels, account, password }
+enum _Input {
+  name,
+  host,
+  port,
+  nick,
+  channels,
+  account,
+  password,
+  serverPassword,
+  nickservPassword,
+}
+
+/// The secret-bearing fields, so listener wiring and touch-tracking do not
+/// have to name each one again.
+const _secretInputs = {
+  _Input.password,
+  _Input.serverPassword,
+  _Input.nickservPassword,
+};
 
 class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   /// The picker's answer, or null. Never consulted while editing an existing
@@ -81,6 +101,8 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       text: widget.profile?.saslAccount ?? '',
     ),
     _Input.password: TextEditingController(),
+    _Input.serverPassword: TextEditingController(),
+    _Input.nickservPassword: TextEditingController(),
   };
 
   late final ProxyFormController _proxy = ProxyFormController(
@@ -100,7 +122,18 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   /// answers most people never give, and a form that asks for them anyway
   /// reads as a form with a lot of questions in it.
   bool _showAdvanced = false;
-  bool _passwordTouched = false;
+  final Set<_Input> _touchedSecrets = {};
+
+  /// Whether the keychain already holds a server password / NickServ
+  /// password for this profile, so a blank field can mean "keep it" rather
+  /// than "clear it" — the same distinction SASL's password makes off
+  /// [Profile.usesSasl], which neither of these has an equivalent of.
+  /// Resolved asynchronously since there is no synchronous, secret-free way
+  /// to know; starts false, which only ever briefly under-reports a stored
+  /// secret rather than over-reporting one that isn't there.
+  bool _hasStoredServerPassword = false;
+  bool _hasStoredNickservPassword = false;
+
   late ProxyMode _proxyMode =
       widget.profile?.proxyMode ?? ProxyMode.followDefault;
   late bool _autoConnect = widget.profile?.autoConnect ?? false;
@@ -125,9 +158,35 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         if (!mounted) return;
         setState(() {
           _errors.remove(entry.key);
-          if (entry.key == _Input.password) _passwordTouched = true;
+          if (_secretInputs.contains(entry.key)) {
+            _touchedSecrets.add(entry.key);
+          }
         });
       });
+    }
+    final profile = widget.profile;
+    if (profile != null) {
+      final store = ProfileScope.of(context);
+      unawaited(
+        store.serverPasswordFor(profile.id).then((value) {
+          if (mounted && value != null) {
+            setState(() {
+              _hasStoredServerPassword = true;
+              _showAdvanced = true;
+            });
+          }
+        }),
+      );
+      unawaited(
+        store.nickservPasswordFor(profile.id).then((value) {
+          if (mounted && value != null) {
+            setState(() {
+              _hasStoredNickservPassword = true;
+              _showAdvanced = true;
+            });
+          }
+        }),
+      );
     }
   }
 
@@ -258,17 +317,20 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
     setState(() => _busy = true);
     final store = ProfileScope.of(context);
-    // Only write the password when the user actually typed into the field;
+    // Only write a secret when the user actually typed into its field;
     // otherwise an edit would wipe a credential the user never touched.
-    final password = _passwordTouched ? _fields[_Input.password]!.text : null;
+    String? touched(_Input field) =>
+        _touchedSecrets.contains(field) ? _fields[field]!.text : null;
 
     try {
       await store.save(
         _build(),
-        password: password,
+        password: touched(_Input.password),
         proxyPassword: _proxyMode == ProxyMode.custom
             ? _proxy.passwordToSave()
             : null,
+        serverPassword: touched(_Input.serverPassword),
+        nickservPassword: touched(_Input.nickservPassword),
       );
     } catch (e) {
       if (!mounted) return;
@@ -362,6 +424,27 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
             SettingsSection(
               label: 'Authentication',
               children: [
+                _field(
+                  t,
+                  _Input.serverPassword,
+                  'Server password',
+                  obscure: true,
+                  hint: _hasStoredServerPassword
+                      ? 'Stored — leave blank to keep it'
+                      : 'Optional',
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                  child: Text(
+                    'Sent as the server\'s PASS before registration. Kept in '
+                    'the platform keychain, never in app settings.',
+                    style: TextStyle(
+                      color: t.faint,
+                      fontSize: 11.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
                 _field(t, _Input.account, 'SASL account'),
                 _field(
                   t,
@@ -378,6 +461,28 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                     'Optional. Kept in the platform keychain, never in app '
                     'settings, and zeroized by the core once authentication '
                     'completes.',
+                    style: TextStyle(
+                      color: t.faint,
+                      fontSize: 11.5,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                _field(
+                  t,
+                  _Input.nickservPassword,
+                  'NickServ password',
+                  obscure: true,
+                  hint: _hasStoredNickservPassword
+                      ? 'Stored — leave blank to keep it'
+                      : 'Optional',
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                  child: Text(
+                    'Used to identify with NickServ if SASL was not '
+                    'accepted. Kept in the platform keychain, never in app '
+                    'settings.',
                     style: TextStyle(
                       color: t.faint,
                       fontSize: 11.5,
@@ -582,8 +687,16 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   /// something is — so folding it away never hides a decision that has been
   /// made, only ones that have not.
   String get _advancedSummary {
+    final hasServerPassword =
+        _hasStoredServerPassword ||
+        _fields[_Input.serverPassword]!.text.isNotEmpty;
+    final hasNickservPassword =
+        _hasStoredNickservPassword ||
+        _fields[_Input.nickservPassword]!.text.isNotEmpty;
     final set = <String?>[
+      if (hasServerPassword) 'server PASS',
       if (_text(_Input.account).isNotEmpty) 'SASL',
+      if (hasNickservPassword) 'NickServ',
       switch (_proxyMode) {
         ProxyMode.followDefault => null,
         ProxyMode.direct => 'always direct',

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../model/app_lock.dart';
 import '../../model/local_server.dart';
 import '../../model/log.dart';
 import '../../model/proxy.dart';
@@ -9,6 +10,7 @@ import '../../version.dart';
 import '../background.dart';
 import '../motion.dart';
 import '../notifier.dart' show notificationsSupportedOn;
+import 'app_lock_section.dart';
 import 'file_transfer_section.dart';
 import 'local_server_section.dart';
 import 'proxy_section.dart';
@@ -163,7 +165,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
       const SettingsRule(),
       SettingsNavRow(
         label: _Page.privacy.label,
-        summary: _privacySummary(settings),
+        summary: _privacySummary(settings, AppLockScope.of(context)),
         onTap: () => _open(_Page.privacy),
       ),
       const SettingsRule(),
@@ -205,14 +207,15 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
     ].join(' · ');
   }
 
-  static String _privacySummary(AppSettings settings) {
-    final on = [
+  static String _privacySummary(AppSettings settings, AppLockSettings lock) {
+    final logs = [
       if (settings.saveChatLogs) 'chat logs',
       if (settings.saveDebugLogs) 'debug logs',
     ];
-    return on.isEmpty
+    final writing = logs.isEmpty
         ? 'Nothing written to disk'
-        : 'Saving ${on.join(' and ')}';
+        : 'Saving ${logs.join(' and ')}';
+    return lock.enabled ? 'App lock on · $writing' : writing;
   }
 
   // ----------------------------------------------------------------- the pages
@@ -346,6 +349,14 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
   List<Widget> _privacy(BuildContext context) {
     final settings = SettingsScope.of(context);
     return [
+      // First, because it is the line of defense everything else on this page
+      // sits behind. Not shown on Linux: local_auth has no implementation
+      // there, and a switch that could not do anything is worse than no
+      // switch.
+      if (appLockSupportedOn(defaultTargetPlatform)) ...[
+        const AppLockSection(),
+        const SettingsRule(),
+      ],
       SettingsSection(
         label: 'Logging',
         children: [

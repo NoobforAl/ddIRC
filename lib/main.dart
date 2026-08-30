@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'src/model/app_lock.dart';
 import 'src/model/local_server.dart';
 import 'src/model/log.dart';
 import 'src/model/profile.dart';
@@ -18,6 +19,7 @@ import 'src/model/tor.dart';
 import 'src/model/workspace.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/theme.dart';
+import 'src/ui/app_lock_gate.dart';
 import 'src/ui/background.dart';
 import 'src/ui/boot_screen.dart';
 import 'src/ui/notification_router.dart';
@@ -48,6 +50,9 @@ Future<void> main() async {
   // The local server owns one profile, so it needs the store. Like the two
   // above, this reads a preference and starts nothing.
   final localServer = await LocalServerSettings.load(profiles: profiles);
+  // Just a preference too: whether to ask for biometrics is decided here,
+  // but the asking itself only happens once the workspace is on screen.
+  final appLock = await AppLockSettings.load();
   runApp(
     DdIrcApp(
       settings: settings,
@@ -55,6 +60,7 @@ Future<void> main() async {
       proxies: proxies,
       tor: tor,
       localServer: localServer,
+      appLock: appLock,
     ),
   );
 }
@@ -98,6 +104,7 @@ class DdIrcApp extends StatefulWidget {
     required this.proxies,
     required this.tor,
     required this.localServer,
+    required this.appLock,
   });
 
   final AppSettings settings;
@@ -105,6 +112,7 @@ class DdIrcApp extends StatefulWidget {
   final ProxySettings proxies;
   final TorSettings tor;
   final LocalServerSettings localServer;
+  final AppLockSettings appLock;
 
   @override
   State<DdIrcApp> createState() => _DdIrcAppState();
@@ -226,40 +234,47 @@ class _DdIrcAppState extends State<DdIrcApp> {
 
   @override
   Widget build(BuildContext context) {
-    return SettingsScope(
-      settings: widget.settings,
-      child: ProfileScope(
-        store: widget.profiles,
-        child: ProxyScope(
-          settings: widget.proxies,
-          child: TorScope(
-            tor: widget.tor,
-            child: LocalServerScope(
-              server: widget.localServer,
-              child: WorkspaceScope(
-                workspace: _workspace,
-                // The theme is a setting, so the app itself has to listen:
-                // nothing below rebuilds MaterialApp, and `themeMode` is read
-                // here. Only that one setting, though — see [_themeMode].
-                child: ValueListenableBuilder<ThemeMode>(
-                  valueListenable: _themeMode,
-                  builder: (context, mode, _) => MaterialApp(
-                    title: 'ddIRC',
-                    debugShowCheckedModeBanner: false,
-                    theme: _light,
-                    darkTheme: _dark,
-                    themeMode: mode,
-                    // Wrapping here rather than per screen means every route —
-                    // and every dialog on the root navigator — sits under one
-                    // frame.
-                    builder: (context, child) =>
-                        WindowFrame(child: child ?? const SizedBox.shrink()),
-                    // Inside MaterialApp rather than around it, so the splash
-                    // is themed and cross-fades into the app. The scopes stay
-                    // above it, because dialogs are routes and must reach them.
-                    home: BootScreen(
-                      load: _start,
-                      builder: (context) => const WorkspaceScreen(),
+    return AppLockScope(
+      settings: widget.appLock,
+      child: SettingsScope(
+        settings: widget.settings,
+        child: ProfileScope(
+          store: widget.profiles,
+          child: ProxyScope(
+            settings: widget.proxies,
+            child: TorScope(
+              tor: widget.tor,
+              child: LocalServerScope(
+                server: widget.localServer,
+                child: WorkspaceScope(
+                  workspace: _workspace,
+                  // The theme is a setting, so the app itself has to listen:
+                  // nothing below rebuilds MaterialApp, and `themeMode` is read
+                  // here. Only that one setting, though — see [_themeMode].
+                  child: ValueListenableBuilder<ThemeMode>(
+                    valueListenable: _themeMode,
+                    builder: (context, mode, _) => MaterialApp(
+                      title: 'ddIRC',
+                      debugShowCheckedModeBanner: false,
+                      theme: _light,
+                      darkTheme: _dark,
+                      themeMode: mode,
+                      // Wrapping here rather than per screen means every route —
+                      // and every dialog on the root navigator — sits under one
+                      // frame.
+                      builder: (context, child) =>
+                          WindowFrame(child: child ?? const SizedBox.shrink()),
+                      // Inside MaterialApp rather than around it, so the splash
+                      // is themed and cross-fades into the app. The scopes stay
+                      // above it, because dialogs are routes and must reach
+                      // them. The lock gate sits inside what the splash
+                      // reveals rather than around it, so a failed core load
+                      // still shows the existing retry screen unlocked.
+                      home: BootScreen(
+                        load: _start,
+                        builder: (context) =>
+                            AppLockGate(child: const WorkspaceScreen()),
+                      ),
                     ),
                   ),
                 ),

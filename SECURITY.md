@@ -287,6 +287,10 @@ every cycle and produce a hot loop.
   at connect time, handed straight to the core, and never stored on the
   in-memory `Profile` object — so a profile list dumped for any reason cannot
   carry a credential. Deleting a profile deletes its stored password.
+- The same is true of a profile's server password (`PASS`) and NickServ
+  password: both live in `flutter_secure_storage` alongside the SASL
+  password, read only at connect time, and never held on the in-memory
+  `Profile` object.
 - The settings store (`shared_preferences`) holds **display preferences only** —
   booleans, an enum, and per-channel notification levels. It is plain,
   world-readable-by-the-app storage with no encryption, so nothing that
@@ -296,6 +300,25 @@ every cycle and produce a hot loop.
   networks a user joins and under what nick, so it is not nothing; it is
   ordinary configuration rather than a credential, and it is what a plain
   config file would hold on any other client.
+
+### App lock
+
+- Optional, off by default. Gates the UI behind the device's biometrics —
+  fingerprint, face, or Windows Hello — on cold launch and every return from
+  the background, not just at launch.
+- **What it protects against:** casual physical access to a device where
+  ddIRC is already running — someone picks up an unlocked phone and opens the
+  app.
+- **What it does not protect against:** it is a UI gate, not disk encryption
+  or a data-at-rest control. The platform keychain (see Credentials, above)
+  already protects every stored secret whether or not this is turned on, and
+  connections already open keep running behind the lock screen — this does
+  not pause or hide the fact that ddIRC is connected, only what is on screen.
+- **Not available on Linux.** No `local_auth` implementation exists there, so
+  the setting does not appear rather than appearing and doing nothing.
+- Falls back to the device's own PIN, pattern or password when biometrics are
+  unavailable or unenrolled — the platform's own default behaviour, not a
+  weaker path added on top of it.
 
 ### Least privilege
 

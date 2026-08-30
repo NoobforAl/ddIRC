@@ -110,13 +110,18 @@ class Profile {
 
   /// Build the config the core connects with.
   ///
-  /// Both secrets are passed in rather than stored, so they exist only for the
-  /// duration of the connect call — the core zeroizes them once used.
+  /// Every secret is passed in rather than stored, so it exists only for the
+  /// duration of the connect call — the core zeroizes it once used.
   ///
   /// `proxy` is already resolved: `resolveProxy` settles this profile's mode
   /// against the app-wide setting first, so what arrives here is the single
   /// answer and not a policy for the core to interpret.
-  ServerConfig toConfig({String? saslPassword, ProxyConfig? proxy}) {
+  ServerConfig toConfig({
+    String? saslPassword,
+    String? serverPassword,
+    String? nickservPassword,
+    ProxyConfig? proxy,
+  }) {
     final fallback = altNicks.isEmpty ? ['${nickname}_'] : altNicks;
     return ServerConfig(
       host: host,
@@ -126,6 +131,10 @@ class Profile {
       channels: channels,
       saslAccount: (saslAccount ?? '').isEmpty ? null : saslAccount,
       saslPassword: (saslPassword ?? '').isEmpty ? null : saslPassword,
+      serverPassword: (serverPassword ?? '').isEmpty ? null : serverPassword,
+      nickservPassword: (nickservPassword ?? '').isEmpty
+          ? null
+          : nickservPassword,
       proxy: proxy,
     );
   }
@@ -191,6 +200,8 @@ class ProfileStore extends ChangeNotifier {
   static const _kProfiles = 'profiles.v1';
   static const _secretPrefix = 'sasl.';
   static const _proxySecretPrefix = 'proxy.server.';
+  static const _serverPassPrefix = 'server-pass.';
+  static const _nickservPrefix = 'nickserv.';
 
   final SharedPreferences? _prefs;
   final FlutterSecureStorage _secrets;
@@ -242,15 +253,18 @@ class ProfileStore extends ChangeNotifier {
     return null;
   }
 
-  /// Add or replace a profile, optionally rewriting its stored password.
+  /// Add or replace a profile, optionally rewriting its stored secrets.
   ///
-  /// `password` and `proxyPassword` each distinguish three cases: null leaves
-  /// whatever is stored alone (so editing a profile does not silently wipe a
-  /// credential), an empty string clears it, and anything else replaces it.
+  /// Each of `password`, `proxyPassword`, `serverPassword` and
+  /// `nickservPassword` distinguishes three cases: null leaves whatever is
+  /// stored alone (so editing a profile does not silently wipe a credential),
+  /// an empty string clears it, and anything else replaces it.
   Future<void> save(
     Profile profile, {
     String? password,
     String? proxyPassword,
+    String? serverPassword,
+    String? nickservPassword,
   }) async {
     final index = _profiles.indexWhere((p) => p.id == profile.id);
     if (index == -1) {
@@ -266,10 +280,18 @@ class ProfileStore extends ChangeNotifier {
     if (proxyPassword != null) {
       await _writeSecret(_proxySecretPrefix, profile.id, proxyPassword);
     }
+    if (serverPassword != null) {
+      await _writeSecret(_serverPassPrefix, profile.id, serverPassword);
+    }
+    if (nickservPassword != null) {
+      await _writeSecret(_nickservPrefix, profile.id, nickservPassword);
+    }
     // A profile with no SASL account cannot use a password; drop any that a
     // previous configuration left behind rather than keeping an orphan. The
     // same goes for a proxy that no longer authenticates, or is no longer
-    // this profile's own.
+    // this profile's own. The server password and NickServ password have no
+    // such companion field to check against — each stands on its own — so
+    // there is nothing to auto-clear for either.
     if (!profile.usesSasl) await _writeSecret(_secretPrefix, profile.id, '');
     if (!profile.usesProxyAuth) {
       await _writeSecret(_proxySecretPrefix, profile.id, '');
@@ -283,6 +305,8 @@ class ProfileStore extends ChangeNotifier {
     notifyListeners();
     await _writeSecret(_secretPrefix, id, '');
     await _writeSecret(_proxySecretPrefix, id, '');
+    await _writeSecret(_serverPassPrefix, id, '');
+    await _writeSecret(_nickservPrefix, id, '');
     await _write();
   }
 
@@ -292,6 +316,14 @@ class ProfileStore extends ChangeNotifier {
   /// The stored password for this profile's own proxy, or null.
   Future<String?> proxyPasswordFor(String id) =>
       _readSecret(_proxySecretPrefix, id);
+
+  /// The stored server password (sent as `PASS`), or null.
+  Future<String?> serverPasswordFor(String id) =>
+      _readSecret(_serverPassPrefix, id);
+
+  /// The stored NickServ password, or null.
+  Future<String?> nickservPasswordFor(String id) =>
+      _readSecret(_nickservPrefix, id);
 
   Future<String?> _readSecret(String prefix, String id) async {
     try {
