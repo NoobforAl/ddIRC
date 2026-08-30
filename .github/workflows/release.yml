@@ -61,18 +61,18 @@ jobs:
           channel: stable
           cache: true
 
-      # `ndkVersion = flutter.ndkVersion` in both build.gradle files means the
-      # exact NDK side-by-side version tracks whichever Flutter is pinned
-      # above — 27.0.12077973 for 3.44.2, the same one the README's manual
-      # instructions install. Bumping the Flutter version here without
-      # checking whether its default NDK moved is how this step quietly stops
-      # matching what Gradle asks for.
+      # Neither the platform (`compileSdk = 37`) nor the NDK
+      # (`ndkVersion = flutter.ndkVersion`) is installed by hand here — a
+      # first attempt that named `platforms;android-37` explicitly failed
+      # because the runner's sdkmanager repository does not carry that exact
+      # package id under its default channel. Gradle already knows precisely
+      # which platform and NDK side-by-side version it needs by reading those
+      # two settings itself, and downloads whichever is missing the moment
+      # licences are accepted — which is a more reliable source of truth than
+      # this file guessing package ids by hand.
       - name: Accept the Android SDK licences
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
-      - name: Install the platform and NDK build.gradle asks for
-        run: |
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37" "ndk;27.0.12077973"
 
       - run: flutter pub get
 
