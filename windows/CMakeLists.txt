@@ -32,6 +32,15 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# local_auth_windows's plugin code still includes <experimental/coroutine>,
+# which a sufficiently new MSVC (STL1011) now hard-errors on rather than just
+# warning about — there is no newer local_auth_windows release that has moved
+# off it. Silencing the deprecation is Microsoft's own documented escape
+# hatch for exactly this, and it has to be set here rather than in the
+# plugin's own (generated) CMakeLists.txt, since that file is not ours to
+# edit and would be overwritten on the next `flutter pub get`.
+add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by

@@ -179,8 +179,15 @@ build-release:
 # The check for it is a prerequisite rather than the first line of the recipe,
 # so a missing Inno Setup is reported now instead of after a release build has
 # finished and there is nothing left to do with it.
+#
+# MSYS2_ARG_CONV_EXCL=* turns off Git Bash's own path-conversion for this one
+# command. Without it, `/DAppVersion=...` is indistinguishable from a Unix
+# absolute path starting with a single-letter directory, and Git Bash rewrites
+# it into something ISCC no longer recognises as its `/D` switch - which
+# surfaces as "You may not specify more than one script filename," naming the
+# wrong argument entirely.
 installer: check-iscc build-release
-	"$(ISCC)" /DAppVersion=$(APP_VERSION) windows/installer/ddirc.iss
+	MSYS2_ARG_CONV_EXCL="*" "$(ISCC)" /DAppVersion=$(APP_VERSION) windows/installer/ddirc.iss
 	@echo "-> build/installer/ddIRC-$(APP_VERSION)-windows-x64-setup.exe"
 
 check-iscc:
