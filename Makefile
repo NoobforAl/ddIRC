@@ -49,7 +49,12 @@ CARGO   ?= cargo
 # Kept to one line each, and free of backslashes: this Make strips a backslash
 # out of a $(shell) body before the shell ever sees it, so `sed 's/x\(y\)/.../'`
 # silently becomes a different expression and the variable comes out empty.
-ISCC    ?= $(shell command -v iscc 2>/dev/null || ls "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" 2>/dev/null || ls "/c/Program Files/Inno Setup 6/ISCC.exe" 2>/dev/null)
+# LOCALAPPDATA is checked first and is not an afterthought: Inno Setup's own
+# installer defaults to a per-user install when it is not run as an
+# administrator, which is the ordinary case on a developer's machine and the
+# one this was missing. Looking only in Program Files meant a perfectly
+# installed Inno Setup reported as absent.
+ISCC    ?= $(shell command -v iscc 2>/dev/null || ls "$$LOCALAPPDATA/Programs/Inno Setup 6/ISCC.exe" 2>/dev/null || ls "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" 2>/dev/null || ls "/c/Program Files/Inno Setup 6/ISCC.exe" 2>/dev/null)
 
 # `1.0.0+1` in pubspec.yaml is one version for Dart and two for everyone else:
 # the part before `+` is what Windows shows and compares, and the build number
