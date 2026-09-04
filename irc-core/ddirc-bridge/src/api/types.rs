@@ -72,6 +72,16 @@ pub struct MemberView {
     pub sort_key: String,
 }
 
+/// One channel in the server's directory.
+#[derive(Debug, Clone)]
+pub struct ChannelListing {
+    pub name: String,
+    /// How many people are in it, as the server reported.
+    pub users: u32,
+    /// Already stripped of formatting codes; empty when there is none.
+    pub topic: String,
+}
+
 /// Where a message was addressed.
 #[derive(Debug, Clone)]
 pub enum Target {
@@ -207,6 +217,19 @@ pub enum IrcEvent {
         path: Option<String>,
         error: Option<String>,
     },
+    /// What the server has, in answer to `list_channels`.
+    ///
+    /// Sent more than once for one request: each carries the busiest channels
+    /// seen so far, so the list is replaced rather than appended to. `done`
+    /// marks the last.
+    ChannelList {
+        channels: Vec<ChannelListing>,
+        done: bool,
+        /// True when there was more than the core kept, so the UI can say it
+        /// is showing the busiest rather than all of them.
+        truncated: bool,
+    },
+
     Error {
         message: String,
         fatal: bool,
@@ -341,6 +364,16 @@ impl From<types::AuthOutcome> for AuthOutcome {
     }
 }
 
+impl From<types::ChannelListing> for ChannelListing {
+    fn from(listing: types::ChannelListing) -> Self {
+        Self {
+            name: listing.name,
+            users: listing.users,
+            topic: listing.topic,
+        }
+    }
+}
+
 impl From<types::MemberView> for MemberView {
     fn from(member: types::MemberView) -> Self {
         Self {
@@ -470,6 +503,15 @@ impl From<events::IrcEvent> for IrcEvent {
             events::IrcEvent::MessagesDropped { channel, count } => {
                 Self::MessagesDropped { channel, count }
             }
+            events::IrcEvent::ChannelList {
+                channels,
+                done,
+                truncated,
+            } => Self::ChannelList {
+                channels: channels.into_iter().map(Into::into).collect(),
+                done,
+                truncated,
+            },
             events::IrcEvent::FileOffered {
                 id,
                 channel,

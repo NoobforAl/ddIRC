@@ -362,6 +362,23 @@ void main() {
       expect(notificationsSupportedOn(TargetPlatform.iOS), isFalse);
     });
 
+    // The advice has to name the actual screen, because the failure it is for
+    // is a silent one: every platform has a switch above the app's own, none
+    // of them can be read from here, and a notification refused there is
+    // simply never drawn. "Check your system settings" would help nobody.
+    test('every platform that can notify says where its own switch is', () {
+      const generic = 'This platform will not show notifications.';
+      for (final platform in [
+        TargetPlatform.windows,
+        TargetPlatform.linux,
+        TargetPlatform.macOS,
+        TargetPlatform.android,
+      ]) {
+        expect(notificationHelpFor(platform), isNot(generic));
+      }
+      expect(notificationHelpFor(TargetPlatform.iOS), generic);
+    });
+
     test('a notifier that cannot notify is still a notifier', () async {
       // Rather than a null everything above would have to remember about.
       const notifier = NoNotifier();
@@ -522,6 +539,63 @@ void main() {
         ),
       );
       await notifier.clear('p1/ada');
+    });
+
+    // The bug this pins: `POST_NOTIFICATIONS` used to be asked for in exactly
+    // one place — turning on "stay connected in the background" — and message
+    // notifications never asked at all. On Android 13 and later, a phone where
+    // that switch had been left alone dropped every notification this app
+    // raised, silently, while the settings screen said they were on.
+    group('the notification permission', () {
+      test('is not asked for twice when it is already granted', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          calls.add(call);
+          return call.method == 'notificationsAllowed' ? true : null;
+        });
+
+        expect(await notifier.ensurePermitted(), isTrue);
+        expect(calls.map((c) => c.method), ['notificationsAllowed']);
+      });
+
+      test('is requested when it has not been granted', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          calls.add(call);
+          return switch (call.method) {
+            'notificationsAllowed' => false,
+            'requestNotifications' => true,
+            _ => null,
+          };
+        });
+
+        expect(await notifier.ensurePermitted(), isTrue);
+        expect(calls.map((c) => c.method), [
+          'notificationsAllowed',
+          'requestNotifications',
+        ]);
+      });
+
+      test('a refusal is reported rather than assumed away', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => false,
+        );
+        expect(await notifier.ensurePermitted(), isFalse);
+      });
+
+      // A host that cannot be reached is not a user who said no. Treating it
+      // as a refusal would turn a channel error into a feature that quietly
+      // stopped working.
+      test('a host that will not answer is not treated as a refusal', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => throw PlatformException(code: 'boom'),
+        );
+        expect(await notifier.ensurePermitted(), isTrue);
+      });
     });
   });
 }

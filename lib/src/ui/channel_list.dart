@@ -13,6 +13,7 @@ class ChannelList extends StatelessWidget {
     required this.session,
     required this.networkName,
     required this.onSelect,
+    required this.onBrowse,
     this.onDisconnect,
     this.onChannelSettings,
   });
@@ -22,6 +23,13 @@ class ChannelList extends StatelessWidget {
   /// What the user named this network, used until the server names itself.
   final String networkName;
   final ValueChanged<String> onSelect;
+
+  /// Opens the server's own list of channels.
+  ///
+  /// The answer to the empty state's old advice, which was to type a command
+  /// naming a channel — useful only to somebody who already knew one.
+  final VoidCallback onBrowse;
+
   final VoidCallback? onDisconnect;
 
   /// Opens the settings for one conversation — right-click or long-press.
@@ -45,14 +53,35 @@ class ChannelList extends StatelessWidget {
           Expanded(
             child: conversations.isEmpty
                 ? Center(
-                    child: Text(
-                      'No channels yet.\nUse /join #channel',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: t.faint,
-                        fontSize: 12,
-                        height: 1.5,
-                      ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            'Nothing joined yet.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: t.faint,
+                              fontSize: 12,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // A button rather than the name of a command. The
+                        // people who reach this screen are exactly the ones
+                        // who do not yet know a channel to type.
+                        TextButton.icon(
+                          onPressed: onBrowse,
+                          icon: const Icon(Icons.travel_explore, size: 16),
+                          label: const Text('Browse channels'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: t.accent,
+                            textStyle: const TextStyle(fontSize: 12.5),
+                          ),
+                        ),
+                      ],
                     ),
                   )
                 : ListView.builder(
@@ -117,6 +146,15 @@ class ChannelList extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          // Beside the network's name, because browsing is a question about
+          // the network rather than about anything already in the list below.
+          IconButton(
+            onPressed: onBrowse,
+            icon: const Icon(Icons.travel_explore, size: 18),
+            color: t.muted,
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Browse this network’s channels',
           ),
         ],
       ),

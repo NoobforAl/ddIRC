@@ -43,6 +43,30 @@ class AndroidNotifier implements Notifier {
     hostCallsFor(channel).add(_onHostCall);
   }
 
+  /// Ask for `POST_NOTIFICATIONS`, which from Android 13 is the difference
+  /// between a notification and nothing at all.
+  ///
+  /// This used to be asked for in one place only: turning on *Stay connected
+  /// in the background*, because that is what puts a permanent notice in the
+  /// shade. Message notifications were never asked about, so on a phone where
+  /// that switch had been left alone — its default — every notification this
+  /// app raised was dropped by the platform without a word. The switch in
+  /// settings said they were on, the code ran end to end, and nothing ever
+  /// appeared.
+  ///
+  /// Two features needing the same permission is not a reason for only one of
+  /// them to ask for it.
+  @override
+  Future<bool> ensurePermitted() async {
+    // Below 13 there is no permission and the answer is yes. `true` is also
+    // the right answer to a host that could not be reached: refusing to notify
+    // because the question failed would turn a channel error into a silent
+    // feature loss.
+    final allowed = await _ask<bool>('notificationsAllowed') ?? true;
+    if (allowed) return true;
+    return await _ask<bool>('requestNotifications') ?? false;
+  }
+
   @override
   Future<void> show(NotificationContent content) => _invoke('notifyMessage', {
     'key': content.key,
@@ -81,6 +105,20 @@ class AndroidNotifier implements Notifier {
       await channel.invokeMethod<void>(method, arguments);
     } catch (e) {
       debugPrint('notifications: $method failed ($e)');
+    }
+  }
+
+  /// The same, for the calls that come back with an answer.
+  ///
+  /// Null on failure rather than a default, so each caller decides what a
+  /// question it could not ask should mean — which is not the same answer
+  /// every time.
+  Future<T?> _ask<T>(String method) async {
+    try {
+      return await channel.invokeMethod<T>(method);
+    } catch (e) {
+      debugPrint('notifications: $method failed ($e)');
+      return null;
     }
   }
 }

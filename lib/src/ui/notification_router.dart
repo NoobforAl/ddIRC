@@ -41,11 +41,46 @@ class NotificationRouter {
   /// every conversation opened would otherwise be a channel call.
   final Set<String> _showing = {};
 
-  Future<void> start() => notifier.start();
+  /// Whether the platform will actually draw one, as far as it will say.
+  ///
+  /// Starts null — nothing has been asked yet — and is only ever an answer the
+  /// platform gave.
+  bool? get permitted => _permitted;
+  bool? _permitted;
+
+  Future<void> start() async {
+    await notifier.start();
+    // Asked here rather than inside the notifier, because whether it is worth
+    // interrupting someone with a permission dialog depends on a setting the
+    // notifier cannot see. On at launch is the right moment for it: the app is
+    // in front, the user has just opened it, and the dialog arrives beside the
+    // thing it is about.
+    _wanted = settings.notifications;
+    if (_wanted) _permitted = await notifier.ensurePermitted();
+    // And again whenever the switch is turned on, so a user who left it off,
+    // or refused once, is asked at the moment they say they want this — not
+    // only at a launch they have already forgotten about.
+    settings.addListener(_onSettingsChanged);
+  }
 
   void dispose() {
+    settings.removeListener(_onSettingsChanged);
     notifier.dispose();
     _showing.clear();
+  }
+
+  /// Notice the notifications switch being turned on, and nothing else.
+  ///
+  /// [AppSettings] notifies for every preference in the app, including a
+  /// progress tick while Tor bootstraps, so this has to be cheap and has to
+  /// fire on the transition rather than on the value.
+  bool _wanted = false;
+  void _onSettingsChanged() {
+    final wanted = settings.notifications;
+    if (wanted == _wanted) return;
+    _wanted = wanted;
+    if (!wanted) return;
+    unawaited(notifier.ensurePermitted().then((ok) => _permitted = ok));
   }
 
   /// A line arrived. Decide, word it, and raise it — or do nothing, which is

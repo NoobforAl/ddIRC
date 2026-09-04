@@ -28,6 +28,16 @@ Stream<IrcEvent> eventStream({required BigInt id}) =>
 Future<void> join({required BigInt id, required String channel, String? key}) =>
     RustLib.instance.api.crateApiClientJoin(id: id, channel: channel, key: key);
 
+/// Ask the server what channels it has.
+///
+/// The answer arrives on the event stream as one or more
+/// `IrcEvent::ChannelList`, the last of them marked done — not as a return
+/// value, because on a large network it takes seconds and tens of thousands of
+/// lines, and a call that blocked for that would be a call nobody could put
+/// behind a button.
+Future<void> listChannels({required BigInt id}) =>
+    RustLib.instance.api.crateApiClientListChannels(id: id);
+
 Future<void> part_({
   required BigInt id,
   required String channel,

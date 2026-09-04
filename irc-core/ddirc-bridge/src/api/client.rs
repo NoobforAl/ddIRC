@@ -188,6 +188,17 @@ pub fn join(id: u64, channel: String, key: Option<String>) -> Result<(), String>
     )
 }
 
+/// Ask the server what channels it has.
+///
+/// The answer arrives on the event stream as one or more
+/// `IrcEvent::ChannelList`, the last of them marked done — not as a return
+/// value, because on a large network it takes seconds and tens of thousands of
+/// lines, and a call that blocked for that would be a call nobody could put
+/// behind a button.
+pub fn list_channels(id: u64) -> Result<(), String> {
+    send(id, ClientCommand::ListChannels)
+}
+
 pub fn part(id: u64, channel: String, reason: Option<String>) -> Result<(), String> {
     send(id, ClientCommand::Part { channel, reason })
 }

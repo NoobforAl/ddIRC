@@ -375,7 +375,6 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           label: 'Server',
           children: [
             _field(
-              t,
               _Input.name,
               'Name',
               hint: 'Optional — defaults to the host',
@@ -386,17 +385,16 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 Expanded(
                   flex: 3,
                   child: _field(
-                    t,
                     _Input.host,
                     'Address',
                     hint: 'irc.example.org',
                   ),
                 ),
-                Expanded(child: _field(t, _Input.port, 'Port')),
+                Expanded(child: _field(_Input.port, 'Port')),
               ],
             ),
             _networkNote(t),
-            _field(t, _Input.channels, 'Channels', hint: 'Comma-separated'),
+            _field(_Input.channels, 'Channels', hint: 'Comma-separated'),
             _suggestedChannels(t),
             SettingsSwitch(
               label: 'Connect at launch',
@@ -412,7 +410,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         const SettingsRule(),
         SettingsSection(
           label: 'Identity',
-          children: [_field(t, _Input.nick, 'Nickname')],
+          children: [_field(_Input.nick, 'Nickname')],
         ),
         const SettingsRule(),
         SettingsDisclosure(
@@ -425,70 +423,40 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               label: 'Authentication',
               children: [
                 _field(
-                  t,
                   _Input.serverPassword,
                   'Server password',
                   obscure: true,
                   hint: _hasStoredServerPassword
                       ? 'Stored — leave blank to keep it'
                       : 'Optional',
+                  help:
+                      'Sent as the server\'s PASS before registration. Kept '
+                      'in the platform keychain, never in app settings.',
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                  child: Text(
-                    'Sent as the server\'s PASS before registration. Kept in '
-                    'the platform keychain, never in app settings.',
-                    style: TextStyle(
-                      color: t.faint,
-                      fontSize: 11.5,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-                _field(t, _Input.account, 'SASL account'),
+                _field(_Input.account, 'SASL account'),
                 _field(
-                  t,
                   _Input.password,
                   'SASL password',
                   obscure: true,
                   hint: !_isNew && widget.profile!.usesSasl
                       ? 'Stored — leave blank to keep it'
                       : null,
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                  child: Text(
-                    'Optional. Kept in the platform keychain, never in app '
-                    'settings, and zeroized by the core once authentication '
-                    'completes.',
-                    style: TextStyle(
-                      color: t.faint,
-                      fontSize: 11.5,
-                      height: 1.4,
-                    ),
-                  ),
+                  help:
+                      'Optional. Kept in the platform keychain, never in app '
+                      'settings, and zeroized by the core once authentication '
+                      'completes.',
                 ),
                 _field(
-                  t,
                   _Input.nickservPassword,
                   'NickServ password',
                   obscure: true,
                   hint: _hasStoredNickservPassword
                       ? 'Stored — leave blank to keep it'
                       : 'Optional',
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                  child: Text(
-                    'Used to identify with NickServ if SASL was not '
-                    'accepted. Kept in the platform keychain, never in app '
-                    'settings.',
-                    style: TextStyle(
-                      color: t.faint,
-                      fontSize: 11.5,
-                      height: 1.4,
-                    ),
-                  ),
+                  help:
+                      'Used to identify with NickServ if SASL was not '
+                      'accepted. Kept in the platform keychain, never in app '
+                      'settings.',
                 ),
               ],
             ),
@@ -707,38 +675,21 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   }
 
   Widget _field(
-    Tokens t,
     _Input field,
     String label, {
     String? hint,
+    String? help,
     bool obscure = false,
-  }) {
-    final error = _errors[field];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: error == null ? t.muted : t.bad,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 5),
-          SettingsField(
-            controller: _fields[field]!,
-            hint: hint,
-            obscure: obscure,
-            error: error,
-            shakeTick: _shake,
-            onSubmitted: (_) => _busy ? null : _save(thenConnect: true),
-          ),
-        ],
-      ),
-    );
-  }
+  }) => SettingsLabelledField(
+    label: label,
+    controller: _fields[field]!,
+    hint: hint,
+    help: help,
+    obscure: obscure,
+    error: _errors[field],
+    shakeTick: _shake,
+    onSubmitted: (_) => _busy ? null : _save(thenConnect: true),
+  );
 }
 
 /// One suggested channel, on or off.

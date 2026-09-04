@@ -32,6 +32,16 @@ class _LocalServerSectionState extends State<LocalServerSection> {
     return SettingsSection(
       label: 'Local server',
       beta: true,
+      // The two paragraphs that used to sit under the readouts. Both are worth
+      // saying and neither changes, which is exactly the kind of text that
+      // becomes wallpaper if it is always on screen.
+      help:
+          'The port changes each time it starts, so the network in the rail '
+          'is kept pointed at it for you. Your nickname and channels there '
+          'are yours to change and are kept.\n\n'
+          'Reachable only from this machine. Letting another machine in would '
+          'mean handing it a certificate to install, and ddIRC will not build '
+          'that.',
       children: [
         SettingsSwitch(
           label: 'Run an IRC server in this app',
@@ -57,23 +67,10 @@ class _LocalServerSectionState extends State<LocalServerSection> {
             label: 'Network',
             value: server.networkName ?? 'None yet',
           ),
-          // Said rather than left to be discovered. The port is different at
-          // every start, so the network in the rail is maintained by this
-          // switch and not something to configure by hand.
-          const SettingsNote(
-            text:
-                'The port changes each time it starts, so the network in the '
-                'rail is kept pointed at it for you. Your nickname and '
-                'channels there are yours to change and are kept.',
-          ),
-          // The one thing about it that is genuinely a limit rather than a
-          // default, and the reason is worth giving in full.
-          const SettingsNote(
-            text:
-                'Reachable only from this machine. Letting another machine in '
-                'would mean handing it a certificate to install, and ddIRC '
-                'will not build that.',
-          ),
+          // Not a note: the limit is a fact about the feature rather than
+          // about this moment, so it lives behind the '?' on the heading with
+          // the rest of what does not change. A failure still speaks up here,
+          // because that is the opposite kind of thing.
           if (server.failure != null)
             SettingsNote(text: server.failure!, isError: true),
         ],

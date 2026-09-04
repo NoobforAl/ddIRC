@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -22,6 +22,35 @@ sealed class AuthOutcome with _$AuthOutcome {
   const factory AuthOutcome.nickServFallback({required String reason}) =
       AuthOutcome_NickServFallback;
   const factory AuthOutcome.anonymous() = AuthOutcome_Anonymous;
+}
+
+/// One channel in the server's directory.
+class ChannelListing {
+  final String name;
+
+  /// How many people are in it, as the server reported.
+  final int users;
+
+  /// Already stripped of formatting codes; empty when there is none.
+  final String topic;
+
+  const ChannelListing({
+    required this.name,
+    required this.users,
+    required this.topic,
+  });
+
+  @override
+  int get hashCode => name.hashCode ^ users.hashCode ^ topic.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChannelListing &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          users == other.users &&
+          topic == other.topic;
 }
 
 /// A chat message, already sanitised.
@@ -297,6 +326,20 @@ sealed class IrcEvent with _$IrcEvent {
     String? path,
     String? error,
   }) = IrcEvent_FileTransferEnded;
+
+  /// What the server has, in answer to `list_channels`.
+  ///
+  /// Sent more than once for one request: each carries the busiest channels
+  /// seen so far, so the list is replaced rather than appended to. `done`
+  /// marks the last.
+  const factory IrcEvent.channelList({
+    required List<ChannelListing> channels,
+    required bool done,
+
+    /// True when there was more than the core kept, so the UI can say it
+    /// is showing the busiest rather than all of them.
+    required bool truncated,
+  }) = IrcEvent_ChannelList;
   const factory IrcEvent.error({required String message, required bool fatal}) =
       IrcEvent_Error;
 }

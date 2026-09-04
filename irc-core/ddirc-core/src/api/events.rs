@@ -4,7 +4,7 @@
 //! Dart `Stream`, keeps ordering guarantees obvious, and means adding an event
 //! later does not change the API surface.
 
-use crate::api::types::{AuthOutcome, ChatMessage, ConnectionStatus, MemberView};
+use crate::api::types::{AuthOutcome, ChannelListing, ChatMessage, ConnectionStatus, MemberView};
 use crate::dcc::DccOffer;
 
 /// Something that happened on a connection.
@@ -172,6 +172,29 @@ pub enum IrcEvent {
         error: Option<String>,
     },
 
+    /// What the server has, in answer to a `LIST`.
+    ///
+    /// Emitted more than once for a single request, because on a large network
+    /// the answer is tens of thousands of lines arriving over several seconds
+    /// and a browser that showed nothing until the last one would be a browser
+    /// nobody waits for. Each event carries the best of what has arrived so
+    /// far, so the UI replaces its list rather than appending to it.
+    ///
+    /// `done` marks the last one. Until it is true the list is still growing
+    /// and its ordering may still change.
+    ChannelList {
+        /// The busiest channels seen so far, most populated first, capped —
+        /// see [`crate::conn::actor::MAX_LIST_KEPT`].
+        channels: Vec<ChannelListing>,
+        /// True once the server has finished, or once the core stopped
+        /// listening because the answer was unreasonably long.
+        done: bool,
+        /// True when there was more than the core was willing to keep, so the
+        /// UI can say "the busiest of many" rather than implying this is all
+        /// of them.
+        truncated: bool,
+    },
+
     /// A server error or a protocol-level problem worth showing the user.
     Error { message: String, fatal: bool },
 }
@@ -198,6 +221,9 @@ impl IrcEvent {
             // step for no gain.
             Self::FileTransferProgress { .. } => None,
             Self::MessagesDropped { channel, .. } => channel.as_deref(),
+            // Belongs to the network, not to any one conversation: it is a
+            // list of rooms the user is precisely not in.
+            Self::ChannelList { .. } => None,
             Self::Status { .. }
             | Self::Registered { .. }
             | Self::NetworkNamed { .. }

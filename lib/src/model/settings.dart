@@ -64,6 +64,7 @@ class AppSettings extends ChangeNotifier {
   static const _kNotifications = 'app.notifications';
   static const _kNotifyPreview = 'app.notifyPreview';
   static const _kNotifyPrefix = 'notify.';
+  static const _kShowMembers = 'ui.showMembers';
 
   /// People whose first message was declined, and people whose was accepted.
   ///
@@ -120,6 +121,16 @@ class AppSettings extends ChangeNotifier {
   /// said is a choice to make deliberately.
   bool _notifyPreview = false;
 
+  /// Off, so a wide window shows the conversation and not the roster.
+  ///
+  /// The member list used to appear the moment the window was wide enough,
+  /// which made it a property of the window rather than a thing anyone asked
+  /// for: on a desktop it was simply always there, taking 190 points to list
+  /// people who are mostly not saying anything. It is one press away in the
+  /// header, and the count of who is present stays on that button either way —
+  /// which is the part of it that is worth having at a glance.
+  bool _showMembers = false;
+
   Density _density = Density.comfortable;
   ThemeMode _themeMode = ThemeMode.dark;
   final Map<String, NotifyLevel> _notify = {};
@@ -157,6 +168,7 @@ class AppSettings extends ChangeNotifier {
     _runInBackground = prefs.getBool(_kRunInBackground) ?? _runInBackground;
     _notifications = prefs.getBool(_kNotifications) ?? _notifications;
     _notifyPreview = prefs.getBool(_kNotifyPreview) ?? _notifyPreview;
+    _showMembers = prefs.getBool(_kShowMembers) ?? _showMembers;
     _density = Density.values.firstWhere(
       (d) => d.name == prefs.getString(_kDensity),
       orElse: () => _density,
@@ -194,6 +206,7 @@ class AppSettings extends ChangeNotifier {
   bool get runInBackground => _runInBackground;
   bool get notifications => _notifications;
   bool get notifyPreview => _notifyPreview;
+  bool get showMembers => _showMembers;
   Density get density => _density;
   ThemeMode get themeMode => _themeMode;
 
@@ -253,6 +266,10 @@ class AppSettings extends ChangeNotifier {
 
   set notifyPreview(bool value) => _set(_kNotifyPreview, value, () {
     _notifyPreview = value;
+  });
+
+  set showMembers(bool value) => _set(_kShowMembers, value, () {
+    _showMembers = value;
   });
 
   set density(Density value) => _set(_kDensity, value.name, () {

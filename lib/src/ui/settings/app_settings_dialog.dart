@@ -9,7 +9,8 @@ import '../../model/settings.dart';
 import '../../version.dart';
 import '../background.dart';
 import '../motion.dart';
-import '../notifier.dart' show notificationsSupportedOn;
+import '../notifier.dart'
+    show notificationHelpFor, notificationsSupportedOn;
 import 'app_lock_section.dart';
 import 'file_transfer_section.dart';
 import 'local_server_section.dart';
@@ -314,6 +315,13 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
       if (notificationsSupportedOn(defaultTargetPlatform))
         SettingsSection(
           label: 'Notifications',
+          // The one thing this switch cannot do anything about, said where
+          // somebody wondering why nothing appears will find it. The operating
+          // system has its own switch above this one, ddIRC cannot read it,
+          // and a notification refused there is refused silently — which
+          // leaves this page claiming notifications are on while nothing is
+          // ever drawn.
+          help: notificationHelpFor(defaultTargetPlatform),
           children: [
             SettingsSwitch(
               label: 'Notify me about messages',

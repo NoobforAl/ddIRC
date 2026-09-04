@@ -137,12 +137,13 @@ class SettingsDialog extends StatelessWidget {
 }
 
 /// A labelled group of rows, and the unit a settings page is built from.
-class SettingsSection extends StatelessWidget {
+class SettingsSection extends StatefulWidget {
   const SettingsSection({
     super.key,
     required this.label,
     required this.children,
     this.beta = false,
+    this.help,
   });
 
   final String label;
@@ -155,18 +156,36 @@ class SettingsSection extends StatelessWidget {
   /// as the switch is.
   final bool beta;
 
+  /// What the whole section is, behind a [HelpDot] on the heading.
+  ///
+  /// For the paragraph that explains the feature rather than any one control
+  /// in it — the sort of thing that used to sit under the last readout as a
+  /// [SettingsNote] and was read once, by everybody, forever.
+  final String? help;
+
+  @override
+  State<SettingsSection> createState() => _SettingsSectionState();
+}
+
+class _SettingsSectionState extends State<SettingsSection> {
+  bool _help = false;
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final help = widget.help;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+          // Tighter above when a dot is present: the dot is taller than the
+          // heading it sits beside and would otherwise push every section
+          // apart by the difference.
+          padding: EdgeInsets.fromLTRB(18, help == null ? 14 : 8, 18, 6),
           child: Row(
             children: [
               Text(
-                label.toUpperCase(),
+                widget.label.toUpperCase(),
                 style: TextStyle(
                   color: t.faint,
                   fontSize: 10.5,
@@ -174,11 +193,27 @@ class SettingsSection extends StatelessWidget {
                   letterSpacing: 0.9,
                 ),
               ),
-              if (beta) ...[const SizedBox(width: 7), const BetaBadge()],
+              if (widget.beta) ...[
+                const SizedBox(width: 7),
+                const BetaBadge(),
+              ],
+              if (help != null) ...[
+                const SizedBox(width: 3),
+                HelpDot(
+                  open: _help,
+                  subject: widget.label,
+                  onToggle: () => setState(() => _help = !_help),
+                ),
+              ],
             ],
           ),
         ),
-        ...children,
+        HelpText(
+          text: help,
+          open: _help,
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+        ),
+        ...widget.children,
       ],
     );
   }
@@ -224,6 +259,129 @@ class BetaBadge extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The '?' that stands in for a paragraph.
+///
+/// Settings used to explain themselves in full underneath every control, and
+/// the result was a dialog where the explanations outnumbered the switches
+/// three lines to one. Nobody reads a wall of small grey text, and a page
+/// where everything is explained at once is a page where nothing stands out —
+/// including the two or three explanations that genuinely matter.
+///
+/// So the prose is still there, in full, and it is one tap away instead of
+/// permanently in the way. Nothing is deleted and nothing is summarised: the
+/// dot is a promise that pressing it gives back exactly what was there before.
+///
+/// Deliberately controlled rather than holding its own state, so the widget
+/// that owns the row can put the '?' beside the label and the text below the
+/// whole row — the two halves are never in the same place.
+class HelpDot extends StatelessWidget {
+  const HelpDot({
+    super.key,
+    required this.open,
+    required this.onToggle,
+    this.subject,
+  });
+
+  final bool open;
+  final VoidCallback onToggle;
+
+  /// What the help is about, for the tooltip. Without it the tooltip can only
+  /// say "this", which is no use to someone reading with a screen reader and
+  /// no pointer to say what "this" is next to.
+  final String? subject;
+
+  /// The dot occupies this square whether or not it is drawn, so a row of
+  /// labels stays on one baseline when only some of them have help.
+  static const size = 26.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final subject = this.subject;
+    return Tooltip(
+      message: open
+          ? 'Hide the explanation'
+          : subject == null
+          ? 'What does this do?'
+          : 'What does “$subject” do?',
+      child: InkResponse(
+        onTap: onToggle,
+        radius: size / 2,
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Center(
+            child: AnimatedContainer(
+              duration: context.motion.fast,
+              curve: Motion.curve,
+              width: 15,
+              height: 15,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: open ? t.accent.withValues(alpha: 0.14) : null,
+                border: Border.all(
+                  color: open ? t.accent : t.rule,
+                  width: Tokens.hairline,
+                ),
+              ),
+              child: Text(
+                '?',
+                style: TextStyle(
+                  color: open ? t.accent : t.faint,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  // Pinned, or the glyph's own leading pushes it off centre in
+                  // a circle this small.
+                  height: 1,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The paragraph a [HelpDot] reveals.
+///
+/// Takes a nullable [text] so a caller with nothing to explain can drop this
+/// in unconditionally rather than growing an `if` around it.
+class HelpText extends StatelessWidget {
+  const HelpText({
+    super.key,
+    required this.text,
+    required this.open,
+    this.padding = const EdgeInsets.only(top: 6, bottom: 2),
+  });
+
+  final String? text;
+  final bool open;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final text = this.text;
+    return Reveal(
+      child: open && text != null
+          ? Padding(
+              padding: padding,
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: t.faint,
+                  fontSize: 11.5,
+                  height: 1.45,
+                ),
+              ),
+            )
+          : null,
     );
   }
 }
@@ -399,7 +557,7 @@ class SettingsDisclosure extends StatelessWidget {
 }
 
 /// One boolean preference.
-class SettingsSwitch extends StatelessWidget {
+class SettingsSwitch extends StatefulWidget {
   const SettingsSwitch({
     super.key,
     required this.label,
@@ -409,49 +567,76 @@ class SettingsSwitch extends StatelessWidget {
   });
 
   final String label;
+
+  /// What the switch means, behind a [HelpDot] rather than under the label.
+  /// See [HelpDot] for why it is not simply printed.
   final String? description;
+
   final bool value;
   final ValueChanged<bool> onChanged;
 
   @override
+  State<SettingsSwitch> createState() => _SettingsSwitchState();
+}
+
+class _SettingsSwitchState extends State<SettingsSwitch> {
+  bool _help = false;
+
+  @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final description = widget.description;
     return InkWell(
-      onTap: () => onChanged(!value),
+      onTap: () => widget.onChanged(!widget.value),
       child: Padding(
+        // Unchanged whether or not there is a dot: the switch is taller than
+        // both the label and the dot, so it is the switch that sets this row's
+        // height and adding help costs nothing until it is opened.
         padding: const EdgeInsets.fromLTRB(18, 9, 14, 9),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: TextStyle(color: t.text, fontSize: 13.5)),
-                  if (description != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      description!,
-                      style: TextStyle(
-                        color: t.faint,
-                        fontSize: 11.5,
-                        height: 1.35,
+            Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          widget.label,
+                          style: TextStyle(color: t.text, fontSize: 13.5),
+                        ),
                       ),
-                    ),
-                  ],
-                ],
-              ),
+                      if (description != null)
+                        // Inside the row's own InkWell, and that is safe: the
+                        // innermost gesture recogniser takes the tap, so
+                        // pressing the dot asks what the switch does instead
+                        // of flipping it.
+                        HelpDot(
+                          open: _help,
+                          subject: widget.label,
+                          onToggle: () => setState(() => _help = !_help),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Switch(
+                  value: widget.value,
+                  onChanged: widget.onChanged,
+                  activeThumbColor: t.onAccent,
+                  activeTrackColor: t.accent,
+                  inactiveThumbColor: t.muted,
+                  inactiveTrackColor: t.surfaceHover,
+                  trackOutlineColor: WidgetStatePropertyAll(t.rule),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Switch(
-              value: value,
-              onChanged: onChanged,
-              activeThumbColor: t.onAccent,
-              activeTrackColor: t.accent,
-              inactiveThumbColor: t.muted,
-              inactiveTrackColor: t.surfaceHover,
-              trackOutlineColor: WidgetStatePropertyAll(t.rule),
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
+            // Full width under the switch rather than in a column beside it:
+            // once it is opened deliberately it should be as readable as the
+            // dialog can make it.
+            HelpText(text: description, open: _help),
           ],
         ),
       ),
@@ -463,7 +648,7 @@ class SettingsSwitch extends StatelessWidget {
 ///
 /// A segmented row rather than a dropdown: with two or three choices, hiding
 /// them behind a menu costs a tap and tells the user nothing.
-class SettingsChoice<T> extends StatelessWidget {
+class SettingsChoice<T> extends StatefulWidget {
   const SettingsChoice({
     super.key,
     required this.label,
@@ -475,28 +660,48 @@ class SettingsChoice<T> extends StatelessWidget {
   });
 
   final String label;
+
+  /// What the choice means, behind a [HelpDot] rather than under the label.
   final String? description;
+
   final List<T> options;
   final String Function(T) labelFor;
   final T value;
   final ValueChanged<T> onChanged;
 
   @override
+  State<SettingsChoice<T>> createState() => _SettingsChoiceState<T>();
+}
+
+class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
+  bool _help = false;
+
+  @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final description = widget.description;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 9, 18, 10),
+      padding: EdgeInsets.fromLTRB(18, description == null ? 9 : 5, 18, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(color: t.text, fontSize: 13.5)),
-          if (description != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              description!,
-              style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.35),
-            ),
-          ],
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  widget.label,
+                  style: TextStyle(color: t.text, fontSize: 13.5),
+                ),
+              ),
+              if (description != null)
+                HelpDot(
+                  open: _help,
+                  subject: widget.label,
+                  onToggle: () => setState(() => _help = !_help),
+                ),
+            ],
+          ),
+          HelpText(text: description, open: _help),
           const SizedBox(height: 9),
           Container(
             decoration: BoxDecoration(
@@ -506,14 +711,14 @@ class SettingsChoice<T> extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: Row(
               children: [
-                for (final option in options)
+                for (final option in widget.options)
                   Expanded(
                     child: _Segment(
-                      label: labelFor(option),
-                      selected: option == value,
+                      label: widget.labelFor(option),
+                      selected: option == widget.value,
                       // A hairline between segments, never around the first.
-                      leadingRule: option != options.first,
-                      onTap: () => onChanged(option),
+                      leadingRule: option != widget.options.first,
+                      onTap: () => widget.onChanged(option),
                     ),
                   ),
               ],
@@ -620,7 +825,7 @@ class SettingsReadout extends StatelessWidget {
 ///
 /// When [error] is set the field itself turns red and shakes; nothing about
 /// the problem is reported anywhere else, so there is only one place to look.
-class SettingsField extends StatelessWidget {
+class SettingsField extends StatefulWidget {
   const SettingsField({
     super.key,
     required this.controller,
@@ -638,45 +843,92 @@ class SettingsField extends StatelessWidget {
   final int maxLines;
   final ValueChanged<String>? onSubmitted;
   final bool enabled;
+
+  /// Hides what is typed, and puts an eye at the end of the field to show it
+  /// again. See [_SettingsFieldState._reveal] for why the eye is not optional.
   final bool obscure;
+
   final String? error;
 
   /// Bumped by the caller to replay the shake on a repeated attempt.
   final int shakeTick;
 
   @override
+  State<SettingsField> createState() => _SettingsFieldState();
+}
+
+class _SettingsFieldState extends State<SettingsField> {
+  /// Whether the user has asked to see what they are typing.
+  ///
+  /// Every obscured field here takes a password that is typed once, cannot be
+  /// checked anywhere else, and produces a failure hours later and on another
+  /// screen if it is wrong — a SASL password that is one character out looks
+  /// exactly like a server that is refusing the account. Dots alone are the
+  /// wrong trade for that: the thing being hidden from is a person standing
+  /// behind you, and they are not there most of the time.
+  ///
+  /// So it starts hidden, which is the right default, and it is one press to
+  /// check. Never remembered: the field goes back to dots whenever the dialog
+  /// is closed and reopened, because a reveal that outlives the moment it was
+  /// wanted for is a password left on the screen.
+  bool _reveal = false;
+
+  @override
+  void didUpdateWidget(SettingsField old) {
+    super.didUpdateWidget(old);
+    // A field that stops being a secret and later becomes one again must not
+    // come back already showing.
+    if (!widget.obscure && _reveal) _reveal = false;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final invalid = error != null;
+    final invalid = widget.error != null;
+    final obscured = widget.obscure && !_reveal;
 
     return Shake(
-      tick: invalid ? shakeTick : 0,
+      tick: invalid ? widget.shakeTick : 0,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           TextField(
-            controller: controller,
+            controller: widget.controller,
             // An obscured field is always single-line; passing minLines with
-            // obscureText is an assertion failure in Flutter.
-            maxLines: obscure ? 1 : maxLines,
-            minLines: obscure ? null : 1,
-            obscureText: obscure,
-            enabled: enabled,
-            onSubmitted: onSubmitted,
+            // obscureText is an assertion failure in Flutter. It stays single
+            // line while revealed too, so showing a password does not resize
+            // the form around it.
+            maxLines: widget.obscure ? 1 : widget.maxLines,
+            minLines: widget.obscure ? null : 1,
+            obscureText: obscured,
+            enabled: widget.enabled,
+            onSubmitted: widget.onSubmitted,
             autocorrect: false,
             enableSuggestions: false,
             style: TextStyle(
-              color: enabled ? t.text : t.muted,
+              color: widget.enabled ? t.text : t.muted,
               fontSize: 13.5,
               height: 1.35,
             ),
             decoration: InputDecoration(
-              hintText: hint,
+              hintText: widget.hint,
               hintStyle: TextStyle(color: t.faint, fontSize: 13.5),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 11,
                 vertical: 11,
+              ),
+              suffixIcon: widget.obscure && widget.enabled
+                  ? _RevealButton(
+                      revealed: _reveal,
+                      onToggle: () => setState(() => _reveal = !_reveal),
+                    )
+                  : null,
+              // Without this the eye claims Material's default 48-square and
+              // the field grows taller than every other one in the form.
+              suffixIconConstraints: const BoxConstraints(
+                minWidth: 34,
+                minHeight: 34,
               ),
               enabledBorder: outlinedBorder(
                 invalid ? t.bad : t.rule,
@@ -690,10 +942,141 @@ class SettingsField extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(top: 5),
               child: Text(
-                error!,
+                widget.error!,
                 style: TextStyle(color: t.bad, fontSize: 11.5, height: 1.35),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The eye at the end of a secret field.
+///
+/// The icon shows the state the field is in rather than the state pressing it
+/// would produce — an open eye means "this is visible" — and the tooltip says
+/// what the press does. That pairing is the one people already know from
+/// every other password field, and inventing a better one here would only
+/// mean it has to be learned.
+class _RevealButton extends StatelessWidget {
+  const _RevealButton({required this.revealed, required this.onToggle});
+
+  final bool revealed;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: revealed ? 'Hide it again' : 'Show what is typed',
+      child: InkResponse(
+        onTap: onToggle,
+        radius: 17,
+        child: SizedBox(
+          width: 34,
+          height: 34,
+          child: Icon(
+            revealed ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            size: 17,
+            color: revealed ? t.accent : t.faint,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A [SettingsField] with its own label above it, and optionally a [HelpDot]
+/// beside the label.
+///
+/// One widget rather than the near-identical private helper the network editor
+/// and the proxy form each had, because the two drifted the moment either one
+/// grew anything — and what they grew was help, which has to sit in exactly
+/// the same place in both or the '?' stops reading as one control.
+class SettingsLabelledField extends StatefulWidget {
+  const SettingsLabelledField({
+    super.key,
+    required this.label,
+    required this.controller,
+    this.help,
+    this.hint,
+    this.obscure = false,
+    this.error,
+    this.shakeTick = 0,
+    this.onSubmitted,
+  });
+
+  final String label;
+  final TextEditingController controller;
+
+  /// What the field is for, and what happens to what is typed into it. Behind
+  /// the '?': see [HelpDot].
+  final String? help;
+
+  final String? hint;
+  final bool obscure;
+  final String? error;
+  final int shakeTick;
+  final ValueChanged<String>? onSubmitted;
+
+  @override
+  State<SettingsLabelledField> createState() => _SettingsLabelledFieldState();
+}
+
+class _SettingsLabelledFieldState extends State<SettingsLabelledField> {
+  bool _help = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final help = widget.help;
+    final invalid = widget.error != null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // A fixed height, so two fields side by side start their boxes on
+          // the same line whether or not either of them has a '?'.
+          SizedBox(
+            height: HelpDot.size,
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: invalid ? t.bad : t.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                if (help != null)
+                  HelpDot(
+                    open: _help,
+                    subject: widget.label,
+                    onToggle: () => setState(() => _help = !_help),
+                  ),
+              ],
+            ),
+          ),
+          HelpText(
+            text: help,
+            open: _help,
+            padding: const EdgeInsets.only(bottom: 6),
+          ),
+          const SizedBox(height: 3),
+          SettingsField(
+            controller: widget.controller,
+            hint: widget.hint,
+            obscure: widget.obscure,
+            error: widget.error,
+            shakeTick: widget.shakeTick,
+            onSubmitted: widget.onSubmitted,
+          ),
         ],
       ),
     );

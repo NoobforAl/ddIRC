@@ -6,6 +6,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../rust/api/client.dart' as core;
 import '../rust/api/types.dart';
+import 'errors.dart';
 import 'log.dart';
 import 'notice.dart';
 import 'settings.dart';
@@ -272,6 +273,43 @@ class SessionModel extends ChangeNotifier {
   /// everything you are in; this is what you have open.
   final List<String> _tabs = [];
 
+  /// Channels the user has just asked to be in, waiting for the server to say
+  /// they are.
+  ///
+  /// The whole difference between a channel that opens a tab and one that does
+  /// not. A `JOIN` for ourselves looks identical on the wire whether it came
+  /// from `/join`, from the browser, or from the profile's list being replayed
+  /// at registration — and only the first two are the user opening something
+  /// right now. Nothing else can tell them apart after the fact, so the
+  /// intention is recorded before the request goes out.
+  ///
+  /// Keys, not names, because the server may answer `#Foo` with `#foo`.
+  final Set<String> _requested = {};
+
+  /// Whether this session has put the user anywhere yet.
+  ///
+  /// Connecting should land somewhere rather than on an empty screen, and the
+  /// first channel to arrive is where. Deliberately not "is anything open
+  /// right now": that question answers yes again the moment somebody closes
+  /// their last tab, which would make a channel cycling on the server reopen a
+  /// tab they had just shut.
+  bool _landed = false;
+
+  /// The server's channel directory, most populated first.
+  ///
+  /// Empty until somebody asks: `LIST` is the largest thing this connection
+  /// ever receives, and sending it unprompted at every connect would make
+  /// every connect expensive to pay for a browser most people open rarely.
+  List<ChannelListing> _directory = const [];
+  bool _directoryLoading = false;
+  bool _directoryTruncated = false;
+
+  /// Gives up waiting for a server that answered `LIST` with silence.
+  ///
+  /// Some servers refuse the command outright and say nothing at all, and a
+  /// browser spinning for ever is a worse answer than an empty one.
+  Timer? _directoryTimeout;
+
   String _nick;
   String? _active;
 
@@ -346,6 +384,46 @@ class SessionModel extends ChangeNotifier {
     _tabsCache = null;
   }
 
+  /// Whether this session is already in [name].
+  ///
+  /// Read by the browser, which offers channels the user may well be sitting
+  /// in — a directory that quietly omitted them would read as those channels
+  /// having closed.
+  bool isIn(String name) => _conversations.containsKey(_key(name));
+
+  /// The channels this server has, as far as they have arrived.
+  List<ChannelListing> get directory => _directory;
+
+  /// Whether an answer is still coming.
+  bool get directoryLoading => _directoryLoading;
+
+  /// Whether what is in [directory] is the busiest of more than it holds.
+  bool get directoryTruncated => _directoryTruncated;
+
+  /// Ask the server for its channels.
+  ///
+  /// Cheap to call again — the core ignores a second request while one is in
+  /// flight — but the results already held are kept on screen while the new
+  /// ones arrive, so reopening the browser never empties it.
+  Future<void> browseChannels() async {
+    if (_directoryLoading) return;
+    _directoryLoading = true;
+    _directoryTimeout?.cancel();
+    _directoryTimeout = Timer(const Duration(seconds: 45), () {
+      if (_disposed || !_directoryLoading) return;
+      _directoryLoading = false;
+      notifyListeners();
+    });
+    notifyListeners();
+    try {
+      await core.listChannels(id: connectionId);
+    } catch (e) {
+      _directoryLoading = false;
+      _directoryTimeout?.cancel();
+      raiseNotice(Notice.error(describeError(e)));
+    }
+  }
+
   int get totalUnread =>
       _conversations.values.fold(0, (sum, c) => sum + c.unread);
 
@@ -353,6 +431,24 @@ class SessionModel extends ChangeNotifier {
       _conversations.values.fold(0, (sum, c) => sum + c.unreadMentions);
 
   bool get isConnected => _status is ConnectionStatus_Connected;
+
+  /// Feed one event in as though it had come from the core.
+  ///
+  /// The seam this class was already written for — see the note on [onLine] —
+  /// extended to the event stream, so which channels open a tab can be checked
+  /// without a socket, a server or the native library loaded.
+  @visibleForTesting
+  void receiveForTesting(IrcEvent event) => _onEvent(event);
+
+  /// The half of [joinChannel] that does not touch the core: record that the
+  /// user asked for this channel.
+  ///
+  /// Exposed because the other half cannot run in a test — there is no native
+  /// library to send through, and a send that fails deliberately forgets the
+  /// intention, which is the correct behaviour and also the one that makes the
+  /// interesting case untestable through the front door.
+  @visibleForTesting
+  void requestForTesting(String channel) => _requested.add(_key(channel));
 
   void start() {
     // Fed from the Rust network runtime, so a flooding channel never stalls
@@ -404,6 +500,7 @@ class SessionModel extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _noticeTimer?.cancel();
+    _directoryTimeout?.cancel();
     _subscription?.cancel();
     core.disconnect(id: connectionId, reason: 'ddIRC');
     super.dispose();
@@ -417,6 +514,7 @@ class SessionModel extends ChangeNotifier {
     String name, {
     required bool isChannel,
     bool pending = false,
+    bool openTab = true,
   }) {
     final key = _key(name);
     final existing = _conversations[key];
@@ -435,14 +533,50 @@ class SessionModel extends ChangeNotifier {
     // a choice they made — a tab opening and the screen changing under them is
     // exactly the control this is taking back.
     if (pending) return created;
-    // Arriving somewhere opens it. A channel joined from /join or from the
-    // profile's autojoin list that did not appear in the strip would be
+    // The same argument, one step weaker, for a channel that arrived from the
+    // profile's own list: being in it was decided once, when the network was
+    // saved, and is not a decision to open it *now*. It goes in the list on
+    // the left with everything else you are in, and the strip stays as short
+    // as the number of things you actually opened.
+    if (!openTab) return created;
+    // Arriving somewhere you asked to be opens it. A channel joined from
+    // /join or from the browser that did not appear in the strip would be
     // invisible until the user went looking for it in the list.
     _tabs.add(key);
     // The first conversation to appear becomes the active one, so the user is
     // never looking at an empty screen after joining.
     _active ??= key;
     return created;
+  }
+
+  /// Join a channel because the user just said to.
+  ///
+  /// The one door for a deliberate join — `/join`, the channel browser — and
+  /// the only thing that separates them from the profile's list is that they
+  /// come through here. Recording the intention before the request goes out is
+  /// what lets the answer open a tab; a join that skipped this would land in
+  /// the list on the left and nowhere else.
+  Future<void> joinChannel(String channel, {String? key}) async {
+    final name = channel.trim();
+    if (name.isEmpty) return;
+    _requested.add(_key(name));
+    // Already in it — the browser will happily offer a channel you are in, and
+    // the server will not send a second JOIN to answer with. Open it here
+    // instead, so pressing Join is never a press that does nothing.
+    if (_conversations.containsKey(_key(name))) {
+      _requested.remove(_key(name));
+      select(name);
+      return;
+    }
+    try {
+      await core.join(id: connectionId, channel: name, key: key);
+    } catch (e) {
+      // The intention outlives nothing: a request that never went out must not
+      // leave a channel primed to open a tab if the server puts us in it later
+      // for some other reason.
+      _requested.remove(_key(name));
+      raiseNotice(Notice.error(describeError(e)));
+    }
   }
 
   /// Open a conversation with a person, without sending them anything.
@@ -564,11 +698,13 @@ class SessionModel extends ChangeNotifier {
     ChatLine line, {
     required bool isChannel,
     bool pending = false,
+    bool openTab = true,
   }) {
     final conversation = _conversationFor(
       name,
       isChannel: isChannel,
       pending: pending,
+      openTab: openTab,
     );
     conversation.add(
       line,
@@ -677,6 +813,14 @@ class SessionModel extends ChangeNotifier {
         );
 
       case IrcEvent_Joined(:final channel, :final nick, :final isSelf):
+        // Whether *this* join is something the user just did. A `/join`, a
+        // channel picked in the browser and a click on the list all say so;
+        // the profile's own list, arriving in a burst the moment registration
+        // completes, says nothing and gets nothing.
+        //
+        // Consumed rather than read, so joining `#x`, parting, and being put
+        // back in it by the server does not reopen a tab the user closed.
+        final asked = isSelf && _requested.remove(_key(channel));
         _addLine(
           channel,
           ChatLine.system(
@@ -685,10 +829,29 @@ class SessionModel extends ChangeNotifier {
             SystemKind.presence,
           ),
           isChannel: true,
+          openTab: asked,
         );
-        if (isSelf) {
-          _active ??= _key(channel);
+        // Somewhere to be, and only that. The first channel to arrive is
+        // opened so that connecting does not land on an empty screen; the
+        // fifth is not, and the strip stays the length of what was asked for.
+        if (isSelf && (asked || !_landed)) {
+          _landed = true;
           select(channel);
+        }
+
+      case IrcEvent_ChannelList(
+        :final channels,
+        :final done,
+        :final truncated,
+      ):
+        // Replaced, never appended to: each event carries the busiest of
+        // everything the core has seen, so the previous one is a prefix of
+        // this one and adding them together would show every channel twice.
+        _directory = channels;
+        _directoryTruncated = truncated;
+        if (done) {
+          _directoryLoading = false;
+          _directoryTimeout?.cancel();
         }
 
       case IrcEvent_Parted(
@@ -1077,7 +1240,7 @@ class SessionModel extends ChangeNotifier {
       switch (command) {
         case SlashCommand.join:
           if (argument.isEmpty) return usage();
-          await core.join(id: connectionId, channel: argument);
+          await joinChannel(argument);
         case SlashCommand.part:
           final target = active;
           if (target == null) return 'not in a channel';

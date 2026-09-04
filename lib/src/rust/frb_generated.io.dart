@@ -73,6 +73,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_box_autoadd_u_8(dynamic raw);
 
   @protected
+  ChannelListing dco_decode_channel_listing(dynamic raw);
+
+  @protected
   ChatMessage dco_decode_chat_message(dynamic raw);
 
   @protected
@@ -92,6 +95,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<ChannelListing> dco_decode_list_channel_listing(dynamic raw);
 
   @protected
   List<MemberView> dco_decode_list_member_view(dynamic raw);
@@ -233,6 +239,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_box_autoadd_u_8(SseDeserializer deserializer);
 
   @protected
+  ChannelListing sse_decode_channel_listing(SseDeserializer deserializer);
+
+  @protected
   ChatMessage sse_decode_chat_message(SseDeserializer deserializer);
 
   @protected
@@ -252,6 +261,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<ChannelListing> sse_decode_list_channel_listing(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<MemberView> sse_decode_list_member_view(SseDeserializer deserializer);
@@ -425,6 +439,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_channel_listing(
+    ChannelListing self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_chat_message(ChatMessage self, SseSerializer serializer);
 
   @protected
@@ -447,6 +467,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_channel_listing(
+    List<ChannelListing> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_member_view(

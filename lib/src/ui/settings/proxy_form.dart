@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../model/proxy.dart';
-import '../../theme.dart';
 import 'settings_chrome.dart';
 
 /// The four things a SOCKS5 proxy needs.
@@ -144,7 +143,6 @@ class ProxyFields extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = context.tokens;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -153,82 +151,64 @@ class ProxyFields extends StatelessWidget {
           children: [
             Expanded(
               flex: 3,
-              child: _field(t, ProxyField.host, 'Address', hint: '127.0.0.1'),
+              child: _field(
+                ProxyField.host,
+                'Address',
+                hint: '127.0.0.1',
+                // The paragraph that used to sit under all four fields, split
+                // so each half is beside the field it is actually about. A
+                // note under a form is read by nobody; a note under the field
+                // it describes is read by the person filling that field in.
+                help:
+                    'SOCKS5 only. The proxy carries the connection but never '
+                    'sees inside it: TLS is still negotiated with the IRC '
+                    'server itself, and the server name is resolved at the '
+                    'proxy rather than here.',
+              ),
             ),
-            Expanded(child: _field(t, ProxyField.port, 'Port')),
+            Expanded(child: _field(ProxyField.port, 'Port')),
           ],
         ),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: _field(
-                t,
-                ProxyField.username,
-                'Username',
-                hint: 'Optional',
-              ),
+              child: _field(ProxyField.username, 'Username', hint: 'Optional'),
             ),
             Expanded(
               child: _field(
-                t,
                 ProxyField.password,
                 'Password',
                 obscure: true,
                 hint: controller.hasStoredPassword
                     ? 'Stored — leave blank to keep it'
                     : 'Optional',
+                help:
+                    'Sent to the proxy in the clear, if the proxy asks for '
+                    'one. It proves who you are to the proxy and protects '
+                    'nothing else.',
               ),
             ),
           ],
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-          child: Text(
-            'SOCKS5 only. The proxy carries the connection but never sees '
-            'inside it: TLS is still negotiated with the IRC server itself, '
-            'and the server name is resolved at the proxy rather than here. '
-            'A username and password, if the proxy asks for one, are sent to '
-            'it in the clear — they prove who you are to the proxy and '
-            'protect nothing else.',
-            style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-          ),
         ),
       ],
     );
   }
 
   Widget _field(
-    Tokens t,
     ProxyField field,
     String label, {
     String? hint,
+    String? help,
     bool obscure = false,
-  }) {
-    final error = controller.errors[field];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: error == null ? t.muted : t.bad,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 5),
-          SettingsField(
-            controller: controller.controller(field),
-            hint: hint,
-            obscure: obscure,
-            error: error,
-            shakeTick: shakeTick,
-            onSubmitted: (_) => onSubmitted?.call(),
-          ),
-        ],
-      ),
-    );
-  }
+  }) => SettingsLabelledField(
+    label: label,
+    controller: controller.controller(field),
+    hint: hint,
+    help: help,
+    obscure: obscure,
+    error: controller.errors[field],
+    shakeTick: shakeTick,
+    onSubmitted: (_) => onSubmitted?.call(),
+  );
 }

@@ -333,6 +333,21 @@ pub struct MemberView {
     pub sort_key: String,
 }
 
+/// One channel as it appears in the server's directory.
+///
+/// The answer to `LIST`, and deliberately not a `Conversation`: this is a room
+/// the user has not joined and may never join. It carries only what is worth
+/// deciding on — how busy it is, and what it says it is about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelListing {
+    pub name: String,
+    /// How many people are in it, as the server reported. The number that
+    /// makes a list of channel names into something you can choose from.
+    pub users: u32,
+    /// Already stripped of formatting codes, and empty when there is none.
+    pub topic: String,
+}
+
 /// Where a message was addressed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {

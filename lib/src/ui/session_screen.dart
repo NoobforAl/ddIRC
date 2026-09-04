@@ -23,6 +23,7 @@ import 'send_file_sheet.dart';
 import 'touchable.dart';
 import 'transfer_bar.dart';
 import 'settings/app_settings_dialog.dart';
+import 'settings/channel_browser_dialog.dart';
 import 'settings/channel_settings_dialog.dart';
 import 'settings/profile_editor_dialog.dart';
 import 'settings/server_settings_dialog.dart';
@@ -195,6 +196,40 @@ class _SessionScreenState extends State<SessionScreen> {
     if (!context.layout.membersPinned) Navigator.of(context).maybePop();
   }
 
+  /// Open the server's directory of channels.
+  ///
+  /// Closes the channel drawer on the way, on a narrow screen: the dialog
+  /// covers it anyway, and leaving it open behind would mean coming back to
+  /// two things stacked over the conversation.
+  void _browseChannels() {
+    if (!context.layout.channelsPinned) Navigator.of(context).maybePop();
+    ChannelBrowserDialog.show(context, session);
+  }
+
+  /// Whether the member list is currently sitting beside the conversation.
+  ///
+  /// Two conditions, and both are needed: the window has to be wide enough to
+  /// hold it, and the user has to have asked for it. It used to be the first
+  /// alone, which made a roster of people who are mostly silent a property of
+  /// the window size rather than of anything anyone wanted.
+  bool get _membersBeside =>
+      context.layout.membersPinned && SettingsScope.of(context).showMembers;
+
+  /// The member button, which does different things at different widths.
+  ///
+  /// Wide enough for the panel, it turns the panel on and off. Narrower, there
+  /// is no panel to turn on and it opens the drawer instead. One control
+  /// either way, because from the user's side it is one question — show me who
+  /// is here — and where the answer appears is the app's problem.
+  void _toggleMembers() {
+    final settings = SettingsScope.of(context);
+    if (context.layout.membersPinned) {
+      settings.showMembers = !settings.showMembers;
+    } else {
+      _scaffold.currentState?.openEndDrawer();
+    }
+  }
+
   /// Pick a file and offer it to whoever this conversation is with.
   ///
   /// Four steps, and the order matters: pick, clean, confirm, send. The
@@ -297,6 +332,7 @@ class _SessionScreenState extends State<SessionScreen> {
       networkName:
           ProfileScope.of(context).byId(session.profileId)?.name ?? 'ddIRC',
       onSelect: _select,
+      onBrowse: _browseChannels,
       onDisconnect: _disconnect,
       onChannelSettings: _openChannelSettings,
     );
@@ -304,8 +340,12 @@ class _SessionScreenState extends State<SessionScreen> {
         ? const SizedBox.shrink()
         : MemberList(
             members: active.members,
+            // Closable either way. Beside the conversation the cross puts the
+            // setting back; in a drawer it dismisses the drawer. A panel the
+            // user turned on and cannot turn off from where they are looking
+            // at it is the reason it was always on in the first place.
             onClose: layout.membersPinned
-                ? null
+                ? () => SettingsScope.of(context).showMembers = false
                 : () => Navigator.of(context).maybePop(),
             onOpenDirect: _openDirect,
           );
@@ -350,7 +390,7 @@ class _SessionScreenState extends State<SessionScreen> {
                 ),
               ),
             Expanded(child: _conversationPane(t, layout, active)),
-            if (layout.membersPinned && active != null && active.isChannel)
+            if (_membersBeside && active != null && active.isChannel)
               SizedBox(
                 width: _memberPanelWidth,
                 child: Container(
@@ -377,7 +417,8 @@ class _SessionScreenState extends State<SessionScreen> {
           conversation: active,
           layout: layout,
           onOpenChannels: () => _scaffold.currentState?.openDrawer(),
-          onOpenMembers: () => _scaffold.currentState?.openEndDrawer(),
+          onOpenMembers: _toggleMembers,
+          membersOpen: _membersBeside,
           onChannelSettings: _openChannelSettings,
           onServerSettings: _openServerSettings,
           onNetworkEditor: _openNetworkEditor,
@@ -538,6 +579,7 @@ class _Header extends StatelessWidget {
     required this.layout,
     required this.onOpenChannels,
     required this.onOpenMembers,
+    required this.membersOpen,
     required this.onChannelSettings,
     required this.onServerSettings,
     required this.onNetworkEditor,
@@ -549,6 +591,11 @@ class _Header extends StatelessWidget {
   final Layout layout;
   final VoidCallback onOpenChannels;
   final VoidCallback onOpenMembers;
+
+  /// Whether the member list is currently beside the conversation, so the
+  /// button can show it as pressed rather than leaving the user to work out
+  /// which of the two states they are in.
+  final bool membersOpen;
   final VoidCallback onChannelSettings;
   final VoidCallback onServerSettings;
   final VoidCallback onNetworkEditor;
@@ -607,27 +654,25 @@ class _Header extends StatelessWidget {
             ),
           ),
           if (conversation != null && conversation!.isChannel)
-            // A count when the list is beside us, a button when it is not:
-            // the number is the same information either way, and only one of
-            // them needs to be reachable.
-            if (layout.membersPinned)
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: Text(
-                  '${conversation!.members.length}',
-                  style: TextStyle(color: t.muted, fontSize: 13),
-                ),
-              )
-            else
-              TextButton.icon(
-                onPressed: onOpenMembers,
-                icon: const Icon(Icons.people_outline, size: 17),
-                label: Text('${conversation!.members.length}'),
-                style: TextButton.styleFrom(
-                  foregroundColor: t.muted,
-                  visualDensity: VisualDensity.compact,
-                ),
+            // Always a button, at every width. It used to be a bare number
+            // once the list was beside us, on the grounds that the panel was
+            // already there and nothing needed reaching — which stopped being
+            // true the moment the panel became something to ask for.
+            //
+            // The count is on the button either way, because who is present is
+            // worth knowing at a glance whether or not the list is open.
+            TextButton.icon(
+              onPressed: onOpenMembers,
+              icon: Icon(
+                membersOpen ? Icons.people : Icons.people_outline,
+                size: 17,
               ),
+              label: Text('${conversation!.members.length}'),
+              style: TextButton.styleFrom(
+                foregroundColor: membersOpen ? t.accent : t.muted,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
           _SettingsMenu(
             hasChannel: conversation != null,
             channelName: conversation?.name,

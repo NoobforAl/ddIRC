@@ -24,7 +24,8 @@ use zeroize::Zeroizing;
 
 use crate::api::events::IrcEvent;
 use crate::api::types::{
-    AuthOutcome, ChatMessage, ConfigError, ConnectionStatus, MemberView, ServerConfig, Target,
+    AuthOutcome, ChannelListing, ChatMessage, ConfigError, ConnectionStatus, MemberView,
+    ServerConfig, Target,
 };
 use crate::conn::diagnose;
 use crate::conn::ratelimit::{ReceiveLimiter, SendLimiter};
@@ -34,6 +35,26 @@ use crate::dcc::transfer::{self, Progress, TransferError, TransferEvent};
 use crate::dcc::DccOffer;
 use crate::state::{limits, truncate, Session};
 use crate::text::format;
+
+/// How many channels a `LIST` keeps, and they are the busiest ones.
+///
+/// A directory is for choosing from, and nobody chooses from fifty thousand.
+/// The cap is also what makes the answer bounded in memory on a network whose
+/// full list is measured in megabytes.
+pub const MAX_LIST_KEPT: usize = 100;
+
+/// How many `LIST` replies the core will read before deciding the answer is
+/// unreasonable and reporting what it has.
+///
+/// Not a limit anyone should reach: it exists so that a server which answers
+/// `LIST` with an endless stream cannot hold a connection reading it for ever.
+const MAX_LIST_REPLIES: u32 = 60_000;
+
+/// How often a `LIST` still in progress reports what it has so far.
+///
+/// Often enough that a browser fills in while the answer is still arriving,
+/// rarely enough that the interim reports are not themselves the flood.
+const LIST_PROGRESS_EVERY: u32 = 2_000;
 
 /// How many events may queue up before we start dropping them. Generous enough
 /// to absorb a netsplit burst; bounded so a stalled UI cannot exhaust memory.
@@ -93,6 +114,14 @@ pub enum ClientCommand {
         channel: String,
         topic: String,
     },
+    /// Ask the server what channels it has.
+    ///
+    /// One request at a time: a second while one is in flight is ignored
+    /// rather than queued, because the answer is the same answer and asking
+    /// twice would double a burst that is already the largest thing this
+    /// connection ever receives.
+    ListChannels,
+
     /// Stop waiting out the backoff and attempt the next connection now.
     ///
     /// Only meaningful while reconnecting; ignored at any other time, which is
@@ -231,6 +260,63 @@ struct Actor {
     ever_registered: bool,
     /// Offers and transfers, by the id they were announced with.
     transfers: Transfers,
+    /// The `LIST` currently being answered, if any.
+    ///
+    /// `Some` from the moment the request goes out until the server says it
+    /// has finished, and it is what makes the reply burst distinguishable from
+    /// a flood: nothing else on this connection is both enormous and asked
+    /// for.
+    listing: Option<Listing>,
+}
+
+/// A `LIST` in progress: the best of what has arrived, and how much has.
+#[derive(Default)]
+struct Listing {
+    /// Kept sorted-and-truncated lazily rather than on every reply — see
+    /// [`Listing::push`].
+    kept: Vec<ChannelListing>,
+    /// Replies seen, including the ones thrown away. Drives both the progress
+    /// reports and the hard stop.
+    seen: u32,
+    /// True once anything has been discarded, so the UI can say so.
+    truncated: bool,
+    /// [`Self::seen`] at the last progress report.
+    reported_at: u32,
+}
+
+impl Listing {
+    /// Take one reply, keeping the busiest [`MAX_LIST_KEPT`] of everything
+    /// seen so far.
+    ///
+    /// Sorted only when the buffer has grown to twice the cap rather than on
+    /// every reply: the answer arrives at thousands of lines a second, and
+    /// sorting a hundred entries per line would be the expensive part of
+    /// reading it. Amortised, this is one comparison-sort per cap-worth of
+    /// replies.
+    fn push(&mut self, entry: ChannelListing) {
+        self.seen = self.seen.saturating_add(1);
+        self.kept.push(entry);
+        if self.kept.len() >= MAX_LIST_KEPT * 2 {
+            self.compact();
+        }
+    }
+
+    fn compact(&mut self) {
+        // Descending by population, then by name so that two equally busy
+        // channels do not swap places between one report and the next.
+        self.kept
+            .sort_by(|a, b| b.users.cmp(&a.users).then_with(|| a.name.cmp(&b.name)));
+        if self.kept.len() > MAX_LIST_KEPT {
+            self.kept.truncate(MAX_LIST_KEPT);
+            self.truncated = true;
+        }
+    }
+
+    /// What to send the UI now.
+    fn snapshot(&mut self) -> Vec<ChannelListing> {
+        self.compact();
+        self.kept.clone()
+    }
 }
 
 /// Offers waiting for an answer, and transfers already running.
@@ -272,6 +358,7 @@ impl Actor {
             dropped_events: 0,
             ever_registered: false,
             transfers: Transfers::default(),
+            listing: None,
         }
     }
 
@@ -522,7 +609,18 @@ impl Actor {
                         }
                     }
 
-                    if !self.recv_limiter.admit(Instant::now()) {
+                    // The answer to our own `LIST` is exempt from flood
+                    // protection, and only while we are waiting for one.
+                    //
+                    // The limiter exists to bound what a server or another
+                    // user can push at us unasked. A directory we requested is
+                    // neither: it is one reply that happens to arrive as fifty
+                    // thousand lines, and metering it would mean discarding
+                    // most of the answer and then reporting the loss as a
+                    // flood. What bounds it instead is `MAX_LIST_REPLIES`,
+                    // after which the exemption ends with the request.
+                    let asked_for = self.listing.is_some() && is_list_reply(&message);
+                    if !asked_for && !self.recv_limiter.admit(Instant::now()) {
                         continue;
                     }
 
@@ -640,6 +738,13 @@ impl Actor {
                         target.clone(),
                         format!("\u{01}ACTION {line}\u{01}"),
                     ));
+                }
+            }
+            ClientCommand::ListChannels => {
+                // Ignored while one is already running. See the variant.
+                if self.listing.is_none() {
+                    self.listing = Some(Listing::default());
+                    outgoing.push_back(Irc::LIST(None, None));
                 }
             }
             ClientCommand::SetNick(nick) => outgoing.push_back(Irc::NICK(nick)),
@@ -776,6 +881,19 @@ impl Actor {
                     self.emit_member_list(channel);
                 }
             }
+            // 321: <nick> Channel :Users  Name — the header, which some
+            // servers omit entirely. Starting the collection here as well as
+            // on the request means a stray one cannot leave the accumulator
+            // holding half of a previous answer.
+            Irc::Response(Response::RPL_LISTSTART, _) => {
+                if let Some(listing) = self.listing.as_mut() {
+                    *listing = Listing::default();
+                }
+            }
+            // 322: <nick> <channel> <#visible> :<topic>
+            Irc::Response(Response::RPL_LIST, args) => self.on_list_reply(args),
+            // 323: <nick> :End of /LIST
+            Irc::Response(Response::RPL_LISTEND, _) => self.finish_listing(),
             // 332: <nick> <channel> :<topic>
             Irc::Response(Response::RPL_TOPIC, args) => {
                 if let (Some(channel), Some(topic)) = (args.get(1), args.get(2)) {
@@ -934,6 +1052,64 @@ impl Actor {
             auth: auth.clone(),
         });
         self.status(ConnectionStatus::Connected, None);
+    }
+
+    /// One `RPL_LIST` line.
+    ///
+    /// Ignored outright when no `LIST` is in flight. A server is free to send
+    /// these unprompted, and an unprompted directory is not something the user
+    /// asked to see.
+    fn on_list_reply(&mut self, args: &[String]) {
+        let Some(listing) = self.listing.as_mut() else {
+            return;
+        };
+        // Past the point where reading more could be doing anyone a favour.
+        if listing.seen >= MAX_LIST_REPLIES {
+            listing.truncated = true;
+            self.finish_listing();
+            return;
+        }
+
+        let Some(name) = args.get(1) else { return };
+        // A channel with no reported population is not an error — some servers
+        // hide the count on secret channels — and zero is the honest reading.
+        let users = args.get(2).and_then(|u| u.parse::<u32>().ok()).unwrap_or(0);
+        let topic = args.get(3).map(|t| format::strip(t)).unwrap_or_default();
+
+        listing.push(ChannelListing {
+            name: name.clone(),
+            users,
+            topic: truncate(topic.trim(), limits::MAX_TOPIC),
+        });
+
+        // Report as it goes, so a browser fills in while the rest is still
+        // arriving rather than sitting empty for the length of the answer.
+        if listing.seen - listing.reported_at >= LIST_PROGRESS_EVERY {
+            listing.reported_at = listing.seen;
+            let channels = listing.snapshot();
+            let truncated = listing.truncated;
+            self.emit(IrcEvent::ChannelList {
+                channels,
+                done: false,
+                truncated,
+            });
+        }
+    }
+
+    /// The server has finished, or we have stopped listening.
+    ///
+    /// Emits even when nothing was collected: "this server has no channels to
+    /// show" is an answer, and a browser left spinning for ever is not.
+    fn finish_listing(&mut self) {
+        let Some(mut listing) = self.listing.take() else {
+            return;
+        };
+        let channels = listing.snapshot();
+        self.emit(IrcEvent::ChannelList {
+            channels,
+            done: true,
+            truncated: listing.truncated,
+        });
     }
 
     /// Apply a channel mode change.
@@ -1319,6 +1495,21 @@ fn sanitize_outgoing(text: &str) -> Vec<String> {
         })
         .filter(|line| !line.trim().is_empty())
         .collect()
+}
+
+/// True for the three numerics that make up the answer to a `LIST`.
+///
+/// Kept next to the flood limiter's only exemption, because that is the one
+/// thing it decides: which lines are allowed to arrive faster than a person
+/// could have caused them.
+fn is_list_reply(message: &Message) -> bool {
+    matches!(
+        message.command,
+        Irc::Response(
+            Response::RPL_LISTSTART | Response::RPL_LIST | Response::RPL_LISTEND,
+            _
+        )
+    )
 }
 
 /// True for numerics that represent an error worth surfacing.
@@ -2526,5 +2717,151 @@ mod tests {
         assert!(is_error_numeric(Response::ERR_NICKNAMEINUSE));
         assert!(!is_error_numeric(Response::RPL_WELCOME));
         assert!(!is_error_numeric(Response::RPL_TOPIC));
+    }
+
+    // -------------------------------------------------------------- the LIST
+    //
+    // The directory is the one reply on this connection that arrives faster
+    // than a person could have caused it, so most of what is worth pinning
+    // here is about *bounding* it: what is kept, what is thrown away, and the
+    // fact that none of it happens unless somebody asked.
+
+    /// Send the request the way the UI does, so the actor is in the state a
+    /// real answer would arrive into.
+    fn start_listing(actor: &mut Actor, outgoing: &mut VecDeque<Irc>) {
+        actor.queue(outgoing, ClientCommand::ListChannels);
+    }
+
+    fn last_list(rx: &mut mpsc::Receiver<IrcEvent>) -> (Vec<ChannelListing>, bool, bool) {
+        drain(rx)
+            .into_iter()
+            .filter_map(|event| match event {
+                IrcEvent::ChannelList {
+                    channels,
+                    done,
+                    truncated,
+                } => Some((channels, done, truncated)),
+                _ => None,
+            })
+            .next_back()
+            .expect("a LIST should be answered")
+    }
+
+    #[test]
+    fn asking_sends_one_list_and_ignores_a_second_ask() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        start_listing(&mut actor, &mut outgoing);
+        start_listing(&mut actor, &mut outgoing);
+
+        // The answer to the second would be the answer to the first, and this
+        // is the largest thing the connection ever receives.
+        let asks = outgoing
+            .iter()
+            .filter(|c| matches!(c, Irc::LIST(..)))
+            .count();
+        assert_eq!(asks, 1, "a second ask while one is running is not sent");
+    }
+
+    #[test]
+    fn a_directory_arrives_busiest_first() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        start_listing(&mut actor, &mut outgoing);
+
+        feed(&mut actor, &mut outgoing, ":s 322 me #quiet 3 :a small room");
+        feed(&mut actor, &mut outgoing, ":s 322 me #busy 900 :the big one");
+        feed(&mut actor, &mut outgoing, ":s 322 me #middle 40 :");
+        feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
+
+        let (channels, done, truncated) = last_list(&mut rx);
+        assert!(done, "the end of the list is the end of the list");
+        assert!(!truncated, "three channels is not more than the cap");
+        let names: Vec<&str> = channels.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["#busy", "#middle", "#quiet"]);
+        assert_eq!(channels[0].users, 900);
+        assert_eq!(channels[0].topic, "the big one");
+    }
+
+    /// The cap is what makes the answer bounded, and it has to keep the *best*
+    /// of what it saw rather than the first that happened to arrive.
+    #[test]
+    fn a_long_directory_keeps_the_busiest_and_says_it_did() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        start_listing(&mut actor, &mut outgoing);
+
+        // Populations ascending, so keeping the first N would be exactly wrong.
+        for i in 0..(MAX_LIST_KEPT * 3) {
+            feed(
+                &mut actor,
+                &mut outgoing,
+                &format!(":s 322 me #c{i} {i} :room {i}"),
+            );
+        }
+        feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
+
+        let (channels, done, truncated) = last_list(&mut rx);
+        assert!(done);
+        assert!(truncated, "throwing some away has to be admitted");
+        assert_eq!(channels.len(), MAX_LIST_KEPT);
+        assert_eq!(
+            channels[0].users as usize,
+            MAX_LIST_KEPT * 3 - 1,
+            "the busiest channel seen must survive the cap"
+        );
+    }
+
+    /// A server that answers nothing at all still ends the wait.
+    #[test]
+    fn an_empty_directory_is_still_an_answer() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        start_listing(&mut actor, &mut outgoing);
+        feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
+
+        let (channels, done, _) = last_list(&mut rx);
+        assert!(done, "a browser left spinning is worse than an empty one");
+        assert!(channels.is_empty());
+    }
+
+    /// Nobody asked, so nobody is told.
+    #[test]
+    fn unprompted_list_replies_are_ignored() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        feed(&mut actor, &mut outgoing, ":s 322 me #whatever 5 :unasked for");
+        feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
+
+        assert!(
+            drain(&mut rx).is_empty(),
+            "a directory nobody asked for is not news"
+        );
+    }
+
+    /// The flood limiter's one exemption, and its exact shape: these three
+    /// numerics, and only while a request is outstanding.
+    #[test]
+    fn only_list_replies_are_exempt_from_flood_protection() {
+        let parse = |raw: &str| raw.parse::<Message>().expect("should parse");
+
+        assert!(is_list_reply(&parse(":s 321 me Channel :Users  Name")));
+        assert!(is_list_reply(&parse(":s 322 me #a 1 :t")));
+        assert!(is_list_reply(&parse(":s 323 me :End of /LIST")));
+
+        assert!(!is_list_reply(&parse(":a!u@h PRIVMSG #a :hello")));
+        assert!(!is_list_reply(&parse(":s 353 me = #a :alice")));
+    }
+
+    /// The header restarts the collection, so a stray answer cannot leave the
+    /// accumulator holding half of a previous one.
+    #[test]
+    fn the_list_header_starts_the_collection_over() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        start_listing(&mut actor, &mut outgoing);
+
+        feed(&mut actor, &mut outgoing, ":s 322 me #stale 10 :left over");
+        feed(&mut actor, &mut outgoing, ":s 321 me Channel :Users  Name");
+        feed(&mut actor, &mut outgoing, ":s 322 me #fresh 5 :the real one");
+        feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
+
+        let (channels, _, _) = last_list(&mut rx);
+        let names: Vec<&str> = channels.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["#fresh"]);
     }
 }

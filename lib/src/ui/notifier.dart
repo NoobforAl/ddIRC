@@ -24,6 +24,31 @@ bool notificationsSupportedOn(TargetPlatform platform) => const {
   TargetPlatform.android,
 }.contains(platform);
 
+/// Where to go when notifications are on here and still not appearing.
+///
+/// Every platform has a switch above this app's, ddIRC cannot read any of
+/// them, and all of them fail the same silent way: the toast is simply never
+/// drawn. Naming the actual screen is the whole value of this — "check your
+/// system settings" is advice nobody has ever been helped by.
+String notificationHelpFor(TargetPlatform platform) => switch (platform) {
+  TargetPlatform.windows =>
+    'Windows has its own switch above this one. If nothing appears, open '
+        'Settings → System → Notifications and check that notifications are '
+        'on, that ddIRC is allowed, and that Do not disturb is off.',
+  TargetPlatform.macOS =>
+    'macOS has its own switch above this one. If nothing appears, open '
+        'System Settings → Notifications → ddIRC and allow them there, and '
+        'check that Focus is off.',
+  TargetPlatform.android =>
+    'Android asks for permission the first time this is switched on. If '
+        'nothing appears, or the permission was refused, it can be given '
+        'again in the system Settings → Apps → ddIRC → Notifications.',
+  TargetPlatform.linux =>
+    'Your desktop has its own notification settings above this one, and its '
+        'own do-not-disturb. If nothing appears, that is where to look.',
+  _ => 'This platform will not show notifications.',
+};
+
 /// Raises notifications, and takes them away again.
 ///
 /// Shaped like [BackgroundKeeper] on purpose — an interface, a factory that is
@@ -34,6 +59,20 @@ abstract interface class Notifier {
   /// Prepare whatever the platform needs before the first notification. Safe to
   /// call once, at startup.
   Future<void> start();
+
+  /// Ask the platform for permission to show notifications, if it has one to
+  /// give, and report whether it will now show them.
+  ///
+  /// Separate from [start] because the two answer different questions and one
+  /// of them is the user's. Registering with the platform is bookkeeping and
+  /// happens whatever the settings say; *asking* is an interruption, and is
+  /// only worth making when the user has notifications switched on — which is
+  /// something only the caller knows.
+  ///
+  /// Called again whenever that switch is turned on, so a refusal is never
+  /// permanent: Android will show its dialog again the next time, and a user
+  /// who has refused twice can still be told plainly what is wrong.
+  Future<bool> ensurePermitted();
 
   /// Show one, replacing any earlier one for the same conversation.
   Future<void> show(NotificationContent content);
@@ -67,6 +106,12 @@ class NoNotifier implements Notifier {
 
   @override
   Future<void> start() async {}
+
+  /// False, and honestly so. This platform will not show one, and a caller
+  /// that wants to say why is entitled to a straight answer rather than an
+  /// optimistic one from an object that does nothing.
+  @override
+  Future<bool> ensurePermitted() async => false;
 
   @override
   Future<void> show(NotificationContent content) async {}
