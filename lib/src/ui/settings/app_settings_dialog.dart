@@ -9,8 +9,7 @@ import '../../model/settings.dart';
 import '../../version.dart';
 import '../background.dart';
 import '../motion.dart';
-import '../notifier.dart'
-    show notificationHelpFor, notificationsSupportedOn;
+import '../notifier.dart' show notificationHelpFor, notificationsSupportedOn;
 import 'app_lock_section.dart';
 import 'file_transfer_section.dart';
 import 'local_server_section.dart';

@@ -55,8 +55,9 @@ class _ChannelBrowserDialogState extends State<ChannelBrowserDialog> {
     // arrived last time rather than emptying it and asking again, because the
     // question is expensive and the answer does not change by the minute.
     if (session.directory.isEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => session
-          .browseChannels());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => session.browseChannels(),
+      );
     }
   }
 

@@ -2767,8 +2767,16 @@ mod tests {
         let (mut actor, mut rx, mut outgoing) = actor(&[]);
         start_listing(&mut actor, &mut outgoing);
 
-        feed(&mut actor, &mut outgoing, ":s 322 me #quiet 3 :a small room");
-        feed(&mut actor, &mut outgoing, ":s 322 me #busy 900 :the big one");
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":s 322 me #quiet 3 :a small room",
+        );
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":s 322 me #busy 900 :the big one",
+        );
         feed(&mut actor, &mut outgoing, ":s 322 me #middle 40 :");
         feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
 
@@ -2825,7 +2833,11 @@ mod tests {
     #[test]
     fn unprompted_list_replies_are_ignored() {
         let (mut actor, mut rx, mut outgoing) = actor(&[]);
-        feed(&mut actor, &mut outgoing, ":s 322 me #whatever 5 :unasked for");
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":s 322 me #whatever 5 :unasked for",
+        );
         feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
 
         assert!(
@@ -2857,7 +2869,11 @@ mod tests {
 
         feed(&mut actor, &mut outgoing, ":s 322 me #stale 10 :left over");
         feed(&mut actor, &mut outgoing, ":s 321 me Channel :Users  Name");
-        feed(&mut actor, &mut outgoing, ":s 322 me #fresh 5 :the real one");
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":s 322 me #fresh 5 :the real one",
+        );
         feed(&mut actor, &mut outgoing, ":s 323 me :End of /LIST");
 
         let (channels, _, _) = last_list(&mut rx);

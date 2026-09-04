@@ -193,10 +193,7 @@ class _SettingsSectionState extends State<SettingsSection> {
                   letterSpacing: 0.9,
                 ),
               ),
-              if (widget.beta) ...[
-                const SizedBox(width: 7),
-                const BetaBadge(),
-              ],
+              if (widget.beta) ...[const SizedBox(width: 7), const BetaBadge()],
               if (help != null) ...[
                 const SizedBox(width: 3),
                 HelpDot(
@@ -374,11 +371,7 @@ class HelpText extends StatelessWidget {
               padding: padding,
               child: Text(
                 text,
-                style: TextStyle(
-                  color: t.faint,
-                  fontSize: 11.5,
-                  height: 1.45,
-                ),
+                style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.45),
               ),
             )
           : null,
@@ -977,7 +970,9 @@ class _RevealButton extends StatelessWidget {
           width: 34,
           height: 34,
           child: Icon(
-            revealed ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+            revealed
+                ? Icons.visibility_outlined
+                : Icons.visibility_off_outlined,
             size: 17,
             color: revealed ? t.accent : t.faint,
           ),

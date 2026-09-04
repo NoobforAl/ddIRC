@@ -188,6 +188,7 @@ fn command_for(line: &str, current: Option<&str>) -> Option<Action> {
             }),
             None => Action::Notice("usage: /msg <target> <text>".to_owned()),
         },
+        "list" => Action::Send(ClientCommand::ListChannels),
         "quit" => Action::Send(ClientCommand::Disconnect {
             reason: (!argument.is_empty()).then(|| argument.to_owned()),
         }),
@@ -364,6 +365,32 @@ fn render(event: &IrcEvent) {
                 None => println!("-- \"{filename}\" sent --"),
             },
         },
+        // Only the finished answer. A LIST reports itself as it arrives so a
+        // browser can fill in, and reprinting the busiest hundred every couple
+        // of thousand replies would bury the scrollback in redraws of the same
+        // list.
+        IrcEvent::ChannelList {
+            channels,
+            done: true,
+            truncated,
+        } => {
+            for channel in channels {
+                let topic = if channel.topic.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", channel.topic)
+                };
+                println!("{:>6}  {}{topic}", channel.users, channel.name);
+            }
+            let count = channels.len();
+            if *truncated {
+                println!("-- the {count} busiest; there are more --");
+            } else {
+                println!("-- {count} channels --");
+            }
+        }
+        IrcEvent::ChannelList { done: false, .. } => {}
+
         IrcEvent::Error { message, fatal } => {
             let label = if *fatal { "fatal" } else { "error" };
             eprintln!("-- {label}: {message} --");

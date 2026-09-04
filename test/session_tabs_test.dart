@@ -71,7 +71,8 @@ void main() {
     expect(
       names(s.tabs),
       ['#one'],
-      reason: 'only the first, so connecting lands somewhere rather than '
+      reason:
+          'only the first, so connecting lands somewhere rather than '
           'opening five things nobody asked to see',
     );
     expect(
@@ -90,26 +91,34 @@ void main() {
     joined(s, '#chosen');
 
     expect(names(s.tabs), ['#autojoined', '#chosen']);
-    expect(s.active?.name, '#chosen', reason: 'asking for it is asking to be '
-        'taken there');
-  });
-
-  test('asking is spent once, so a rejoin does not reopen a closed tab', () async {
-    final s = await session();
-    s.requestForTesting('#chosen');
-    joined(s, '#chosen');
-    s.closeTab('#chosen');
-    expect(names(s.tabs), isEmpty);
-
-    // Cycled by the server — a netsplit healing, a rejoin after a kick. The
-    // user asked once, and that ask has already been answered.
-    joined(s, '#chosen');
     expect(
-      names(s.tabs),
-      isEmpty,
-      reason: 'a tab the user closed must stay closed',
+      s.active?.name,
+      '#chosen',
+      reason:
+          'asking for it is asking to be '
+          'taken there',
     );
   });
+
+  test(
+    'asking is spent once, so a rejoin does not reopen a closed tab',
+    () async {
+      final s = await session();
+      s.requestForTesting('#chosen');
+      joined(s, '#chosen');
+      s.closeTab('#chosen');
+      expect(names(s.tabs), isEmpty);
+
+      // Cycled by the server — a netsplit healing, a rejoin after a kick. The
+      // user asked once, and that ask has already been answered.
+      joined(s, '#chosen');
+      expect(
+        names(s.tabs),
+        isEmpty,
+        reason: 'a tab the user closed must stay closed',
+      );
+    },
+  );
 
   test('joining a channel already open just goes there', () async {
     final s = await session();

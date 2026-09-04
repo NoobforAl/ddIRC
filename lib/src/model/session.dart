@@ -839,11 +839,7 @@ class SessionModel extends ChangeNotifier {
           select(channel);
         }
 
-      case IrcEvent_ChannelList(
-        :final channels,
-        :final done,
-        :final truncated,
-      ):
+      case IrcEvent_ChannelList(:final channels, :final done, :final truncated):
         // Replaced, never appended to: each event carries the busiest of
         // everything the core has seen, so the previous one is a prefix of
         // this one and adding them together would show every channel twice.
