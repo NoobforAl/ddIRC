@@ -8,6 +8,7 @@
 
 import 'api/client.dart';
 import 'api/server.dart';
+import 'api/store.dart';
 import 'api/tor.dart';
 import 'api/types.dart';
 import 'dart:async';
@@ -93,6 +94,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_f_32(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
+
+  @protected
   IrcEvent dco_decode_irc_event(dynamic raw);
 
   @protected
@@ -112,6 +116,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<RemovedItem> dco_decode_list_removed_item(dynamic raw);
+
+  @protected
+  List<StoredLine> dco_decode_list_stored_line(dynamic raw);
 
   @protected
   List<TextSpan> dco_decode_list_text_span(dynamic raw);
@@ -144,6 +151,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_u_8(dynamic raw);
 
   @protected
+  ProbeReport dco_decode_probe_report(dynamic raw);
+
+  @protected
   ProxyConfig dco_decode_proxy_config(dynamic raw);
 
   @protected
@@ -154,6 +164,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SpanStyle dco_decode_span_style(dynamic raw);
+
+  @protected
+  StoreStats dco_decode_store_stats(dynamic raw);
+
+  @protected
+  StoredLine dco_decode_stored_line(dynamic raw);
 
   @protected
   Target dco_decode_target(dynamic raw);
@@ -259,6 +275,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_f_32(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
+
+  @protected
   IrcEvent sse_decode_irc_event(SseDeserializer deserializer);
 
   @protected
@@ -280,6 +299,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<RemovedItem> sse_decode_list_removed_item(SseDeserializer deserializer);
+
+  @protected
+  List<StoredLine> sse_decode_list_stored_line(SseDeserializer deserializer);
 
   @protected
   List<TextSpan> sse_decode_list_text_span(SseDeserializer deserializer);
@@ -318,6 +340,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer);
 
   @protected
+  ProbeReport sse_decode_probe_report(SseDeserializer deserializer);
+
+  @protected
   ProxyConfig sse_decode_proxy_config(SseDeserializer deserializer);
 
   @protected
@@ -328,6 +353,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SpanStyle sse_decode_span_style(SseDeserializer deserializer);
+
+  @protected
+  StoreStats sse_decode_store_stats(SseDeserializer deserializer);
+
+  @protected
+  StoredLine sse_decode_stored_line(SseDeserializer deserializer);
 
   @protected
   Target sse_decode_target(SseDeserializer deserializer);
@@ -465,6 +496,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_f_32(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
+
+  @protected
   void sse_encode_irc_event(IrcEvent self, SseSerializer serializer);
 
   @protected
@@ -494,6 +528,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_removed_item(
     List<RemovedItem> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_stored_line(
+    List<StoredLine> self,
     SseSerializer serializer,
   );
 
@@ -540,6 +580,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_probe_report(ProbeReport self, SseSerializer serializer);
+
+  @protected
   void sse_encode_proxy_config(ProxyConfig self, SseSerializer serializer);
 
   @protected
@@ -550,6 +593,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_span_style(SpanStyle self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_store_stats(StoreStats self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_stored_line(StoredLine self, SseSerializer serializer);
 
   @protected
   void sse_encode_target(Target self, SseSerializer serializer);

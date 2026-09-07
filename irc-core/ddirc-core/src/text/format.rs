@@ -180,6 +180,77 @@ pub fn strip(input: &str) -> String {
     parse(input).into_iter().map(|s| s.text).collect()
 }
 
+/// Write spans back out as mIRC codes, so [`parse`] recovers them exactly.
+///
+/// The inverse of [`parse`], and it exists for one reason: the message store
+/// keeps a line as a single string, and a store that kept the flattened text
+/// would quietly turn every saved message plain. Encoding back into the same
+/// codes the message arrived in means the database holds one `TEXT` column and
+/// history reloads through the parser that every other message goes through —
+/// no second representation to keep in step, and no serialisation format to
+/// version.
+///
+/// Each span opens with a reset and states its style in full rather than
+/// emitting the difference from the previous one. Absolute is not merely
+/// simpler here, it is safer: a diff that is wrong produces a line that is
+/// subtly mis-styled from that point on, and nothing about the output would
+/// say so.
+pub fn encode(spans: &[TextSpan]) -> String {
+    let mut out = String::new();
+    for span in spans {
+        // Nothing before this span can leak into it.
+        out.push(RESET);
+        if span.style.bold {
+            out.push(BOLD);
+        }
+        if span.style.italic {
+            out.push(ITALIC);
+        }
+        if span.style.underline {
+            out.push(UNDERLINE);
+        }
+        if span.style.strikethrough {
+            out.push(STRIKETHROUGH);
+        }
+        if span.style.monospace {
+            out.push(MONOSPACE);
+        }
+        if span.style.inverse {
+            out.push(INVERSE);
+        }
+        if let Some(fg) = span.style.fg {
+            out.push(COLOR);
+            // Always two digits. A one-digit colour would swallow a leading
+            // digit of the text as the second, which is the classic mIRC
+            // encoding bug and produces a different colour *and* a missing
+            // character.
+            out.push_str(&format!("{:02}", fg));
+            if let Some(bg) = span.style.bg {
+                out.push(',');
+                out.push_str(&format!("{:02}", bg));
+            }
+            // A colour with no background, followed by text that opens with a
+            // comma and a digit, would have that comma read as the separator
+            // and the digits eaten as a background. Two bold toggles cancel
+            // out, change no style, produce no span of their own — and end the
+            // colour payload so the comma stays literal.
+            if span.style.bg.is_none() && opens_like_a_background(&span.text) {
+                out.push(BOLD);
+                out.push(BOLD);
+            }
+        }
+        out.push_str(&span.text);
+    }
+    out
+}
+
+/// Whether `text` starts with something [`take_color`] would mistake for the
+/// background half of a colour code.
+fn opens_like_a_background(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next() == Some(',') && chars.next().is_some_and(|c| c.is_ascii_digit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +373,55 @@ mod tests {
     #[test]
     fn unicode_is_preserved() {
         assert_eq!(strip("\u{02}héllo → 世界"), "héllo → 世界");
+    }
+
+    /// The property the message store depends on: whatever a message arrived
+    /// as, saving and reloading it produces the same spans. Checked as a
+    /// round-trip rather than against a fixed encoding, because it is the
+    /// round-trip and not the byte sequence that anything relies on.
+    #[track_caller]
+    fn round_trips(input: &str) {
+        let once = parse(input);
+        let again = parse(&encode(&once));
+        assert_eq!(once, again, "re-parsing {input:?} lost or changed styling");
+    }
+
+    #[test]
+    fn encoding_round_trips_through_the_parser() {
+        for input in [
+            "plain text",
+            "\u{02}bold\u{02} and not",
+            "\u{1D}italic\u{1F}underlined\u{1E}struck\u{11}mono\u{16}inverse",
+            "\u{03}04red\u{03}09,01 on green \u{0F}back to nothing",
+            "\u{02}\u{1D}both at once\u{0F}",
+            "héllo → 世界 \u{02}emoji 🎉\u{02}",
+            "\u{03}12three digits: 3",
+        ] {
+            round_trips(input);
+        }
+    }
+
+    #[test]
+    fn a_colour_followed_by_a_comma_and_digits_survives() {
+        // The encoding trap: "\x0304" then ",5" would be read back as
+        // foreground 4 on background 5, with the ",5" gone from the text.
+        round_trips("\u{03}04\u{02}\u{02},5 past midnight");
+
+        let spans = parse(&encode(&[TextSpan {
+            text: ",50 of them".to_owned(),
+            style: SpanStyle {
+                fg: Some(4),
+                ..SpanStyle::default()
+            },
+        }]));
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, ",50 of them");
+        assert_eq!(spans[0].style.fg, Some(4));
+        assert_eq!(spans[0].style.bg, None);
+    }
+
+    #[test]
+    fn encoding_nothing_produces_nothing() {
+        assert!(parse(&encode(&[])).is_empty());
     }
 }

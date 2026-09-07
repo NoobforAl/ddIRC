@@ -12,6 +12,7 @@ import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
 import 'channel_list.dart';
+import 'connection_log_dialog.dart';
 import 'conversation_tabs.dart';
 import 'layout.dart';
 import 'member_list.dart';
@@ -314,6 +315,10 @@ class _SessionScreenState extends State<SessionScreen> {
 
   void _openAppSettings() => AppSettingsDialog.show(context);
 
+  /// What this connection has actually been doing, in full.
+  void _openConnectionLog() =>
+      ConnectionLogDialog.show(context, session: session);
+
   void _openNetworkEditor() {
     final profile = ProfileScope.of(context).byId(session.profileId);
     if (profile == null) return;
@@ -423,6 +428,7 @@ class _SessionScreenState extends State<SessionScreen> {
           onServerSettings: _openServerSettings,
           onNetworkEditor: _openNetworkEditor,
           onAppSettings: _openAppSettings,
+          onConnectionLog: _openConnectionLog,
         ),
         // Anything other than "connected" gets a bar of its own. The status
         // dot in the header can say something is wrong, but it has nowhere to
@@ -431,6 +437,7 @@ class _SessionScreenState extends State<SessionScreen> {
           status: session.status,
           detail: session.statusDetail,
           onRetry: _retry,
+          onViewLog: _openConnectionLog,
         ),
         ConversationTabs(
           session: session,
@@ -584,6 +591,7 @@ class _Header extends StatelessWidget {
     required this.onServerSettings,
     required this.onNetworkEditor,
     required this.onAppSettings,
+    required this.onConnectionLog,
   });
 
   final SessionModel session;
@@ -600,6 +608,7 @@ class _Header extends StatelessWidget {
   final VoidCallback onServerSettings;
   final VoidCallback onNetworkEditor;
   final VoidCallback onAppSettings;
+  final VoidCallback onConnectionLog;
 
   @override
   Widget build(BuildContext context) {
@@ -680,6 +689,7 @@ class _Header extends StatelessWidget {
             onServerSettings: onServerSettings,
             onNetworkEditor: onNetworkEditor,
             onAppSettings: onAppSettings,
+            onConnectionLog: onConnectionLog,
           ),
         ],
       ),
@@ -688,7 +698,7 @@ class _Header extends StatelessWidget {
 }
 
 /// The one place every settings dialog can be reached from.
-enum _SettingsTarget { channel, server, network, app }
+enum _SettingsTarget { channel, server, network, app, connectionLog }
 
 class _SettingsMenu extends StatelessWidget {
   const _SettingsMenu({
@@ -698,6 +708,7 @@ class _SettingsMenu extends StatelessWidget {
     required this.onServerSettings,
     required this.onNetworkEditor,
     required this.onAppSettings,
+    required this.onConnectionLog,
   });
 
   final bool hasChannel;
@@ -706,6 +717,12 @@ class _SettingsMenu extends StatelessWidget {
   final VoidCallback onServerSettings;
   final VoidCallback onNetworkEditor;
   final VoidCallback onAppSettings;
+
+  /// The way back to the connection log once the bar that offers it has gone.
+  ///
+  /// The bar only exists while something is wrong, and "why did it take so
+  /// long to connect" is a question asked after it has finally worked.
+  final VoidCallback onConnectionLog;
 
   @override
   Widget build(BuildContext context) {
@@ -722,6 +739,7 @@ class _SettingsMenu extends StatelessWidget {
         _SettingsTarget.server => onServerSettings(),
         _SettingsTarget.network => onNetworkEditor(),
         _SettingsTarget.app => onAppSettings(),
+        _SettingsTarget.connectionLog => onConnectionLog(),
       },
       itemBuilder: (context) => [
         PopupMenuItem(
@@ -746,6 +764,13 @@ class _SettingsMenu extends StatelessWidget {
           child: MenuRow(
             icon: Icons.edit_outlined,
             label: 'Edit this network…',
+          ),
+        ),
+        const PopupMenuItem(
+          value: _SettingsTarget.connectionLog,
+          child: MenuRow(
+            icon: Icons.receipt_long_outlined,
+            label: 'Connection log…',
           ),
         ),
         const PopupMenuItem(
@@ -1046,6 +1071,7 @@ class _ConnectionBar extends StatelessWidget {
     required this.status,
     required this.detail,
     required this.onRetry,
+    required this.onViewLog,
   });
 
   /// Why, when the core said. Shown only where the state alone does not
@@ -1054,6 +1080,15 @@ class _ConnectionBar extends StatelessWidget {
 
   final ConnectionStatus status;
   final VoidCallback onRetry;
+
+  /// Opens the full account of what this connection has been doing.
+  ///
+  /// The bar has room for one sentence, and one sentence is not always the
+  /// answer: a TLS complaint, a proxy that will not carry the connection, or a
+  /// server refusing a password all need the sequence that led to them. That
+  /// sequence used to be dumped into the conversation; it is one press away
+  /// from here instead.
+  final VoidCallback onViewLog;
 
   @override
   Widget build(BuildContext context) {
@@ -1110,10 +1145,59 @@ class _ConnectionBar extends StatelessWidget {
                       style: TextStyle(color: color, fontSize: 12),
                     ),
                   ),
+                  _ViewLog(onTap: onViewLog),
+                  const SizedBox(width: 4),
                   _RetryNow(onTap: onRetry),
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// See what the connection has actually been doing.
+///
+/// Icon and label, like the retry beside it, but in the muted colour rather
+/// than the accent: retrying is the thing being offered, and reading the log is
+/// the thing available to someone who wants to know why they have to.
+class _ViewLog extends StatelessWidget {
+  const _ViewLog({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: 'What this connection has been doing',
+      child: Touchable(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        builder: (context, touch) => AnimatedContainer(
+          duration: context.motion.fast,
+          curve: Motion.curve,
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: t.surfaceHover.withValues(alpha: touch.wash),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.receipt_long_outlined, size: 14, color: t.muted),
+              const SizedBox(width: 5),
+              Text(
+                'View log',
+                style: TextStyle(
+                  color: t.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

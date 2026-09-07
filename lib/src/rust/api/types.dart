@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -379,6 +379,46 @@ class MemberView {
           prefix == other.prefix &&
           away == other.away &&
           sortKey == other.sortKey;
+}
+
+/// What a connection test found, when it worked.
+///
+/// A failure is not one of these: it is the `Err` side of the call, and it is
+/// already a sentence for the user rather than a code to be interpreted here.
+class ProbeReport {
+  /// The nickname the server actually gave us, which is not always the one
+  /// that was asked for.
+  final String nickname;
+
+  /// How the server introduced itself, when it named itself at all.
+  final String? server;
+
+  /// Whether the configured credentials were accepted.
+  final AuthOutcome auth;
+
+  /// How long the whole exchange took.
+  final BigInt elapsedMs;
+
+  const ProbeReport({
+    required this.nickname,
+    this.server,
+    required this.auth,
+    required this.elapsedMs,
+  });
+
+  @override
+  int get hashCode =>
+      nickname.hashCode ^ server.hashCode ^ auth.hashCode ^ elapsedMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProbeReport &&
+          runtimeType == other.runtimeType &&
+          nickname == other.nickname &&
+          server == other.server &&
+          auth == other.auth &&
+          elapsedMs == other.elapsedMs;
 }
 
 /// A SOCKS5 proxy to dial through.

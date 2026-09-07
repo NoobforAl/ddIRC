@@ -18,7 +18,7 @@ use flutter_rust_bridge::frb;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-use crate::api::types::{CleanOutcome, IrcEvent, ServerConfig};
+use crate::api::types::{CleanOutcome, IrcEvent, ProbeReport, ServerConfig};
 use crate::frb_generated::StreamSink;
 
 /// The runtime the connection actors live on.
@@ -102,7 +102,13 @@ fn dev_root_cert() -> Option<String> {
 /// The configuration is validated up front, so a bad host, a plaintext port, or
 /// half-supplied SASL credentials fail here with a clear message rather than as
 /// an opaque error later.
-pub fn connect(config: ServerConfig) -> Result<u64, String> {
+/// Settle the trust anchors for a configuration on its way in from Dart.
+///
+/// Shared by [`connect`] and [`test_connection`] rather than written twice: a
+/// test that trusted a different set of roots from the connection it is
+/// standing in for would be answering a question nobody asked.
+fn prepare(config: ServerConfig) -> ddirc_core::api::types::ServerConfig {
+    #[allow(unused_mut)]
     let mut config: ddirc_core::api::types::ServerConfig = config.into();
     #[cfg(debug_assertions)]
     {
@@ -116,6 +122,33 @@ pub fn connect(config: ServerConfig) -> Result<u64, String> {
     if let Some(anchor) = crate::api::server::anchor_for(&config.host, config.port) {
         config.extra_root_cert = Some(anchor);
     }
+    config
+}
+
+/// Connect, register, report what happened, and hang up.
+///
+/// For the "Test connection" button in the network editor: the same journey a
+/// real connection makes — proxy, TLS, capability negotiation, SASL,
+/// registration — run once so a wrong port or a refused password is reported
+/// where it was typed, rather than as a session that quietly sits at
+/// "Reconnecting".
+///
+/// Nothing is remembered: no connection id is created, no channel is joined,
+/// and no NickServ password is sent. The `Err` side is already a sentence for
+/// the user.
+pub async fn test_connection(config: ServerConfig) -> Result<ProbeReport, String> {
+    let config = prepare(config);
+    // On the network runtime rather than the FFI worker thread, which is where
+    // every other connection in this process lives.
+    runtime()
+        .spawn(async move { ddirc_core::conn::probe::probe(config).await })
+        .await
+        .map_err(|_| "the connection test could not be started".to_owned())?
+        .map(ProbeReport::from)
+}
+
+pub fn connect(config: ServerConfig) -> Result<u64, String> {
+    let config = prepare(config);
     config.validate().map_err(|e| e.to_string())?;
 
     // `actor::spawn` calls `tokio::spawn`, which needs a runtime in scope.

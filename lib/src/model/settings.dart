@@ -57,6 +57,7 @@ class AppSettings extends ChangeNotifier {
   static const _kThemeMode = 'ui.themeMode';
   static const _kColors = 'ui.mircColors';
   static const _kChatLog = 'log.chat';
+  static const _kSaveMessages = 'db.messages';
   static const _kDebugLog = 'log.debug';
   static const _kStripMetadata = 'send.stripMetadata';
   static const _kFileTransfers = 'dcc.enabled';
@@ -90,6 +91,16 @@ class AppSettings extends ChangeNotifier {
   /// anyone who is not chasing a bug.
   bool _saveChatLogs = false;
   bool _saveDebugLogs = false;
+
+  /// Off, on the same terms as the chat log above and for the same reason: a
+  /// record of what people said is the most sensitive thing this app can write
+  /// to disk, so it does not start being written because nobody looked.
+  ///
+  /// Not a duplicate of [_saveChatLogs]. That produces a plain-text file for a
+  /// person to read in an editor and is never read back; this is a database the
+  /// app reads back, and it is what puts yesterday's conversation at the top of
+  /// a channel when you rejoin it.
+  bool _saveMessages = false;
 
   /// On, unlike everything else here that touches privacy.
   ///
@@ -162,6 +173,7 @@ class AppSettings extends ChangeNotifier {
         prefs.getBool(_kSystemMessages) ?? _showSystemMessages;
     _renderColors = prefs.getBool(_kColors) ?? _renderColors;
     _saveChatLogs = prefs.getBool(_kChatLog) ?? _saveChatLogs;
+    _saveMessages = prefs.getBool(_kSaveMessages) ?? _saveMessages;
     _saveDebugLogs = prefs.getBool(_kDebugLog) ?? _saveDebugLogs;
     _stripImageMetadata = prefs.getBool(_kStripMetadata) ?? _stripImageMetadata;
     _fileTransfers = prefs.getBool(_kFileTransfers) ?? _fileTransfers;
@@ -201,6 +213,7 @@ class AppSettings extends ChangeNotifier {
   bool get showSystemMessages => _showSystemMessages;
   bool get renderColors => _renderColors;
   bool get saveChatLogs => _saveChatLogs;
+  bool get saveMessages => _saveMessages;
   bool get saveDebugLogs => _saveDebugLogs;
   bool get stripImageMetadata => _stripImageMetadata;
   bool get runInBackground => _runInBackground;
@@ -228,6 +241,10 @@ class AppSettings extends ChangeNotifier {
 
   set saveChatLogs(bool value) => _set(_kChatLog, value, () {
     _saveChatLogs = value;
+  });
+
+  set saveMessages(bool value) => _set(_kSaveMessages, value, () {
+    _saveMessages = value;
   });
 
   set saveDebugLogs(bool value) => _set(_kDebugLog, value, () {

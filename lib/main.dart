@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'src/model/app_lock.dart';
+import 'src/model/history.dart';
 import 'src/model/local_server.dart';
 import 'src/model/log.dart';
 import 'src/model/profile.dart';
@@ -39,6 +40,10 @@ Future<void> main() async {
   // Nothing is created on disk until there is a line to write.
   await AppLog.instance.start();
   _followLogSettings(settings);
+  // The same courtesy for the message store: resolve where it would live so
+  // the settings screen can show the path, without creating anything. Opening
+  // it needs the native core, so that waits for `_start`.
+  await MessageHistory.instance.start();
   // Reconfigure the window while it is still hidden, so the native caption
   // never flashes before ours replaces it.
   await prepareWindow(Tokens.forMode(settings.themeMode));
@@ -74,6 +79,21 @@ void _followLogSettings(AppSettings settings) {
   void apply() => AppLog.instance.configure(
     chat: settings.saveChatLogs,
     debug: settings.saveDebugLogs,
+  );
+
+  apply();
+  settings.addListener(apply);
+}
+
+/// Keep the message store in step with the switch that controls it.
+///
+/// Attached after the core has loaded rather than beside [_followLogSettings]
+/// in `main`, because opening the store is a call into Rust and there is no
+/// Rust yet at that point. Everything else about it is the same: a listener,
+/// not a read at startup, so turning history off stops it immediately.
+void _followHistorySetting(AppSettings settings) {
+  void apply() => unawaited(
+    MessageHistory.instance.configure(enabled: settings.saveMessages),
   );
 
   apply();
@@ -205,6 +225,9 @@ class _DdIrcAppState extends State<DdIrcApp> {
   /// nothing to connect *with*.
   Future<void> _start() async {
     await startCore();
+    // Before any connection, so a channel that opens in the first second
+    // still finds its history rather than filling in a moment later.
+    _followHistorySetting(widget.settings);
     // Awaited, and before the auto-connects: this returns as soon as Tor has
     // a port, not when Tor is ready, so the wait is short. What it buys is
     // that a network dialled a moment later finds the proxy already there.
@@ -223,6 +246,11 @@ class _DdIrcAppState extends State<DdIrcApp> {
   @override
   void dispose() {
     _themeMode.dispose();
+    // The store writes in batches on a timer, so the last couple of seconds of
+    // a conversation are still in memory when the app is asked to quit. Not
+    // awaited — dispose cannot be — but the write is queued before teardown
+    // continues, which is the most that can be promised here.
+    unawaited(MessageHistory.instance.flush());
     _background.dispose();
     _notifications.dispose();
     // Closes every live connection, so quitting never leaves a socket behind.

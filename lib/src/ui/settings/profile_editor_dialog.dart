@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../model/directory.dart';
+import '../../model/errors.dart';
 import '../../model/profile.dart';
 import '../../model/proxy.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/client.dart' as core;
+import '../../rust/api/types.dart' as rust;
 import '../../theme.dart';
 import '../motion.dart';
 import '../network_menu.dart';
@@ -114,6 +116,15 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   final Map<_Input, String> _errors = {};
   int _shake = 0;
   bool _busy = false;
+
+  /// The connection test: whether one is running, and what the last one said.
+  ///
+  /// Kept beside the button rather than raised as a notice, because it is an
+  /// answer to something asked here and it has to still be readable while the
+  /// user edits the field it complained about.
+  bool _testing = false;
+  String? _testNote;
+  bool _testFailed = false;
 
   /// Whether the Advanced group is unfolded.
   ///
@@ -350,6 +361,137 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     );
   }
 
+  /// Dial the server the form describes, report what happened, hang up.
+  ///
+  /// The whole point is that it is not a shortcut: the core runs the same
+  /// journey a real connection makes — the proxy, TLS, capability negotiation,
+  /// SASL — so a wrong port, an untrusted certificate or a refused password is
+  /// answered here, next to the field that caused it, rather than as a session
+  /// that sits in the corner saying "Reconnecting" ten seconds from now.
+  ///
+  /// Nothing is saved on the way. The profile built here exists for the length
+  /// of the call, and the secrets come from whatever is typed in the form —
+  /// falling back to the keychain only for a field the user has not touched,
+  /// which is the same rule saving uses.
+  Future<void> _test() async {
+    final errors = _validate();
+    final proxyErrors = _proxyMode == ProxyMode.custom
+        ? _proxy.validate()
+        : const <ProxyField, String>{};
+    if (errors.isNotEmpty || proxyErrors.isNotEmpty) {
+      setState(() {
+        _errors
+          ..clear()
+          ..addAll(errors);
+        _proxy.errors
+          ..clear()
+          ..addAll(proxyErrors);
+        _shake++;
+        _testNote = null;
+        if (proxyErrors.isNotEmpty ||
+            errors.keys.any(
+              (f) => f == _Input.account || f == _Input.password,
+            )) {
+          _showAdvanced = true;
+        }
+      });
+      return;
+    }
+
+    setState(() {
+      _testing = true;
+      _testNote = null;
+    });
+
+    final profile = _build();
+    final store = ProfileScope.of(context);
+    final proxies = ProxyScope.of(context);
+
+    String note;
+    var failed = true;
+    try {
+      final config = profile.toConfig(
+        saslPassword: await _secretFor(_Input.password, store.passwordFor),
+        serverPassword: await _secretFor(
+          _Input.serverPassword,
+          store.serverPasswordFor,
+        ),
+        // Deliberately not passed. The core's probe never identifies to
+        // NickServ — sending a password to a service is a side effect, and a
+        // test is supposed to leave nothing behind.
+        proxy: await _proxyForTest(profile, store, proxies),
+      );
+      final report = await core.testConnection(config: config);
+      failed = false;
+      note = _describe(report, profile);
+    } catch (error) {
+      note = describeError(error);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      _testNote = note;
+      _testFailed = failed;
+    });
+  }
+
+  /// The password to test with: what was typed, or what is stored if the field
+  /// was left alone. The same rule [_save] applies, so the test is run against
+  /// the credential that saving would have used.
+  Future<String?> _secretFor(
+    _Input field,
+    Future<String?> Function(String id) stored,
+  ) async {
+    if (_touchedSecrets.contains(field)) return _fields[field]!.text;
+    final profile = widget.profile;
+    return profile == null ? null : await stored(profile.id);
+  }
+
+  /// The route to test through — the same one connecting would take.
+  ///
+  /// [resolveProxy] settles the app-wide setting against this network's own,
+  /// and it reads the proxy password from the keychain. A password typed into
+  /// the form and not yet saved has to win over that, or testing a new proxy
+  /// would test it without its credential.
+  Future<rust.ProxyConfig?> _proxyForTest(
+    Profile profile,
+    ProfileStore store,
+    ProxySettings proxies,
+  ) async {
+    final resolved = await resolveProxy(profile, proxies, store);
+    final typed = _proxy.passwordToSave();
+    if (resolved == null || typed == null || _proxyMode != ProxyMode.custom) {
+      return resolved;
+    }
+    return rust.ProxyConfig(
+      host: resolved.host,
+      port: resolved.port,
+      username: resolved.username,
+      password: typed,
+    );
+  }
+
+  /// What a successful test found, in one sentence.
+  String _describe(rust.ProbeReport report, Profile profile) {
+    final seconds = (report.elapsedMs.toInt() / 1000).toStringAsFixed(1);
+    final where = '${profile.host}:${profile.port}';
+    final nick = report.nickname == profile.nickname
+        ? 'as ${report.nickname}'
+        // The server gave us a different name than the one asked for, which is
+        // worth saying now rather than leaving to be noticed after connecting.
+        : 'as ${report.nickname} — not the ${profile.nickname} you asked for';
+    final auth = switch (report.auth) {
+      rust.AuthOutcome_Sasl() => ' SASL accepted.',
+      rust.AuthOutcome_NickServFallback(:final reason) =>
+        ' SASL did not authenticate you ($reason); '
+            'connecting would fall back to NickServ.',
+      rust.AuthOutcome_Anonymous() => '',
+    };
+    return 'Connected to $where over TLS and registered $nick '
+        'in ${seconds}s.$auth Nothing was joined and nothing was saved.';
+  }
+
   Future<void> _delete() async {
     final profile = widget.profile;
     if (profile == null) return;
@@ -378,6 +520,11 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               _Input.name,
               'Name',
               hint: 'Optional — defaults to the host',
+              help:
+                  'What this network is called in the rail on the left and in '
+                  'the channel list. Yours to choose — it is never sent '
+                  'anywhere, and changing it does not change what you connect '
+                  'to.',
             ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -388,13 +535,36 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                     _Input.host,
                     'Address',
                     hint: 'irc.example.org',
+                    help:
+                        'The server to connect to, as a hostname or an IP '
+                        'address. A `.onion` address works too, and is routed '
+                        'through Tor. Pasting `host:port` is fine — the port '
+                        'moves into the box beside it.',
                   ),
                 ),
-                Expanded(child: _field(_Input.port, 'Port')),
+                Expanded(
+                  child: _field(
+                    _Input.port,
+                    'Port',
+                    help:
+                        'Almost always 6697, which is the standard port for '
+                        'IRC over TLS. ddIRC never connects in the clear, so '
+                        'the plaintext ports — 6667 and friends — will not '
+                        'work here.',
+                  ),
+                ),
               ],
             ),
             _networkNote(t),
-            _field(_Input.channels, 'Channels', hint: 'Comma-separated'),
+            _field(
+              _Input.channels,
+              'Channels',
+              hint: 'Comma-separated',
+              help:
+                  'Joined automatically whenever this network connects. They '
+                  'fill the channel list rather than opening a tab each, so '
+                  'saving a dozen does not mean landing in a dozen.',
+            ),
             _suggestedChannels(t),
             SettingsSwitch(
               label: 'Connect at launch',
@@ -410,7 +580,17 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         const SettingsRule(),
         SettingsSection(
           label: 'Identity',
-          children: [_field(_Input.nick, 'Nickname')],
+          children: [
+            _field(
+              _Input.nick,
+              'Nickname',
+              help:
+                  'How people address you on this network, and how you appear '
+                  'in every channel. No spaces. If it is already taken the '
+                  'server offers you the next one down — the connection test '
+                  'below says which name you actually got.',
+            ),
+          ],
         ),
         const SettingsRule(),
         SettingsDisclosure(
@@ -464,6 +644,8 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ],
         ),
         const SettingsRule(),
+        _testSection(),
+        const SettingsRule(),
         SettingsActions(
           children: [
             if (!_isNew)
@@ -489,6 +671,32 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       ],
     );
   }
+
+  /// Try the settings before committing to them.
+  ///
+  /// Its own section rather than a fourth button in the row below, because it
+  /// is not one of the ways out of this dialog — it is something done *while*
+  /// filling it in, and it has an answer that has to sit somewhere.
+  Widget _testSection() => SettingsSection(
+    label: 'Connection test',
+    help:
+        'Dials this server the way connecting would — through the proxy, over '
+        'TLS, with whatever passwords are set here — and then hangs up. No '
+        'channel is joined, no NickServ password is sent, and nothing is '
+        'saved.',
+    children: [
+      if (_testNote != null)
+        SettingsNote(text: _testNote!, isError: _testFailed),
+      SettingsActions(
+        children: [
+          SettingsSecondaryButton(
+            label: _testing ? 'Testing…' : 'Test connection',
+            onPressed: _testing || _busy ? null : _test,
+          ),
+        ],
+      ),
+    ],
+  );
 
   /// The catalogue entry for whatever address is currently typed, or null.
   ///

@@ -308,9 +308,37 @@ pub struct ServerConfig {
     pub proxy: Option<ProxyConfig>,
 }
 
+/// What a connection test found, when it worked.
+///
+/// A failure is not one of these: it is the `Err` side of the call, and it is
+/// already a sentence for the user rather than a code to be interpreted here.
+#[derive(Debug, Clone)]
+pub struct ProbeReport {
+    /// The nickname the server actually gave us, which is not always the one
+    /// that was asked for.
+    pub nickname: String,
+    /// How the server introduced itself, when it named itself at all.
+    pub server: Option<String>,
+    /// Whether the configured credentials were accepted.
+    pub auth: AuthOutcome,
+    /// How long the whole exchange took.
+    pub elapsed_ms: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Conversions from the core's types.
 // ---------------------------------------------------------------------------
+
+impl From<ddirc_core::conn::probe::ProbeReport> for ProbeReport {
+    fn from(report: ddirc_core::conn::probe::ProbeReport) -> Self {
+        Self {
+            nickname: report.nickname,
+            server: report.server,
+            auth: report.auth.into(),
+            elapsed_ms: report.elapsed_ms,
+        }
+    }
+}
 
 impl From<format::SpanStyle> for SpanStyle {
     fn from(style: format::SpanStyle) -> Self {
@@ -332,6 +360,30 @@ impl From<format::TextSpan> for TextSpan {
         Self {
             text: span.text,
             style: span.style.into(),
+        }
+    }
+}
+
+/// The one conversion that runs the other way.
+///
+/// Everything else here flows core → Dart, because everything else originates
+/// on the wire. Stored history is the exception: it comes back *from* Dart on
+/// its way into the message store, where it is re-encoded into the same mIRC
+/// codes it arrived in so that reloading goes through the ordinary parser.
+impl From<TextSpan> for format::TextSpan {
+    fn from(span: TextSpan) -> Self {
+        Self {
+            text: span.text,
+            style: format::SpanStyle {
+                bold: span.style.bold,
+                italic: span.style.italic,
+                underline: span.style.underline,
+                strikethrough: span.style.strikethrough,
+                monospace: span.style.monospace,
+                inverse: span.style.inverse,
+                fg: span.style.fg,
+                bg: span.style.bg,
+            },
         }
     }
 }

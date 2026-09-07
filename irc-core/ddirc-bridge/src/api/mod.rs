@@ -1,5 +1,6 @@
 pub mod client;
 pub mod server;
+pub mod store;
 pub mod tor;
 pub mod types;
 

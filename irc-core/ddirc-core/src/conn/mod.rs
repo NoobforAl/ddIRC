@@ -1,5 +1,6 @@
 pub mod actor;
 pub mod diagnose;
+pub mod probe;
 pub mod ratelimit;
 pub mod reconnect;
 pub mod sasl;

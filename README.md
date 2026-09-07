@@ -75,6 +75,23 @@ says why, and waits to be asked. A wrong address or a blocked port is not
 something persistence fixes, and retrying it every five minutes produces a
 countdown that never ends while the actual reason sits unread.
 
+**The account of the connection is not in the conversation.** Attempts, TLS,
+registration and whatever the server objected to go to a per-connection log,
+reached from **View log** on the status bar under the header, or from
+*Connection log…* in the header menu once the bar has gone. They used to be
+filed as muted grey lines into whichever channel happened to be on screen when
+they arrived, which made a channel's history part conversation and part
+plumbing — and scattered one connection's story across every room visited while
+it was failing. The log is in memory only, bounded at 300 lines, and copyable in
+one press for a bug report. Nothing reaches disk unless the debug log is on.
+
+**A network can be tried before it is saved.** *Test connection* in the network
+editor runs the whole journey once — the proxy, TLS, capability negotiation,
+SASL, registration — and reports what happened next to the fields that caused
+it, rather than leaving a wrong port to surface as a session stuck at
+"Reconnecting". It joins nothing, sends no NickServ password, and quits as soon
+as the server says hello.
+
 ### Talking to one person
 
 Tap a nick in the member list, or type `/query <nick>`, and a conversation with
@@ -269,10 +286,10 @@ right-click or long-press on any channel in the list.
 
 | Dialog | What it holds |
 |---|---|
-| **App** | Theme, timestamps, 12/24-hour clock, message density, whether to keep running in the background (not on iOS), whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, and the app-wide proxy. Applies to every server; persists. |
+| **App** | Theme, timestamps, 12/24-hour clock, message density, whether to keep running in the background (not on iOS), whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, whether message history is kept, and the app-wide proxy. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
 | **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, route (direct or through which proxy), authentication mechanism. Plus disconnect. |
-| **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, whether to connect at launch, and this network's proxy. Reached from the rail's context menu or the header menu. |
+| **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, whether to connect at launch, and this network's proxy. Every field explains itself behind a '?', and *Test connection* dials the server before anything is saved. Reached from the rail's context menu or the header menu. |
 
 Preferences live in `shared_preferences`. **No credential is ever written
 there** — see [SECURITY.md](SECURITY.md).
@@ -381,6 +398,42 @@ anything shaped like a credential on the way into the debug log; it is a
 backstop rather than the defence, since the core strips secrets before they
 ever become events. Write failures are swallowed — a full disk must not
 interrupt a conversation over a diagnostic.
+
+## Message history
+
+Off, like the logs above, and offered beside them for the same reason: it is the
+third switch on that page that writes down what people said.
+
+It is not a third log. The chat log is plain text for a person to open in an
+editor and is never read back; this is a database the app reads back, and what
+it buys is that rejoining a channel shows the last conversation instead of an
+empty screen. The last 200 lines of a conversation are restored when it opens,
+with their formatting intact — messages are stored as the mIRC codes they
+arrived in, so a reloaded line goes through the same parser a live one does and
+there is no second representation of a message to keep in step.
+
+| | |
+|---|---|
+| **File** | `history.db`, beside the settings and the logs |
+| **Holds** | Messages and system lines, per network and per conversation |
+| **Does not hold** | Passwords, the connection log, anything about how the connection was made |
+| **Ceiling** | Two million lines, oldest dropped first, across every network |
+| **Encrypted** | No — anyone who can read the folder can read the conversations |
+
+The path and the current size are shown in App settings *before* the switch is
+turned on, and nothing is created until it is. Turning it off stops recording
+and leaves what was already recorded; **Delete saved messages** is the separate
+thing that destroys it, and it `VACUUM`s rather than only deleting rows — a
+delete that left every message sitting in the file's free pages would not be
+what the button says.
+
+It lives in Rust, in `ddirc-core::store`, rather than in a Dart sqlite package.
+A second persistence layer in a second language means two schemas to keep in
+step and two places to get a migration wrong, and this one belongs next to the
+session state it is a record of. `rusqlite`'s `bundled` feature compiles
+SQLite's amalgamation from source as part of the ordinary cargo build, so every
+platform this tree already cross-compiles for gets the same SQLite rather than
+whatever the system happens to ship.
 
 ## What gets sent about you
 
@@ -618,7 +671,9 @@ unchanged.
 | `dcc/offer.rs` | Parses an incoming `DCC SEND`. Built before anything that acts on one, because an offer is a string a stranger wrote. |
 | `dcc/transfer.rs` | Moves the bytes, on its own socket and its own task. Holds the rule about what a transfer is allowed to disclose. |
 | `media/` | Removing metadata from images before they are sent. No codec: each format is rewritten as a container, pixels copied across untouched. |
-| `text/format.rs` | Parses mIRC formatting into styled spans and strips control codes. |
+| `text/format.rs` | Parses mIRC formatting into styled spans and strips control codes, and writes them back out so the store can round-trip a line. |
+| `conn/probe.rs` | One connection made to be reported on and thrown away — what *Test connection* runs. |
+| `store/` | The message history database. Closed unless the user turned it on. |
 
 `ddirc-server` is a separate crate rather than a module here, because it is the
 other half of the protocol and wants dependencies the client half does not —
@@ -910,6 +965,16 @@ The proxy support is the crate's own `proxy` feature, backed by
 `conn/diagnose.rs` matches on its error variants and the `irc` crate does not
 re-export the type — matching on Display strings instead would be one upstream
 rewording away from silently losing every proxy diagnosis.
+
+Message history added **one crate that matters**, `rusqlite`, and it is taken
+with `bundled` on purpose. The alternative was a system SQLite, which means a
+different version — or none — on each of the five platforms this cross-compiles
+for, and a database file whose readability depends on which machine wrote it.
+Compiling the amalgamation costs build time and buys one answer everywhere. The
+Dart-side alternatives (`sqlite3`, `drift`) were the other way to do it and were
+rejected for splitting persistence across two languages rather than for anything
+about the packages; `sqlx` wants an async runtime the store does not need, and
+`diesel` is an ORM over a schema with one table.
 
 `Cargo.lock` is committed and `cargo audit` runs over the whole tree. See
 [SECURITY.md](SECURITY.md).

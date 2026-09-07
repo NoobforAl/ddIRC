@@ -488,7 +488,7 @@ impl Actor {
         commands: &mut mpsc::Receiver<ClientCommand>,
         backoff: &mut Backoff,
     ) -> Result<Disposition, ConnectionError> {
-        let mut client = Client::from_config(self.irc_config()).await?;
+        let mut client = Client::from_config(irc_config(&self.config)).await?;
         let mut stream = client.stream()?;
         let sender = client.sender();
 
@@ -665,51 +665,6 @@ impl Actor {
             account: account.clone(),
             password: password.clone(),
         })
-    }
-
-    /// Build the crate's config.
-    ///
-    /// TLS is always on and `dangerously_accept_invalid_certs` is never set, so
-    /// there is no path through this code that skips certificate verification.
-    /// `cert_path` only ever *adds* a root to the platform's trust store, and
-    /// is unset outside tests.
-    /// `channels` and `nick_password` are deliberately left unset: the crate
-    /// would act on them at end-of-MOTD, and we want to control both ordering
-    /// and rate limiting ourselves.
-    ///
-    /// The proxy, when there is one, wraps the socket *below* TLS: the crate
-    /// opens the SOCKS5 tunnel first and then performs the handshake through
-    /// it, against `server`. Verification and SNI are unchanged, so the proxy
-    /// carries ciphertext it cannot read and cannot substitute itself for the
-    /// server. And there is no direct-connection fallback anywhere on this
-    /// path — a proxy that cannot be reached is a connection that fails.
-    fn irc_config(&self) -> IrcConfig {
-        let proxy = self.config.proxy.as_ref();
-        IrcConfig {
-            server: Some(self.config.host.clone()),
-            port: Some(self.config.port),
-            use_tls: Some(true),
-            nickname: Some(self.config.nickname.clone()),
-            alt_nicks: self.config.alt_nicks.clone(),
-            username: Some(self.config.username().to_owned()),
-            realname: Some(self.config.realname().to_owned()),
-            ping_time: Some(60),
-            ping_timeout: Some(20),
-            cert_path: self.config.extra_root_cert.clone(),
-            proxy_type: Some(match proxy {
-                Some(_) => ProxyType::Socks5,
-                None => ProxyType::None,
-            }),
-            proxy_server: proxy.map(|p| p.host.clone()),
-            proxy_port: proxy.map(|p| p.port),
-            proxy_username: proxy.and_then(|p| p.username.clone()),
-            // The crate's config field is a plain `String`, so this copy is not
-            // zeroized on drop the way ours is. Unavoidable without vendoring
-            // the crate, and the same is already true of the server password we
-            // hand to `PASS`; noted rather than papered over.
-            proxy_password: proxy.and_then(|p| p.password.as_ref().map(|s| s.to_string())),
-            ..IrcConfig::default()
-        }
     }
 
     /// Convert a UI command into protocol commands on the outgoing queue.
@@ -1497,6 +1452,55 @@ fn sanitize_outgoing(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Build the crate's config.
+///
+/// TLS is always on and `dangerously_accept_invalid_certs` is never set, so
+/// there is no path through this code that skips certificate verification.
+/// `cert_path` only ever *adds* a root to the platform's trust store, and
+/// is unset outside tests.
+/// `channels` and `nick_password` are deliberately left unset: the crate
+/// would act on them at end-of-MOTD, and we want to control both ordering
+/// and rate limiting ourselves.
+///
+/// The proxy, when there is one, wraps the socket *below* TLS: the crate
+/// opens the SOCKS5 tunnel first and then performs the handshake through
+/// it, against `server`. Verification and SNI are unchanged, so the proxy
+/// carries ciphertext it cannot read and cannot substitute itself for the
+/// server. And there is no direct-connection fallback anywhere on this
+/// path — a proxy that cannot be reached is a connection that fails.
+///
+/// A free function rather than a method on [`Actor`] because the probe in
+/// [`crate::conn::probe`] dials the same server the same way, and a second
+/// copy of this would be a second place for TLS to be turned off by accident.
+pub(crate) fn irc_config(config: &ServerConfig) -> IrcConfig {
+    let proxy = config.proxy.as_ref();
+    IrcConfig {
+        server: Some(config.host.clone()),
+        port: Some(config.port),
+        use_tls: Some(true),
+        nickname: Some(config.nickname.clone()),
+        alt_nicks: config.alt_nicks.clone(),
+        username: Some(config.username().to_owned()),
+        realname: Some(config.realname().to_owned()),
+        ping_time: Some(60),
+        ping_timeout: Some(20),
+        cert_path: config.extra_root_cert.clone(),
+        proxy_type: Some(match proxy {
+            Some(_) => ProxyType::Socks5,
+            None => ProxyType::None,
+        }),
+        proxy_server: proxy.map(|p| p.host.clone()),
+        proxy_port: proxy.map(|p| p.port),
+        proxy_username: proxy.and_then(|p| p.username.clone()),
+        // The crate's config field is a plain `String`, so this copy is not
+        // zeroized on drop the way ours is. Unavoidable without vendoring
+        // the crate, and the same is already true of the server password we
+        // hand to `PASS`; noted rather than papered over.
+        proxy_password: proxy.and_then(|p| p.password.as_ref().map(|s| s.to_string())),
+        ..IrcConfig::default()
+    }
+}
+
 /// True for the three numerics that make up the answer to a `LIST`.
 ///
 /// Kept next to the flood limiter's only exemption, because that is the one
@@ -1513,7 +1517,7 @@ fn is_list_reply(message: &Message) -> bool {
 }
 
 /// True for numerics that represent an error worth surfacing.
-fn is_error_numeric(response: Response) -> bool {
+pub(crate) fn is_error_numeric(response: Response) -> bool {
     let code = response as u16;
     (400..600).contains(&code)
 }

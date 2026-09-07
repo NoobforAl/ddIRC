@@ -7,6 +7,7 @@ import 'package:flutter/scheduler.dart';
 import '../rust/api/client.dart' as core;
 import '../rust/api/types.dart';
 import 'errors.dart';
+import 'history.dart';
 import 'log.dart';
 import 'notice.dart';
 import 'settings.dart';
@@ -23,6 +24,27 @@ const _maxLinesPerConversation = 2000;
 /// Only [SystemKind.presence] is noise a user might reasonably want gone; the
 /// rest report something that actually changed, so they are never hidden.
 enum SystemKind { presence, topic, mode, connection }
+
+/// How many connection-log entries one session keeps.
+///
+/// A connection that flaps for a day produces a line every few seconds, and
+/// the log exists to explain the last failure rather than to be an archive of
+/// every one. Small enough to hold in memory without thinking about it, long
+/// enough to cover a whole reconnect sequence with the reasons attached.
+const _maxConnectionLogLines = 300;
+
+/// One line of the raw connection log.
+///
+/// Separate from [ChatLine] on purpose. These are not part of any conversation
+/// — they are about the socket underneath all of them — and mixing the two is
+/// what put "connecting…", "registering…" and a TLS complaint in the middle of
+/// what people were saying to each other.
+class ConnectionLogEntry {
+  ConnectionLogEntry(this.text, this.at);
+
+  final String text;
+  final DateTime at;
+}
 
 /// One rendered line: either a real message or a subordinate system notice.
 class ChatLine {
@@ -107,6 +129,31 @@ class Conversation {
     }
     unread++;
     if (line.isMention) unreadMentions++;
+  }
+
+  /// Whether saved history has already been put in front of this conversation,
+  /// so a second attempt cannot show yesterday twice.
+  bool restored = false;
+
+  /// Put older lines in front of whatever is already here.
+  ///
+  /// Only ever called with lines that predate everything in [lines]: the load
+  /// is started the moment a conversation is created, and the store is written
+  /// behind a flush timer, so nothing on screen can also be in what comes back.
+  ///
+  /// Nothing about unread counts changes. These were read yesterday, or never
+  /// arrived while anyone was looking — either way they are not news, and a
+  /// channel that showed forty unread the moment it opened would be reporting
+  /// its own history as activity.
+  void restore(List<ChatLine> older) {
+    restored = true;
+    if (older.isEmpty) return;
+    lines.insertAll(0, older);
+    if (lines.length > _maxLinesPerConversation) {
+      // Trimmed from the front, so the oldest restored lines are the ones that
+      // go rather than anything that arrived live.
+      lines.removeRange(0, lines.length - _maxLinesPerConversation);
+    }
   }
 
   void markRead() {
@@ -337,6 +384,16 @@ class SessionModel extends ChangeNotifier {
   AuthOutcome? _auth;
   StreamSubscription<IrcEvent>? _subscription;
 
+  final List<ConnectionLogEntry> _connectionLog = [];
+
+  /// What this connection has been doing, oldest first.
+  ///
+  /// Everything the socket itself has to report — attempts, TLS, registration,
+  /// and whatever the server objected to. Read by the log sheet behind the
+  /// connection bar, and by nothing that draws the scrollback.
+  List<ConnectionLogEntry> get connectionLog =>
+      UnmodifiableListView(_connectionLog);
+
   String get nick => _nick;
   String? get network => _network;
   ConnectionStatus get status => _status;
@@ -528,6 +585,7 @@ class SessionModel extends ChangeNotifier {
     _conversations[key] = created;
     _order.add(key);
     _invalidateLists();
+    _restoreHistory(created);
     // A request does neither of the two things below. Both are courtesies to
     // somewhere the user chose to be, and being messaged by a stranger is not
     // a choice they made — a tab opening and the screen changing under them is
@@ -547,6 +605,33 @@ class SessionModel extends ChangeNotifier {
     // never looking at an empty screen after joining.
     _active ??= key;
     return created;
+  }
+
+  /// Put yesterday's conversation back at the top of this one.
+  ///
+  /// Started the moment the conversation is created and never awaited, so
+  /// joining a channel is never held up by a disk read. What comes back is
+  /// inserted in front of whatever arrived in the meantime — see
+  /// [Conversation.restore] for why that can never overlap.
+  ///
+  /// Does nothing at all unless the user turned history on, which is not the
+  /// default.
+  void _restoreHistory(Conversation conversation) {
+    if (conversation.restored || !MessageHistory.instance.enabled) return;
+    conversation.restored = true;
+    unawaited(
+      MessageHistory.instance
+          .load(
+            profileId: profileId,
+            conversation: conversation.name,
+            isChannel: conversation.isChannel,
+          )
+          .then((older) {
+            if (_disposed || older.isEmpty) return;
+            conversation.restore(older);
+            _queueNotify();
+          }),
+    );
   }
 
   /// Join a channel because the user just said to.
@@ -712,6 +797,7 @@ class SessionModel extends ChangeNotifier {
       notify: settings.notifyFor(profileId, name),
     );
     _log(name, line);
+    _save(name, line);
     // Handed on with the conversation it landed in, so whoever is listening
     // can see whether it is a request, whether it is the one on screen, and
     // what the network is called. Deciding whether it is worth interrupting
@@ -719,6 +805,19 @@ class SessionModel extends ChangeNotifier {
     // something a session can answer.
     onLine?.call(conversation, line);
   }
+
+  /// Queue a line for the message store, if history is being kept.
+  ///
+  /// Under the same name the conversation is filed under, so what is written
+  /// and what is read back agree — see [MessageHistory.key]. A pending
+  /// conversation is written like any other: the message has already arrived
+  /// and pretending otherwise would mean losing it, which is the same argument
+  /// the scrollback already makes for holding it.
+  void _save(String name, ChatLine line) => MessageHistory.instance.record(
+    profileId: profileId,
+    conversation: name,
+    line: line,
+  );
 
   /// Mirror a line into the chat log, if one is being kept.
   ///
@@ -739,23 +838,41 @@ class SessionModel extends ChangeNotifier {
     );
   }
 
-  /// Status and error lines belong to whatever the user is currently reading;
-  /// they are about the connection, not any one channel.
+  /// File a line into whatever the user is currently reading.
+  ///
+  /// For the one thing left that belongs in a conversation but is not about
+  /// any particular one: messages the flood limiter discarded, when the core
+  /// could not say which channel they were for. Everything else that used to
+  /// come through here now goes to [_logConnection].
   void _addToActive(String text) {
-    final target = active;
-    if (target == null) {
-      // Before any channel exists, keep a server console so early errors — a
-      // ban, a bad password — are not lost.
-      _conversationFor('server', isChannel: false).add(
-        ChatLine.system(text, DateTime.now(), SystemKind.connection),
-        active: true,
+    final conversation = active ?? _conversationFor('server', isChannel: false);
+    final line = ChatLine.system(text, DateTime.now(), SystemKind.connection);
+    conversation.add(line, active: true);
+    _save(conversation.name, line);
+  }
+
+  /// Record something about the connection itself.
+  ///
+  /// These used to be filed into whichever conversation the user happened to
+  /// be reading, as muted grey lines. That put the hostname lookup, the TLS
+  /// handshake, every reconnect countdown and every server complaint in the
+  /// middle of the conversation — an account of the plumbing, interleaved with
+  /// what people were saying, in a scrollback that is supposed to be a record
+  /// of the latter. Worse, which channel it landed in was decided by what was
+  /// on screen at the time, so the same connection's history ended up
+  /// scattered across every room the user had visited while it was failing.
+  ///
+  /// So it goes here instead: one log per connection, in one place, behind the
+  /// button on the connection bar. Nothing is lost — the bar that reports the
+  /// trouble is also where the detail is reached from.
+  void _logConnection(String text) {
+    _connectionLog.add(ConnectionLogEntry(text, DateTime.now()));
+    if (_connectionLog.length > _maxConnectionLogLines) {
+      _connectionLog.removeRange(
+        0,
+        _connectionLog.length - _maxConnectionLogLines,
       );
-      return;
     }
-    target.add(
-      ChatLine.system(text, DateTime.now(), SystemKind.connection),
-      active: true,
-    );
   }
 
   void _onEvent(IrcEvent event) {
@@ -766,7 +883,7 @@ class SessionModel extends ChangeNotifier {
         _status = status;
         _statusDetail = detail;
         final described = _describeStatus(status, detail);
-        _addToActive(described);
+        _logConnection(described);
         // The debug log's whole job: the sequence of connection states, and
         // the reason each one was entered. No message content reaches it.
         AppLog.instance.debug('[${_network ?? config.host}] $described');
@@ -775,9 +892,9 @@ class SessionModel extends ChangeNotifier {
         _nick = nick;
         _network = network;
         _auth = auth;
-        _addToActive('registered on ${network ?? 'server'} as $nick');
+        _logConnection('registered on ${network ?? 'server'} as $nick');
         if (auth is AuthOutcome_NickServFallback) {
-          _addToActive('SASL unavailable (${auth.reason}) — used NickServ');
+          _logConnection('SASL unavailable (${auth.reason}) — used NickServ');
         }
 
       case IrcEvent_NetworkNamed(:final network):
@@ -939,6 +1056,11 @@ class SessionModel extends ChangeNotifier {
 
       case IrcEvent_MessagesDropped(:final channel, :final count):
         // Never swallowed: a silent gap would read as "nobody spoke".
+        //
+        // The one report that stays in the scrollback rather than moving to
+        // the connection log with the rest. It is not about the connection —
+        // it is about this conversation, and it is the only thing standing
+        // between a hole in it and the impression that nothing was said.
         final text = '$count message(s) dropped — flood protection';
         if (channel == null) {
           _addToActive(text);
@@ -1062,12 +1184,12 @@ class SessionModel extends ChangeNotifier {
         );
 
       case IrcEvent_Error(:final message, :final fatal):
-        _addToActive('error: $message');
+        _logConnection('error: $message');
         AppLog.instance.debug('[${_network ?? config.host}] error: $message');
-        // Raised as well as logged. A server error used to be a muted grey
-        // line in the scrollback, which is where it belongs as a record and
-        // exactly the wrong place for it as an alert — being told the nick is
-        // taken should not look like someone joining.
+        // Raised as well as recorded, and the two are not the same thing. The
+        // log is where it will still make sense next week; the notice is the
+        // alert, and without it a server error would be something the user
+        // only found by going looking for it.
         raiseNotice(
           fatal
               ? Notice.error(message, detail: 'The connection cannot continue.')

@@ -13,6 +13,7 @@ import '../notifier.dart' show notificationHelpFor, notificationsSupportedOn;
 import 'app_lock_section.dart';
 import 'file_transfer_section.dart';
 import 'local_server_section.dart';
+import 'message_history_section.dart';
 import 'proxy_section.dart';
 import 'settings_chrome.dart';
 import 'tor_section.dart';
@@ -211,10 +212,20 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
     final logs = [
       if (settings.saveChatLogs) 'chat logs',
       if (settings.saveDebugLogs) 'debug logs',
+      // Named on the index row for the same reason the logs are: this row
+      // exists so somebody can see what is being written down without opening
+      // anything, and a database of conversations is the largest of the three.
+      if (settings.saveMessages) 'message history',
     ];
-    final writing = logs.isEmpty
-        ? 'Nothing written to disk'
-        : 'Saving ${logs.join(' and ')}';
+    // Written out as a list a person would say aloud. With three of these
+    // possible, `join(' and ')` produced "a and b and c".
+    final writing = switch (logs.length) {
+      0 => 'Nothing written to disk',
+      1 => 'Saving ${logs.single}',
+      _ =>
+        'Saving ${logs.sublist(0, logs.length - 1).join(', ')} '
+            'and ${logs.last}',
+    };
     return lock.enabled ? 'App lock on · $writing' : writing;
   }
 
@@ -398,6 +409,10 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
           ),
         ],
       ),
+      // Immediately after the logs, because it is the other switch on this
+      // page that writes down what people said and the two should be weighed
+      // together.
+      const MessageHistorySection(),
       // Beside the log folder, because it answers the same question — where
       // does this end up — and because "are my settings actually saved?" has
       // had no answer in the app short of going and looking for the file.

@@ -7,14 +7,23 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connections`, `dev_root_cert`, `runtime`, `send`, `with_connection`
+// These functions are ignored because they are not marked as `pub`: `connections`, `dev_root_cert`, `prepare`, `runtime`, `send`, `with_connection`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Connection`
 
-/// Open a connection and return its id.
+/// Connect, register, report what happened, and hang up.
 ///
-/// The configuration is validated up front, so a bad host, a plaintext port, or
-/// half-supplied SASL credentials fail here with a clear message rather than as
-/// an opaque error later.
+/// For the "Test connection" button in the network editor: the same journey a
+/// real connection makes — proxy, TLS, capability negotiation, SASL,
+/// registration — run once so a wrong port or a refused password is reported
+/// where it was typed, rather than as a session that quietly sits at
+/// "Reconnecting".
+///
+/// Nothing is remembered: no connection id is created, no channel is joined,
+/// and no NickServ password is sent. The `Err` side is already a sentence for
+/// the user.
+Future<ProbeReport> testConnection({required ServerConfig config}) =>
+    RustLib.instance.api.crateApiClientTestConnection(config: config);
+
 Future<BigInt> connect({required ServerConfig config}) =>
     RustLib.instance.api.crateApiClientConnect(config: config);
 

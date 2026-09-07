@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectedContent;
 
 import '../model/session.dart';
 import '../model/settings.dart';
@@ -19,6 +20,10 @@ class MessageView extends StatefulWidget {
 
 class _MessageViewState extends State<MessageView> {
   final _controller = ScrollController();
+
+  /// Where the rows find out about each other, so a copy that spans several
+  /// of them comes out as several lines. See [_ScrollbackSelection].
+  final _selection = _ScrollbackSelection();
 
   /// Only auto-scroll when already at the bottom, so reading scrollback is not
   /// yanked away every time someone speaks.
@@ -101,43 +106,162 @@ class _MessageViewState extends State<MessageView> {
     // one frame cannot get fifteen different answers worth having.
     final arrivedAfter = DateTime.now().subtract(_arrival);
 
-    return ListView.builder(
-      controller: _controller,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      itemCount: lines.length,
-      itemBuilder: (context, i) {
-        final line = lines[i];
-        final fresh = i >= _freshFrom && line.at.isAfter(arrivedAfter);
+    // Selection lives out here, around the whole list, because a selection
+    // that stopped at one message would not be a selection anyone wanted:
+    // quoting a conversation means taking the three lines it took to have it.
+    // What is *excluded* is the metadata — see [_SenderLabel] — so dragging
+    // across a run of messages copies what was said and not a column of nicks
+    // and clock times interleaved through it.
+    return SelectionArea(
+      child: ListView.builder(
+        controller: _controller,
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        itemCount: lines.length,
+        itemBuilder: (context, i) {
+          final line = lines[i];
+          final fresh = i >= _freshFrom && line.at.isAfter(arrivedAfter);
 
-        if (line.isSystem) {
-          return Arrive(
-            play: fresh,
-            child: _SystemLine(text: line.system!),
+          if (line.isSystem) {
+            return _SelectableLine(
+              index: i,
+              scrollback: _selection,
+              child: Arrive(
+                play: fresh,
+                child: _SystemLine(text: line.system!),
+              ),
+            );
+          }
+
+          // Suppress the repeated sender label when the same person speaks
+          // again within a couple of minutes — the run reads as one utterance
+          // and the screen stays quieter.
+          final previous = i > 0 ? lines[i - 1] : null;
+          final grouped =
+              previous != null &&
+              !previous.isSystem &&
+              previous.message!.sender == line.message!.sender &&
+              previous.message!.isSelf == line.message!.isSelf &&
+              line.at.difference(previous.at).inMinutes < 2;
+
+          return _SelectableLine(
+            index: i,
+            scrollback: _selection,
+            child: Arrive(
+              play: fresh,
+              child: _MessageLine(
+                line: line,
+                showSender: !grouped,
+                settings: settings,
+              ),
+            ),
           );
-        }
-
-        // Suppress the repeated sender label when the same person speaks
-        // again within a couple of minutes — the run reads as one utterance
-        // and the screen stays quieter.
-        final previous = i > 0 ? lines[i - 1] : null;
-        final grouped =
-            previous != null &&
-            !previous.isSystem &&
-            previous.message!.sender == line.message!.sender &&
-            previous.message!.isSelf == line.message!.isSelf &&
-            line.at.difference(previous.at).inMinutes < 2;
-
-        return Arrive(
-          play: fresh,
-          child: _MessageLine(
-            line: line,
-            showSender: !grouped,
-            settings: settings,
-          ),
-        );
-      },
+        },
+      ),
     );
   }
+}
+
+/// Where a copied selection gets its line breaks.
+///
+/// Flutter writes every selected paragraph into one buffer with nothing in
+/// between, so three messages come back as one run-on string. The obvious fix —
+/// one selection container around the whole list, joining its children — does
+/// not work: [Scrollable] already puts a container of its own around the
+/// viewport for auto-scrolling, and that one does the concatenating before
+/// anything outside the list ever sees it. So the join has to happen *inside*,
+/// one row at a time, and a row that cannot see its neighbours needs this to
+/// tell it whether anything above it is also selected.
+///
+/// The separator goes in front of a continuing row rather than after every
+/// row. Appending would be simpler and would put a line break on the end of
+/// every copy, including a few words dragged out of the middle of a single
+/// message — which is not something the user selected.
+class _ScrollbackSelection {
+  final _rows = <_LineSelection>{};
+
+  void register(_LineSelection row) => _rows.add(row);
+  void unregister(_LineSelection row) => _rows.remove(row);
+
+  /// Whether [row] continues a selection that began further up.
+  ///
+  /// Rows are compared by their place in the scrollback rather than by the
+  /// order they registered in, because scrolling registers them in whichever
+  /// direction the list was scrolled.
+  bool continues(_LineSelection row) =>
+      _rows.any((other) => other.index < row.index && other.value.hasSelection);
+}
+
+/// One row's share of the selection, and the line break in front of it.
+class _LineSelection extends StaticSelectionContainerDelegate {
+  _LineSelection(this.scrollback, this.index);
+
+  final _ScrollbackSelection scrollback;
+
+  /// This row's position in the scrollback. Reassigned as the list scrolls —
+  /// rows are recycled, so the delegate outlives any one index.
+  int index;
+
+  @override
+  SelectedContent? getSelectedContent() {
+    final content = super.getSelectedContent();
+    if (content == null) return null;
+    return scrollback.continues(this)
+        ? SelectedContent(plainText: '\n${content.plainText}')
+        : content;
+  }
+}
+
+/// Wraps one row in its own selection container.
+///
+/// Stateful only because the delegate has to outlive the build: a
+/// [SelectionContainer] registers and unregisters whatever it is handed, and a
+/// fresh one every frame would drop the selection mid-drag.
+class _SelectableLine extends StatefulWidget {
+  const _SelectableLine({
+    required this.index,
+    required this.scrollback,
+    required this.child,
+  });
+
+  final int index;
+  final _ScrollbackSelection scrollback;
+  final Widget child;
+
+  @override
+  State<_SelectableLine> createState() => _SelectableLineState();
+}
+
+class _SelectableLineState extends State<_SelectableLine> {
+  late final _LineSelection _delegate = _LineSelection(
+    widget.scrollback,
+    widget.index,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    widget.scrollback.register(_delegate);
+  }
+
+  @override
+  void didUpdateWidget(_SelectableLine old) {
+    super.didUpdateWidget(old);
+    // The list recycles rows, so the same delegate can find itself standing
+    // for a different line. Its index has to follow, or the row that starts a
+    // selection would be decided from where it used to be.
+    _delegate.index = widget.index;
+  }
+
+  @override
+  void dispose() {
+    widget.scrollback.unregister(_delegate);
+    _delegate.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      SelectionContainer(delegate: _delegate, child: widget.child);
 }
 
 /// Joins, parts, topics, connection changes: smaller, muted, centred —
@@ -209,11 +333,17 @@ class _MessageLine extends StatelessWidget {
             : CrossAxisAlignment.start,
         children: [
           if (showSender)
-            _SenderLabel(
-              message: message,
-              at: line.at,
-              mine: mine,
-              settings: settings,
+            // Kept out of the selection rather than stripped back out of it
+            // afterwards. Nick and clock time are the app's annotation on what
+            // someone said, not part of it, and a quote that drags them along
+            // is a quote that has to be tidied up by hand every time.
+            SelectionContainer.disabled(
+              child: _SenderLabel(
+                message: message,
+                at: line.at,
+                mine: mine,
+                settings: settings,
+              ),
             ),
           _MessageBody(
             message: message,
@@ -316,9 +446,12 @@ class _MessageBody extends StatelessWidget {
         ? base.copyWith(color: t.muted)
         : base;
 
-    return RichText(
-      textAlign: mine ? TextAlign.right : TextAlign.left,
-      text: TextSpan(
+    // `Text.rich` rather than the bare `RichText` this used to be: a `Text`
+    // registers itself with whatever selection is in scope, and a hand-built
+    // `RichText` does not — it would draw identically and be the one thing on
+    // the screen that could not be selected.
+    return Text.rich(
+      TextSpan(
         style: style,
         children: [
           if (leading.isNotEmpty)
@@ -329,6 +462,7 @@ class _MessageBody extends StatelessWidget {
           ...message.spans.map((span) => _span(span, style, renderColors, t)),
         ],
       ),
+      textAlign: mine ? TextAlign.right : TextAlign.left,
     );
   }
 

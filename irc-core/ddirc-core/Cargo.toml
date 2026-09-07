@@ -20,6 +20,7 @@ tokio-socks.workspace = true
 tracing.workspace = true
 base64 = "0.22"
 rand = "0.8"
+rusqlite.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]

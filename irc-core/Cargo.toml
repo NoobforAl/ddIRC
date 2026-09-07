@@ -64,6 +64,22 @@ arti-client = { version = "0.45.0", default-features = false, features = [
 ] }
 tor-rtcompat = { version = "0.45.0", default-features = false, features = ["tokio", "rustls"] }
 tracing = "0.1"
+# The message store, when the user opts into one.
+#
+# `bundled` compiles SQLite's C amalgamation from source as part of the normal
+# cargo build, through the `cc` crate. That is the whole reason it is here
+# rather than a Dart-side sqlite package: this tree already cross-compiles to
+# Windows, macOS, Linux, Android and iOS, and every one of those has a
+# different answer to "where is the system libsqlite3, and which version". A
+# compiled-in copy has one answer everywhere, and it is the same version on
+# each, which is what makes a database file written on one platform readable on
+# another.
+#
+# `column_decltype` is off (default-features = false drops the bundled feature
+# set we do not use); `backup`, `serialize` and the rest stay off deliberately —
+# a message log needs INSERT, SELECT and DELETE, and nothing here should be
+# able to attach a second database or load an extension.
+rusqlite = { version = "0.37", features = ["bundled"] }
 flutter_rust_bridge = "=2.13.0"
 zeroize = { version = "1", features = ["derive"] }
 
