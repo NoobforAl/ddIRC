@@ -175,30 +175,57 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         });
       });
     }
+  }
+
+  /// Whether the keychain has already been asked about this profile.
+  ///
+  /// This runs from [didChangeDependencies], which is called again whenever
+  /// anything inherited changes — the theme, the proxy settings, the window
+  /// being resized past a breakpoint. Asking the keychain once is the point;
+  /// asking it on every such rebuild would be a lookup per frame.
+  bool _askedTheKeychain = false;
+
+  /// Find out whether this profile has secrets already stored.
+  ///
+  /// Here rather than in [initState], which is where it was and where it was
+  /// wrong: [ProfileScope.of] is an inherited-widget lookup, and Flutter
+  /// forbids those until dependencies exist. It asserts, which in a debug
+  /// build is the red screen — and only ever on this path, because a new
+  /// network has no stored secrets to ask about and never reached the lookup.
+  ///
+  /// What is read is only *whether* something is stored, never the value. That
+  /// decides two things the form cannot otherwise know: whether to say "Stored
+  /// — leave blank to keep it" under a password field, and whether to open
+  /// Advanced, since a section folded over a password somebody set is a
+  /// setting hidden from the person it belongs to.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
     final profile = widget.profile;
-    if (profile != null) {
-      final store = ProfileScope.of(context);
-      unawaited(
-        store.serverPasswordFor(profile.id).then((value) {
-          if (mounted && value != null) {
-            setState(() {
-              _hasStoredServerPassword = true;
-              _showAdvanced = true;
-            });
-          }
-        }),
-      );
-      unawaited(
-        store.nickservPasswordFor(profile.id).then((value) {
-          if (mounted && value != null) {
-            setState(() {
-              _hasStoredNickservPassword = true;
-              _showAdvanced = true;
-            });
-          }
-        }),
-      );
-    }
+    if (profile == null || _askedTheKeychain) return;
+    _askedTheKeychain = true;
+
+    final store = ProfileScope.of(context);
+    unawaited(
+      store.serverPasswordFor(profile.id).then((value) {
+        if (mounted && value != null) {
+          setState(() {
+            _hasStoredServerPassword = true;
+            _showAdvanced = true;
+          });
+        }
+      }),
+    );
+    unawaited(
+      store.nickservPasswordFor(profile.id).then((value) {
+        if (mounted && value != null) {
+          setState(() {
+            _hasStoredNickservPassword = true;
+            _showAdvanced = true;
+          });
+        }
+      }),
+    );
   }
 
   @override
