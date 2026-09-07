@@ -129,13 +129,16 @@ void main() {
       expect(desktop, contains('tray'));
     });
 
-    test('Android says what still ends it', () async {
-      // The service deliberately does not survive a swipe from Recents, so
-      // the switch has to say so rather than let it be discovered.
-      expect(
-        backgroundSettingDescription(TargetPlatform.android),
-        contains('Recents'),
-      );
+    test('Android says a swipe is not the way out, and what is', () async {
+      // The service survives a swipe from Recents, which is the opposite of
+      // what a swipe usually does — so the switch says so rather than let it
+      // be discovered, and names the thing that does end it in the same
+      // breath. A promise to keep running with no stated way to stop is the
+      // shape of an app you cannot get rid of.
+      final android = backgroundSettingDescription(TargetPlatform.android);
+      expect(android, contains('Recents'));
+      expect(android, contains('Quit'));
+      expect(android, isNot(contains('closes it')));
     });
   });
 

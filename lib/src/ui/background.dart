@@ -89,8 +89,8 @@ String backgroundSettingDescription(TargetPlatform platform) =>
     switch (platform) {
       TargetPlatform.android =>
         'ddIRC keeps its connections while you are in another app, with a '
-            'notification to say so. Swiping it away from Recents still '
-            'closes it.',
+            'notification to say so. Swiping it away from Recents leaves it '
+            'running — Quit on the notification is how you close it.',
       _ =>
         'Closing the window hides it to the tray instead of quitting, so the '
             'connections stay up and nothing is missed while it is away. The '

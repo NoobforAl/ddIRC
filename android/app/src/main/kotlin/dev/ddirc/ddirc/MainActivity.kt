@@ -1,108 +1,90 @@
 package dev.ddirc.ddirc
 
-import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
 
 /**
- * The activity, and the one channel the Android half of the app speaks over.
+ * The window, and not much more than the window.
  *
  * Everything about *when* to run in the background is decided in Dart, next to
- * the setting and the connections it is about. What crosses this channel is
- * only what Dart cannot do for itself: start and stop a service, ask about a
- * permission, and hear that the notification's Quit button was pressed.
+ * the setting and the connections it is about. Everything Dart cannot do for
+ * itself is in [AppEngine], which outlives this class — deliberately, because
+ * the whole point of staying connected in the background is that the app goes
+ * on after its window does not.
+ *
+ * What is left here is what genuinely belongs to an activity: being the thing
+ * on screen, being what Android hands a permission answer to, and being where a
+ * tapped notification arrives.
  *
  * A `FlutterFragmentActivity` rather than a plain `FlutterActivity` — the base
  * class `local_auth_android` requires, since a biometric prompt is shown
  * through a `DialogFragment`, which needs a `FragmentActivity` host to attach
- * to. Everything below is otherwise unchanged.
+ * to.
  */
 class MainActivity : FlutterFragmentActivity() {
 
-    private companion object {
-        const val CHANNEL = "dev.ddirc/background"
-        const val PERMISSION_REQUEST = 1001
+    /**
+     * Attach to the engine [AppEngine] keeps, rather than making one.
+     *
+     * Answering this at all is what puts Flutter on its cached-engine path,
+     * where the engine is something the app owns and lends to a window instead
+     * of something a window brings with it and takes away again.
+     */
+    override fun getCachedEngineId(): String = AppEngine.ENGINE_ID
+
+    /**
+     * Never — and this is not the decision it sounds like.
+     *
+     * Flutter reads this once, while the fragment is being built, and bakes the
+     * answer in. That is far too early to know: the service may not have
+     * started yet on a launch that is about to start it, and may have been
+     * turned off since on one that did. So the answer here is a flat no, and
+     * the real decision is made in [onDestroy], where it can be made with the
+     * facts in front of it.
+     */
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // Before `super`, which builds the fragment that goes looking for the
+        // engine under the id above and throws if nothing is there.
+        AppEngine.warm(this)
+        super.onCreate(savedInstanceState)
     }
 
-    private var channel: MethodChannel? = null
-
-    /** In flight while the user is looking at the permission dialog. */
-    private var pendingPermission: MethodChannel.Result? = null
-
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-
-        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-        this.channel = channel
-
-        channel.setMethodCallHandler { call, result ->
-            when (call.method) {
-                "start" -> {
-                    send(ConnectionService.ACTION_START, call.argument("status"))
-                    result.success(null)
-                }
-
-                "update" -> {
-                    send(ConnectionService.ACTION_UPDATE, call.argument("status"))
-                    result.success(null)
-                }
-
-                "stop" -> {
-                    send(ConnectionService.ACTION_STOP, null)
-                    result.success(null)
-                }
-
-                "notificationsAllowed" -> result.success(notificationsAllowed())
-
-                "requestNotifications" -> requestNotifications(result)
-
-                "notifyMessage" -> {
-                    MessageNotifications.show(
-                        context = this,
-                        key = call.argument("key") ?: "",
-                        profileId = call.argument("profileId") ?: "",
-                        conversation = call.argument("conversation") ?: "",
-                        title = call.argument("title") ?: "",
-                        body = call.argument("body") ?: "",
-                    )
-                    result.success(null)
-                }
-
-                "clearMessage" -> {
-                    MessageNotifications.clear(this, call.argument("key") ?: "")
-                    result.success(null)
-                }
-
-                else -> result.notImplemented()
-            }
-        }
-
+        // Deliberately not `super`, which registers the plugins. This engine is
+        // shared and long-lived, so this runs again every time a window
+        // attaches to it, and a second registration is a warning per plugin
+        // about work already done. [AppEngine.warm] is where it happens once.
+        AppEngine.attach(this)
         // A notification tapped while the app was not running launches the
         // activity, and the intent that did it is the one already sitting here.
-        // Delivered now that the channel exists; onNewIntent covers the case
-        // where the app was running already.
+        // Delivered now that the engine is attached; onNewIntent covers the
+        // case where the app was running already.
         deliverConversation(intent)
-
-        // The notification's Quit button, and a swipe from Recents, both arrive
-        // in the service. Neither can say goodbye to a server on its own, so
-        // both are handed back to Dart, which closes the connections and then
-        // asks for the service to stop.
-        ConnectionService.onQuitRequested = {
-            runOnUiThread { this.channel?.invokeMethod("quit", null) }
-        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        // Cleared rather than left dangling: once the engine is gone there is
-        // nobody to ask, and the service is written to stop itself instead.
-        ConnectionService.onQuitRequested = null
-        channel?.setMethodCallHandler(null)
-        channel = null
-        super.cleanUpFlutterEngine(flutterEngine)
+        AppEngine.detach(this)
+    }
+
+    /**
+     * Whether anything is left when this window closes.
+     *
+     * The engine is not destroyed with the activity, so something has to decide
+     * — and this is the first moment with enough information to. If the
+     * foreground service is up, the user has asked ddIRC to stay connected and
+     * the engine goes on without a window, which is what makes a swipe from
+     * Recents survivable. If it is not, nothing is holding the process up and a
+     * Dart isolate left running in it would be a leak with an app around it.
+     */
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isChangingConfigurations) return
+        if (!ConnectionService.isRunning) AppEngine.shutdown()
     }
 
     /**
@@ -136,55 +118,7 @@ class MainActivity : FlutterFragmentActivity() {
         intent.removeExtra(MessageNotifications.EXTRA_PROFILE)
         intent.removeExtra(MessageNotifications.EXTRA_CONVERSATION)
 
-        runOnUiThread {
-            channel?.invokeMethod(
-                "openConversation",
-                mapOf("profileId" to profileId, "conversation" to conversation),
-            )
-        }
-    }
-
-    private fun send(action: String, status: String?) {
-        val intent = Intent(this, ConnectionService::class.java)
-            .setAction(action)
-            .putExtra(ConnectionService.EXTRA_STATUS, status.orEmpty())
-
-        if (action == ConnectionService.ACTION_START &&
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-        ) {
-            // Only ever called while the app is on screen — the user has just
-            // moved the switch, or the app has just launched — which is the
-            // condition Android 12 and later put on starting one of these.
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-    }
-
-    /**
-     * Whether the notification would actually be seen.
-     *
-     * The service runs either way; this is only about whether the user is told
-     * it is running, which from Android 13 is a permission they may refuse.
-     */
-    private fun notificationsAllowed(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true
-        return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
-            PackageManager.PERMISSION_GRANTED
-    }
-
-    private fun requestNotifications(result: MethodChannel.Result) {
-        if (notificationsAllowed()) {
-            result.success(true)
-            return
-        }
-        // Two dialogs at once would leave the first without an answer.
-        if (pendingPermission != null) {
-            result.success(false)
-            return
-        }
-        pendingPermission = result
-        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), PERMISSION_REQUEST)
+        AppEngine.openConversation(profileId, conversation)
     }
 
     override fun onRequestPermissionsResult(
@@ -193,10 +127,10 @@ class MainActivity : FlutterFragmentActivity() {
         grantResults: IntArray,
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != PERMISSION_REQUEST) return
-        val granted = grantResults.isNotEmpty() &&
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        pendingPermission?.success(granted)
-        pendingPermission = null
+        if (requestCode != AppEngine.PERMISSION_REQUEST) return
+        AppEngine.onPermissionResult(
+            grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED,
+        )
     }
 }

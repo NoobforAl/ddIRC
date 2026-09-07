@@ -12,6 +12,12 @@
     <!-- The notification's own button. -->
     <string name="quit">Quit</string>
 
+    <!-- The status line for the moment after Android has killed the process
+         for memory and put the service back, before Dart is up and saying how
+         many networks are connected. The only line in the notification that
+         does not come from Dart, because at that point there is no Dart. -->
+    <string name="reconnecting">Reconnecting…</string>
+
     <!-- Shown in Android's own notification settings, where the user can
          silence or hide this. Named for what it is about rather than for the
          mechanism: nobody is looking for "foreground service". -->

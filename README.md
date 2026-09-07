@@ -190,10 +190,27 @@ not looking at it *should* be visible, and the notification does the same job
 the tray icon does on desktop: it says the app is running, it says how many
 networks are connected, and it carries the same Quit.
 
-**Swiping the app away from Recents still closes it**, and the switch says so.
-That gesture means "close this", so the service honours it rather than
-outliving it. Surviving it would mean caching the Flutter engine outside the
-activity, and an app you cannot dismiss is not the feature anyone asked for.
+**Swiping the app away from Recents leaves it running**, and the switch says
+so. That gesture dismisses the window; it is not a decision about the
+connections, and treating it as one is what used to make the promise stop being
+true the moment somebody tidied their Recents. *Quit* on the notification is the
+way out, and it is on the notification so that there is always one.
+
+Surviving it costs more than a flag, because the connections were never the
+part at risk. They are in the Rust core and never cared about the window — but
+the events they raise are read in Dart, the decision to notify is made in Dart,
+and the notification is posted back over the channel from Dart. An engine that
+died with the activity would leave the sockets open with nobody listening. So
+the Flutter engine is made by `AppEngine.kt`, kept for the activity to attach
+to, and outlives any number of windows; `MainActivity` is left being a window
+and nothing else, and decides on the way out whether anything is behind it — if
+the service is up the engine stays, and if it is not, it goes.
+
+The service is `START_STICKY`, so Android putting the process back after taking
+it for memory is a case rather than an ending: the notification goes up first,
+because that is what buys the right to be running and Android is timing it, and
+Dart follows and reconnects whatever was set to connect at launch. A service
+stopped on purpose is never restarted, which is what makes *Quit* mean quit.
 
 The service is declared `specialUse` rather than `dataSync`, which is the type
 that looks like the obvious fit. From Android 15 a `dataSync` service is cut
@@ -203,7 +220,7 @@ still be connected this evening, that is not a limit but a silent failure.
 
 No new dependency for any of this: the notification and the permission are
 plain framework APIs behind version guards, and the channel between Dart and
-`MainActivity.kt` carries a handful of methods.
+`AppEngine.kt` carries a handful of methods.
 
 ### Being told that something was said
 
@@ -231,7 +248,7 @@ still asking about it.
 Desktop uses [`local_notifier`](https://pub.dev/packages/local_notifier), from
 the same family as the window and tray packages already here, so Windows, macOS
 and Linux are one dependency rather than three. Android needs no dependency at
-all: `MainActivity` already owned a channel and a notification permission, so a
+all: the app already owned a channel and a notification permission, so a
 message notification is a second `NotificationChannel` — separate from the
 service's, and at a higher importance, so silencing the price of staying
 connected does not silence the point of it.

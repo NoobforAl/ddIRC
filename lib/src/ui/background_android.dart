@@ -7,7 +7,7 @@ import '../model/settings.dart';
 import '../model/workspace.dart';
 import 'background.dart';
 
-/// The channel [ForegroundService] speaks over. See `MainActivity.kt`.
+/// The channel [ForegroundService] speaks over. See `AppEngine.kt`.
 const backgroundChannel = MethodChannel('dev.ddirc/background');
 
 /// Host-to-Dart calls on [backgroundChannel], fanned out to everyone listening.
@@ -84,11 +84,18 @@ class HostCallDispatcher {
 /// not looking at it *should* be visible, and the notification doubles as the
 /// same reassurance the tray icon gives on desktop.
 ///
-/// Deliberately not held past a swipe from Recents. That gesture means "close
-/// this", the service honours it, and the setting says so in as many words —
-/// see [backgroundSettingDescription]. Surviving it would need the Flutter
-/// engine cached outside the activity, and an app the user cannot dismiss is
-/// not the feature that was asked for.
+/// Deliberately held past a swipe from Recents. That gesture dismisses the
+/// window, not the connections, and an app that dropped off IRC because
+/// somebody tidied their Recents would not be keeping the promise the switch
+/// makes. What ends it is Quit on the notification, and the setting says so in
+/// as many words — see [backgroundSettingDescription].
+///
+/// Surviving it costs more than a flag. Nothing here holds a connection, but
+/// everything between a message arriving and a notification appearing is
+/// decided in Dart, so the Flutter engine has to outlive the activity too or
+/// the sockets stay open with nobody listening to them. `AppEngine.kt` is where
+/// that happens, and it is the reason this class talks to the host rather than
+/// to an activity.
 class ForegroundService implements BackgroundKeeper {
   ForegroundService({
     required this.settings,
@@ -133,11 +140,16 @@ class ForegroundService implements BackgroundKeeper {
     hostCallsFor(channel).remove(_onHostCall);
   }
 
-  /// The notification's Quit button, or a swipe from Recents.
+  /// The notification's Quit button, which is now the only way out.
   ///
   /// The order is the same as desktop's, and for the same reason: the servers
   /// are told first, so everyone in the channel sees a quit now rather than a
   /// ping timeout in two minutes' time.
+  ///
+  /// [SystemNavigator.pop] at the end finishes the activity, and there may not
+  /// be one — this is reachable from a notification belonging to an app that
+  /// was swiped away hours ago. That case is not handled here but on the other
+  /// side of the channel, where the engine can actually be let go of.
   Future<void> quit() async {
     if (_quitting) return;
     _quitting = true;
