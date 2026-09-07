@@ -1268,24 +1268,38 @@ class SettingsDangerButton extends StatelessWidget {
 /// Exists for the case where both answers are ordinary and one of them merely
 /// happens to be safer — a consent dialog, where "turn it on" is a legitimate
 /// choice that should be findable without being urged.
+///
+/// [tone] colours it when the action is a *rehearsal* of the primary one
+/// standing beside it: hollow where that is filled, and the same hue, which
+/// says "this is that, without the commitment". Left off, it is neutral, which
+/// is right when the two buttons are simply two answers.
 class SettingsSecondaryButton extends StatelessWidget {
   const SettingsSecondaryButton({
     super.key,
     required this.label,
     required this.onPressed,
+    this.tone,
   });
 
   final String label;
   final VoidCallback? onPressed;
+  final Color? tone;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final tone = this.tone;
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        foregroundColor: t.text,
-        side: BorderSide(color: t.rule, width: Tokens.hairline),
+        foregroundColor: tone ?? t.text,
+        // Tinted rather than the full colour, the way [BetaBadge] carries the
+        // warning one: a hairline at full strength beside a filled button
+        // reads as the louder of the two, which is backwards.
+        side: BorderSide(
+          color: tone?.withValues(alpha: 0.45) ?? t.rule,
+          width: Tokens.hairline,
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),

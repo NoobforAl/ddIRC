@@ -644,8 +644,12 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ],
         ),
         const SettingsRule(),
-        _testSection(),
-        const SettingsRule(),
+        // The answer sits directly above the button that asks for it, which is
+        // the whole reason this was a section of its own before: a test has a
+        // result, and a result with nowhere to go is a button that appears to
+        // do nothing.
+        if (_testNote != null)
+          SettingsNote(text: _testNote!, isError: _testFailed),
         SettingsActions(
           children: [
             if (!_isNew)
@@ -657,6 +661,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               label: 'Save',
               onPressed: _busy ? null : () => _save(thenConnect: false),
             ),
+            _testButton(),
             SettingsPrimaryButton(
               label: _busy
                   ? 'Saving…'
@@ -674,28 +679,27 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
   /// Try the settings before committing to them.
   ///
-  /// Its own section rather than a fourth button in the row below, because it
-  /// is not one of the ways out of this dialog — it is something done *while*
-  /// filling it in, and it has an answer that has to sit somewhere.
-  Widget _testSection() => SettingsSection(
-    label: 'Connection test',
-    help:
+  /// Beside the button it is a rehearsal of, and in the same colour hollowed
+  /// out: *Save & connect* dials this server and stays, this dials it and hangs
+  /// up. Putting them next to each other is what makes that legible — it used
+  /// to be a section of its own further up the dialog, where it read as one
+  /// more thing to fill in rather than as the safe version of the button at the
+  /// bottom.
+  ///
+  /// The paragraph that was behind a '?' on that section is on the button now.
+  /// It is worth keeping: what it mostly says is what the test does *not* do —
+  /// no channel joined, no NickServ password sent, nothing saved.
+  Widget _testButton() => Tooltip(
+    message:
         'Dials this server the way connecting would — through the proxy, over '
         'TLS, with whatever passwords are set here — and then hangs up. No '
         'channel is joined, no NickServ password is sent, and nothing is '
         'saved.',
-    children: [
-      if (_testNote != null)
-        SettingsNote(text: _testNote!, isError: _testFailed),
-      SettingsActions(
-        children: [
-          SettingsSecondaryButton(
-            label: _testing ? 'Testing…' : 'Test connection',
-            onPressed: _testing || _busy ? null : _test,
-          ),
-        ],
-      ),
-    ],
+    child: SettingsSecondaryButton(
+      label: _testing ? 'Testing…' : 'Test connection',
+      tone: context.tokens.accent,
+      onPressed: _testing || _busy ? null : _test,
+    ),
   );
 
   /// The catalogue entry for whatever address is currently typed, or null.

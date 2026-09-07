@@ -191,31 +191,43 @@ void main() {
   });
 
   group('SettingsActions', () {
-    Future<void> row(WidgetTester tester, double width) => tester.pumpWidget(
-      MaterialApp(
-        theme: Tokens.themeFor(Tokens.dark),
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: width,
-              child: SettingsActions(
-                children: [
-                  SettingsDangerButton(
-                    label: 'Delete & disconnect',
-                    onPressed: () {},
-                  ),
-                  SettingsTertiaryButton(label: 'Save', onPressed: () {}),
-                  SettingsPrimaryButton(
-                    label: 'Save & connect',
-                    onPressed: () {},
-                  ),
-                ],
+    Future<void> row(WidgetTester tester, double width) {
+      // The view has to be wider than the row being measured, or the SizedBox
+      // below is clamped to it and every width tests the same thing.
+      sized(tester, Size(width + 200, 600));
+      return tester.pumpWidget(
+        MaterialApp(
+          theme: Tokens.themeFor(Tokens.dark),
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: width,
+                // The network editor's row, which is the longest in the app and
+                // the reason this wraps at all.
+                child: SettingsActions(
+                  children: [
+                    SettingsDangerButton(
+                      label: 'Delete & disconnect',
+                      onPressed: () {},
+                    ),
+                    SettingsTertiaryButton(label: 'Save', onPressed: () {}),
+                    SettingsSecondaryButton(
+                      label: 'Test connection',
+                      tone: Tokens.dark.accent,
+                      onPressed: () {},
+                    ),
+                    SettingsPrimaryButton(
+                      label: 'Save & connect',
+                      onPressed: () {},
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
-      ),
-    );
+      );
+    }
 
     testWidgets('wraps rather than painting stripes over the primary action', (
       tester,
@@ -234,13 +246,70 @@ void main() {
     testWidgets('is still one line where there is room for one', (
       tester,
     ) async {
-      await row(tester, 800);
+      await row(tester, 1000);
 
       expect(tester.takeException(), isNull);
       expect(
         tester.getRect(find.text('Delete & disconnect')).center.dy,
         tester.getRect(find.text('Save & connect')).center.dy,
       );
+    });
+
+    testWidgets('keeps the rehearsal next to the thing it rehearses', (
+      tester,
+    ) async {
+      await row(tester, 1000);
+
+      // Test connection dials this server and hangs up; Save & connect dials
+      // it and stays. Adjacent and in the same hue, one hollow and one filled,
+      // is what says so without a word of explanation.
+      final test = tester.getRect(find.text('Test connection'));
+      final connect = tester.getRect(find.text('Save & connect'));
+      final save = tester.getRect(find.text('Save'));
+      expect(save.right, lessThan(test.left));
+      expect(test.right, lessThan(connect.left));
+    });
+  });
+
+  group('SettingsSecondaryButton', () {
+    Future<OutlinedButton> pumped(WidgetTester tester, {Color? tone}) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Tokens.themeFor(Tokens.dark),
+          home: Scaffold(
+            body: SettingsSecondaryButton(
+              label: 'Test connection',
+              tone: tone,
+              onPressed: () {},
+            ),
+          ),
+        ),
+      );
+      return tester.widget<OutlinedButton>(find.byType(OutlinedButton));
+    }
+
+    Color? labelOf(OutlinedButton b) =>
+        b.style?.foregroundColor?.resolve(const {});
+
+    testWidgets('is neutral when it is simply the other answer', (
+      tester,
+    ) async {
+      // A consent dialog, where "turn it on" is a legitimate choice that
+      // should be findable without being urged.
+      expect(labelOf(await pumped(tester)), Tokens.dark.text);
+    });
+
+    testWidgets('takes the tone it is given, and a quieter edge of it', (
+      tester,
+    ) async {
+      final button = await pumped(tester, tone: Tokens.dark.accent);
+      expect(labelOf(button), Tokens.dark.accent);
+
+      // The border is tinted rather than the full colour: a hairline at full
+      // strength beside a filled button reads as the louder of the two, which
+      // is backwards for a rehearsal of it.
+      final side = button.style?.side?.resolve(const {});
+      expect(side?.color.a, lessThan(1.0));
     });
   });
 
