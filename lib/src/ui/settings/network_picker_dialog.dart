@@ -134,13 +134,10 @@ class _NetworkPickerDialogState extends State<NetworkPickerDialog> {
       else
         for (final network in matches)
           _NetworkRow(network: network, onTap: () => _open(network)),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(18, 12, 18, 14),
-        child: Text(
-          'Picking one fills in the address and the channels. You still get '
-          'the full form afterwards, so nothing connects until you say so.',
-          style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-        ),
+      const SettingsProse(
+        'Picking one fills in the address and the channels. You still get '
+        'the full form afterwards, so nothing connects until you say so.',
+        padding: EdgeInsets.fromLTRB(18, 12, 18, 14),
       ),
     ];
   }
@@ -163,12 +160,9 @@ class _NetworkPickerDialogState extends State<NetworkPickerDialog> {
           child: _Note(text: network.note!),
         ),
       if (network.sasl)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
-          child: Text(
-            'Supports SASL, so an account can be filled in on the next screen.',
-            style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-          ),
+        const SettingsProse(
+          'Supports SASL, so an account can be filled in on the next screen.',
+          padding: EdgeInsets.fromLTRB(18, 10, 18, 0),
         ),
       const SizedBox(height: 4),
       if (network.channels.isEmpty)
@@ -196,14 +190,11 @@ class _NetworkPickerDialogState extends State<NetworkPickerDialog> {
               ),
           ],
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
-          child: Text(
-            'Suggestions, not a directory — a channel can go quiet between '
-            'releases of this app. Any others can be typed on the next '
-            'screen.',
-            style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-          ),
+        const SettingsProse(
+          'Suggestions, not a directory — a channel can go quiet between '
+          'releases of this app. Any others can be typed on the next '
+          'screen.',
+          padding: EdgeInsets.fromLTRB(18, 8, 18, 4),
         ),
       ],
       const SettingsRule(),

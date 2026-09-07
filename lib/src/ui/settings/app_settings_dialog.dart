@@ -29,15 +29,35 @@ String get _backgroundSwitchLabel =>
     ? 'Stay connected in the background'
     : 'Keep running when the window is closed';
 
-/// The three pages of app settings.
+/// The pages of app settings.
 ///
-/// Naming them in an enum rather than building three lists inline is what
-/// makes the index and the page the same decision: a page cannot be reachable
-/// from the index and then turn out not to exist, and a new one cannot be
-/// added without a summary line, because the enum requires it.
+/// Naming them in an enum rather than building the lists inline is what makes
+/// the index and the page the same decision: a page cannot be reachable from
+/// the index and then turn out not to exist, and a new one cannot be added
+/// without a summary line, because the enum requires it.
+///
+/// # Why there are four
+///
+/// Connection used to hold six sections and was half again as long as the
+/// other two put together. What gave away where to cut it was its own summary
+/// line: it has always read "Built-in Tor · local server on · file transfers
+/// on" and has never once mentioned staying connected or notifications —
+/// because those are not what the page was about. They had been put there
+/// because they were connection-adjacent, not because anybody would look for
+/// them under it.
+///
+/// So the routing sections keep the page and the name, and the two that answer
+/// "what happens while I am somewhere else" get their own. That page is called
+/// Notifications, which is the half of it people go looking for by name; the
+/// other half sits at the top of it under its own heading, and the index row
+/// says which way it is set so that nobody has to open the page to find out.
 enum _Page {
   appearance('Appearance', 'How the app looks and how much it says'),
   connection('Connection', 'How and where ddIRC connects'),
+  notifications(
+    'Notifications',
+    'Staying connected while you are elsewhere, and hearing about it',
+  ),
   privacy('Privacy', 'What is written down, and what is always on');
 
   const _Page(this.label, this.subtitle);
@@ -51,11 +71,16 @@ enum _Page {
 
 /// Preferences that apply everywhere, on every server.
 ///
-/// An index and three pages, rather than nine sections in one column. The
+/// An index and four pages, rather than a dozen sections in one column. The
 /// dialog reached the length where scrolling was how you found anything, and
 /// everything looking equally important is the same as nothing being
 /// findable — someone looking for the proxy had to read past the timestamps to
 /// be sure they had not gone by it.
+///
+/// One level of nesting, and no more. A page here opens in place rather than
+/// on top, so there is never a dialog over a dialog, and every page is one
+/// press from the index and two from anywhere — which is the depth at which a
+/// menu is still faster than the long list it replaced.
 ///
 /// The cost of a menu is that the state is no longer all on screen at once,
 /// and it is paid back on the index itself: every row carries what is
@@ -99,6 +124,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
         null => _index(context),
         _Page.appearance => _appearance(context),
         _Page.connection => _connection(context),
+        _Page.notifications => _notifications(context),
         _Page.privacy => _privacy(context),
       },
     );
@@ -116,10 +142,12 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
         if (m.disabled)
           body
         else
-          // Sized as well as switched. The three pages are very different
-          // heights, and a dialog that jumped from the index straight to the
-          // full height of Connection would move the back arrow out from
-          // under the pointer that just arrived on it.
+          // Sized as well as switched, and only where the dialog is a card
+          // that grows to fit: the pages are very different heights, and one
+          // that jumped from the index straight to the full height of
+          // Connection would move the back arrow out from under the pointer
+          // that just arrived on it. Full bleed, the frame is already the
+          // screen and there is nothing to animate.
           AnimatedSize(
             duration: m.normal,
             curve: Motion.curve,
@@ -163,6 +191,14 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
         beta: true,
         onTap: () => _open(_Page.connection),
       ),
+      if (_hasNotificationSettings) ...[
+        const SettingsRule(),
+        SettingsNavRow(
+          label: _Page.notifications.label,
+          summary: _notificationSummary(settings),
+          onTap: () => _open(_Page.notifications),
+        ),
+      ],
       const SettingsRule(),
       SettingsNavRow(
         label: _Page.privacy.label,
@@ -205,6 +241,35 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
       route,
       if (server.running) 'local server on',
       if (settings.fileTransfers) 'file transfers on',
+    ].join(' · ');
+  }
+
+  /// Whether the Notifications page has anything on it.
+  ///
+  /// Both of its sections are absent on iOS, and a row leading to an empty
+  /// page is worse than no row: it promises a setting the platform will not
+  /// let this app have. Asked as "either", not "the one that happens to be
+  /// equivalent today", so that the two lists diverging does not silently
+  /// bring back the empty page.
+  static bool get _hasNotificationSettings =>
+      keepsRunningInBackground ||
+      notificationsSupportedOn(defaultTargetPlatform);
+
+  /// What the Notifications page is currently holding.
+  ///
+  /// Staying connected comes first and is stated either way, for the reason
+  /// the route is on the Connection row: it is the half of this page the label
+  /// does not advertise, so this is where somebody checking whether ddIRC
+  /// survives being put away gets their answer — and a summary that mentioned
+  /// it only when it was on would say nothing by its silence.
+  static String _notificationSummary(AppSettings settings) {
+    return [
+      if (keepsRunningInBackground)
+        settings.runInBackground
+            ? 'Staying connected'
+            : 'Not staying connected',
+      if (notificationsSupportedOn(defaultTargetPlatform))
+        settings.notifications ? 'messages on' : 'messages off',
     ].join(' · ');
   }
 
@@ -297,11 +362,25 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
   }
 
   List<Widget> _connection(BuildContext context) {
+    return const [
+      // Ordered by how far the connection travels: a server on this machine,
+      // then Tor, then somewhere the user runs themselves.
+      LocalServerSection(),
+      TorSection(),
+      GlobalProxySection(),
+      // Last, because it is the one that does not go through any of the three
+      // above — which is the thing about it worth noticing.
+      FileTransferSection(),
+    ];
+  }
+
+  List<Widget> _notifications(BuildContext context) {
     final settings = SettingsScope.of(context);
     return [
-      // Staying connected belongs here rather than under Appearance, whatever
-      // the heading says on this platform: what the switch decides is whether
-      // the sockets outlive the window.
+      // First, and above the switch the page is named after, because it is the
+      // one that decides whether there is anything to notify about. Notifying
+      // is what happens when a message arrives while you are elsewhere; this
+      // is whether the app is still there to receive one.
       //
       // Absent on iOS rather than shown and disabled: the OS will not hold a
       // socket open for an app that is not in front, so the switch would be a
@@ -319,9 +398,9 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             ),
           ],
         ),
-      // Beside staying connected, because it is the other half of the same
-      // promise: one keeps the socket open while you are elsewhere, and this is
-      // how you find out that it caught something.
+      // The other half of the same promise: one keeps the socket open while
+      // you are elsewhere, and this is how you find out that it caught
+      // something.
       if (notificationsSupportedOn(defaultTargetPlatform))
         SettingsSection(
           label: 'Notifications',
@@ -353,14 +432,6 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
             ),
           ],
         ),
-      // Ordered by how far the connection travels: a server on this machine,
-      // then Tor, then somewhere the user runs themselves.
-      const LocalServerSection(),
-      const TorSection(),
-      const GlobalProxySection(),
-      // Last, because it is the one that does not go through any of the three
-      // above — which is the thing about it worth noticing.
-      const FileTransferSection(),
     ];
   }
 

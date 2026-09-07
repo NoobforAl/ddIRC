@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../model/session.dart';
 import '../../model/settings.dart';
-import '../../theme.dart';
 import 'settings_chrome.dart';
 
 /// Settings for one channel: its topic, how loudly it may interrupt, and the
@@ -105,7 +104,6 @@ class _ChannelSettingsDialogState extends State<ChannelSettingsDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final t = context.tokens;
     final settings = SettingsScope.of(context);
     final members = conversation.members;
     final privileged = members.where((m) => m.prefix != null).length;
@@ -192,15 +190,11 @@ class _ChannelSettingsDialogState extends State<ChannelSettingsDialog> {
         SettingsSection(
           label: conversation.isChannel ? 'Leave' : 'Close',
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
-              child: Text(
-                conversation.isChannel
-                    ? 'Leaving removes the channel and its scrollback from this '
-                          'session. Rejoin any time with /join ${conversation.name}.'
-                    : 'This conversation closes when you leave it.',
-                style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-              ),
+            SettingsProse(
+              conversation.isChannel
+                  ? 'Leaving removes the channel and its scrollback from this '
+                        'session. Rejoin any time with /join ${conversation.name}.'
+                  : 'This conversation closes when you leave it.',
             ),
             if (conversation.isChannel)
               SettingsActions(

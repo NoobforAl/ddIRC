@@ -301,9 +301,20 @@ without rerunning the generator fails a test instead of shipping a stale icon.
 Three dialogs, reachable from the ⚙/⚌ controls in the header, and from a
 right-click or long-press on any channel in the list.
 
+They are a dialog on a screen with room for one and the **whole screen on a
+phone**, and that is one shell knowing two shapes rather than two
+presentations. Nine surfaces are built on it, and on a 411dp handset the
+floating version was a 371-wide card inset 32 from the top and bottom — giving
+up about a seventh of the screen to say "this is floating above something"
+while covering that something almost entirely. Where it goes full bleed, the
+system back gesture means *up one level* rather than *close*, because there it
+is the only way back; on a desktop the same gesture is Escape and a click on
+the barrier, both of which mean "I am finished" with the back arrow sitting on
+screen for the other question.
+
 | Dialog | What it holds |
 |---|---|
-| **App** | Theme, timestamps, 12/24-hour clock, message density, whether to keep running in the background (not on iOS), whether joins and parts are shown, whether mIRC colours are rendered, the two logging switches, whether message history is kept, and the app-wide proxy. Applies to every server; persists. |
+| **App** | An index and four pages — *Appearance*, *Connection*, *Notifications*, *Privacy* — each row carrying what is currently set inside it, so "am I going through Tor" is answered without opening anything. One level of nesting and no more: a page opens in place, so there is never a dialog over a dialog. Applies to every server; persists. |
 | **Channel** | Topic (editable), notification level — all / mentions only / muted, member counts, and leaving the channel. The level persists per channel. |
 | **Server** | Nickname (changeable), and the connection as it actually is: status, host and port, network, transport, route (direct or through which proxy), authentication mechanism. Plus disconnect. |
 | **Network** | The saved profile itself — name, address, port, channels, nickname, SASL account, whether to connect at launch, and this network's proxy. Every field explains itself behind a '?', and *Test connection* dials the server before anything is saved. Reached from the rail's context menu or the header menu. |

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
+import '../layout.dart';
 import '../motion.dart';
 import '../shake.dart';
 import '../touchable.dart';
@@ -11,6 +12,22 @@ import '../touchable.dart';
 /// chose to take, so blocking the conversation until they are done is honest.
 /// Connection state never uses a dialog — it stays inline, where it cannot
 /// interrupt a sentence someone is typing.
+///
+/// # Two shapes, one shell
+///
+/// A floating card on anything with room for one, and the whole screen on a
+/// phone. The card was the only shape for a while, and on a 411dp handset it
+/// meant a 371-wide panel inset 32 from the top and bottom — giving up about a
+/// seventh of the screen to say "this is floating above something", while
+/// covering that something almost entirely. The affordance was being paid for
+/// and not delivered.
+///
+/// Adaptive here rather than a second route tree, because nine surfaces share
+/// this shell — app settings, the server and channel dialogs, the network
+/// editor and picker, the channel browser, the connection log — and every one
+/// of them is reached with `showDialog`. One shell that knows two shapes keeps
+/// that true; two presentations would be two things to keep in step, and the
+/// one that was not being looked at is the one that would drift.
 class SettingsDialog extends StatelessWidget {
   const SettingsDialog({
     super.key,
@@ -24,6 +41,8 @@ class SettingsDialog extends StatelessWidget {
   final String title;
   final String? subtitle;
   final List<Widget> children;
+
+  /// How wide the floating card is. Ignored where there is no card.
   final double width;
 
   /// Shows a back arrow to the left of the title, for a dialog that is one
@@ -39,39 +58,75 @@ class SettingsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final viewport = MediaQuery.of(context).size;
+    final full = Layout.of(context).isCompact;
 
-    return Dialog(
+    final frame = Dialog(
       backgroundColor: t.surface,
       surfaceTintColor: Colors.transparent,
       // No elevation anywhere in this app; the hairline is the separation.
       elevation: 0,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: t.rule, width: Tokens.hairline),
-      ),
+      insetPadding: full
+          ? EdgeInsets.zero
+          : const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+      // Full bleed means no corners to round and no edge to draw: a hairline
+      // border against the screen edge is a line with nothing on the other
+      // side of it.
+      shape: full
+          ? const RoundedRectangleBorder()
+          : RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(color: t.rule, width: Tokens.hairline),
+            ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: width,
+          maxWidth: full ? double.infinity : width,
           // Leave the dialog scrollable rather than clipped on a short window
           // or a phone in landscape.
-          maxHeight: viewport.height * 0.85,
+          maxHeight: full ? double.infinity : viewport.height * 0.85,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _header(context),
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                children: children,
+        child: SafeArea(
+          // Only where the dialog reaches the edges. Inset from them, the
+          // padding it would add is padding twice.
+          top: full,
+          bottom: full,
+          left: full,
+          right: full,
+          child: Column(
+            // Filled rather than shrink-wrapped, so a short page still owns
+            // the screen instead of floating as a band across the middle of
+            // it with the conversation showing above and below.
+            mainAxisSize: full ? MainAxisSize.max : MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _header(context),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: !full,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  children: children,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
+    );
+
+    // Back means *up one level* on a phone, and only on a phone.
+    //
+    // Full bleed leaves the system gesture as the only way back, and having it
+    // close a three-page dialog from its second page is the wrong answer to a
+    // question the back arrow in the header already answers correctly. On a
+    // desktop the same intercept would catch Escape and a click on the barrier
+    // — both of which mean "I am finished" there, and both of which have the
+    // close button sitting right beside them.
+    if (!full || onBack == null) return frame;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) onBack!();
+      },
+      child: frame,
     );
   }
 
@@ -1079,6 +1134,15 @@ class _SettingsLabelledFieldState extends State<SettingsLabelledField> {
 }
 
 /// A row of actions along the bottom of a section.
+///
+/// Wraps rather than overflows. This was a plain [Row], which was fine while
+/// every section had one button and stopped being fine when the network editor
+/// grew three — *Delete & disconnect*, *Save*, *Save & connect* come to more
+/// than a phone is wide, and a Row answers that by painting the overflow
+/// stripes over the primary action.
+///
+/// [WrapAlignment.end] on both axes, so a row that does fit is unchanged and a
+/// row that does not still ends with the button the user most likely came for.
 class SettingsActions extends StatelessWidget {
   const SettingsActions({super.key, required this.children});
 
@@ -1088,14 +1152,49 @@ class SettingsActions extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            children[i],
-          ],
-        ],
+      child: Wrap(
+        alignment: WrapAlignment.end,
+        runAlignment: WrapAlignment.end,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        runSpacing: 6,
+        children: children,
+      ),
+    );
+  }
+}
+
+/// A standing paragraph inside a section, always shown.
+///
+/// Distinct from [HelpText], which is the same size and colour and is hidden
+/// behind a '?'. The difference is whether the reader has to have asked: this
+/// is for the sentence somebody needs to have read *before* they press the
+/// button under it — what disconnecting takes down with it, what blocking a
+/// nickname actually does — and hiding that behind a dot would be hiding the
+/// warning and showing the trigger.
+///
+/// Exists because six dialogs had each written out
+/// `Padding(EdgeInsets.fromLTRB(18, 2, 18, 10), Text(… 11.5 … height: 1.4))`
+/// by hand, which is one typo away from six paragraphs that no longer line up
+/// with each other or with the rows above them.
+class SettingsProse extends StatelessWidget {
+  const SettingsProse(
+    this.text, {
+    super.key,
+    this.padding = const EdgeInsets.fromLTRB(18, 2, 18, 10),
+  });
+
+  final String text;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: padding,
+      child: Text(
+        text,
+        style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
       ),
     );
   }
@@ -1188,6 +1287,44 @@ class SettingsSecondaryButton extends StatelessWidget {
         foregroundColor: t.text,
         side: BorderSide(color: t.rule, width: Tokens.hairline),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      child: Text(label),
+    );
+  }
+}
+
+/// The quietest action in a row, for the answer nobody needs urging towards.
+///
+/// Three weights rather than two, because the network editor needs three: one
+/// button that removes something, one that is what most people came to press,
+/// and one — *Save*, without connecting — that is a legitimate choice and not
+/// the expected one. [SettingsSecondaryButton]'s outline would make it argue
+/// with the primary beside it; no outline at all puts it where it belongs.
+///
+/// Lives here rather than privately in the editor, which is where it was. A
+/// button called `_SecondaryButton` sitting a few files from a public
+/// `SettingsSecondaryButton` that looks nothing like it is the drift this
+/// whole file exists to prevent.
+class SettingsTertiaryButton extends StatelessWidget {
+  const SettingsTertiaryButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: t.muted,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),

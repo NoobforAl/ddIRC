@@ -653,7 +653,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 label: connected ? 'Delete & disconnect' : 'Delete',
                 onPressed: _busy ? null : _delete,
               ),
-            _SecondaryButton(
+            SettingsTertiaryButton(
               label: 'Save',
               onPressed: _busy ? null : () => _save(thenConnect: false),
             ),
@@ -837,15 +837,12 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                 : global.label,
           ),
         if (!overridden && _proxyMode == ProxyMode.direct)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-            child: Text(
-              'This network always connects directly, even when the app-wide '
-              'proxy is on. Worth being deliberate about: if the proxy is '
-              'there to keep your address private, this network will still '
-              'see it.',
-              style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-            ),
+          const SettingsProse(
+            'This network always connects directly, even when the app-wide '
+            'proxy is on. Worth being deliberate about: if the proxy is '
+            'there to keep your address private, this network will still '
+            'see it.',
+            padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
           ),
         if (_proxyMode == ProxyMode.custom)
           ProxyFields(
@@ -971,29 +968,6 @@ class _ChannelChip extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// Save without connecting: present, but not the thing being suggested.
-class _SecondaryButton extends StatelessWidget {
-  const _SecondaryButton({required this.label, required this.onPressed});
-
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return TextButton(
-      onPressed: onPressed,
-      style: TextButton.styleFrom(
-        foregroundColor: t.muted,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-      ),
-      child: Text(label),
     );
   }
 }

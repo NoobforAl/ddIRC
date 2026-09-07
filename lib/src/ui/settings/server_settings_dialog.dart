@@ -136,22 +136,22 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
         SettingsSection(
           label: 'Identity',
           children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(18, 2, 18, 6),
-              child: Text(
-                'Nickname',
-                style: TextStyle(color: t.text, fontSize: 13.5),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
-              child: SettingsField(
-                controller: _nick,
-                hint: session.nick,
-                error: _nickError,
-                shakeTick: _shake,
-                onSubmitted: (_) => _busy ? null : _applyNick(),
-              ),
+            // The shared labelled field rather than a label and a box stacked
+            // by hand, which is what this was: the hand-rolled version had its
+            // own font size and its own padding, so the one field in this
+            // dialog sat a little differently from every field in the network
+            // editor beside it.
+            SettingsLabelledField(
+              label: 'Nickname',
+              controller: _nick,
+              hint: session.nick,
+              error: _nickError,
+              shakeTick: _shake,
+              help:
+                  'Changing this asks the server; the server decides. It '
+                  'applies to this connection only and is not saved back to '
+                  'the network — reconnecting brings back the saved one.',
+              onSubmitted: (_) => _busy ? null : _applyNick(),
             ),
             SettingsActions(
               children: [
@@ -222,13 +222,12 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
         SettingsSection(
           label: 'Disconnect',
           children: [
-            Padding(
-              padding: EdgeInsets.fromLTRB(18, 2, 18, 10),
-              child: Text(
-                'Closes this network and its conversations. Other networks '
-                'stay connected. Scrollback is not kept.',
-                style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-              ),
+            // Standing prose, not behind a '?': it says what pressing the
+            // button below costs, and a warning nobody has asked to see is a
+            // warning that arrives after the fact.
+            const SettingsProse(
+              'Closes this network and its conversations. Other networks '
+              'stay connected. Scrollback is not kept.',
             ),
             SettingsActions(
               children: [
@@ -261,17 +260,12 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
     return SettingsSection(
       label: 'Blocked',
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
-          child: Text(
-            nicks.isEmpty
-                ? 'Nobody. Declining someone’s first message blocks them '
-                      'here, and their later messages are dropped without a '
-                      'trace.'
-                : 'Their messages are dropped before they reach a '
-                      'conversation. Unblocking does not tell them anything.',
-            style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
-          ),
+        SettingsProse(
+          nicks.isEmpty
+              ? 'Nobody. Declining someone’s first message blocks them here, '
+                    'and their later messages are dropped without a trace.'
+              : 'Their messages are dropped before they reach a conversation. '
+                    'Unblocking does not tell them anything.',
         ),
         for (final nick in nicks)
           Padding(
