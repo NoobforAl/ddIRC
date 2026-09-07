@@ -81,6 +81,7 @@ PROFILES ?= --profile proxy --profile tor
 
 .DEFAULT_GOAL := help
 .PHONY: help fix fmt lint test test-integration build build-release installer check-iscc \
+        build-android build-android-release \
         build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
         dev-proxy dev-tor dev-tor-logs dev-onion-cert
@@ -96,6 +97,8 @@ help:
 	@echo "  make build    debug build for Windows"
 	@echo "  make build-release     release build for Windows"
 	@echo "  make installer         wrap it in a per-user .exe (needs Inno Setup)"
+	@echo "  make build-android     debug APK  (needs the Android SDK and NDK)"
+	@echo "  make build-android-release   release APK — the thing that ships"
 	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
@@ -154,6 +157,25 @@ test-integration:
 
 build:
 	$(FLUTTER) build windows --debug
+
+## The Android app. The APK is Android's installer, so there is no separate
+## packaging step the way Windows has one.
+#
+# Its own target rather than a line in `build`, because this is the one
+# platform that cross-compiles: it needs the SDK and the NDK, and a machine
+# without them should say so when asked for an APK rather than when asked to
+# build anything at all. Cargokit drives cargo-ndk from inside the Gradle
+# build, so nothing here calls it.
+#
+# The release build is currently signed with the debug key, which is what
+# `android/app/build.gradle.kts` still names as its release signing config.
+# Fine for a beta people sideload and not fine for a store, and worth knowing
+# before this output is handed to anyone.
+build-android:
+	$(FLUTTER) build apk --debug
+
+build-android-release:
+	$(FLUTTER) build apk --release
 
 ## The other desktops and iOS. Each has to run on that host - there is no
 ## cross-compiling a Flutter runner - and none of them has been built yet.

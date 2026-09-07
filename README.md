@@ -777,12 +777,18 @@ event type is an enum carrying data, which becomes a sealed class in Dart.
 export ANDROID_NDK_HOME="$LOCALAPPDATA/Android/Sdk/ndk/27.0.12077973"
 export PATH="$HOME/flutter/bin:$PATH"   # codegen shells out to `flutter`
 flutter_rust_bridge_codegen generate    # after changing irc-core/ddirc-bridge/src/api/**
-flutter build apk --debug
+make build-android                      # or build-android-release for the shipped one
 ```
 
 Cargokit compiles the Rust automatically as part of the Flutter build; there is
 no separate `cargo ndk` step. Generated Dart under `lib/src/rust/` is committed
 so CI does not need the codegen toolchain.
+
+The APK *is* Android's installer, so there is no packaging step here the way
+Windows has one — but `make build-android-release` currently signs with the
+**debug key**, which is what `android/app/build.gradle.kts` still names as its
+release signing config. Fine for a beta somebody sideloads; not fine for a
+store, and not fine for upgrading across a later key change.
 
 ### Building the Windows app
 
@@ -1102,12 +1108,41 @@ description to keep in step; it also puts the generated certificate in
 Lint and test are separate workflows so a formatting slip and a broken test
 report as two different failures.
 
-`.github/workflows/release.yml` builds the Android APK and publishes it to a
-GitHub Release when a tag is pushed. It only ever fires on `v0.*` — not `v*` —
+`.github/workflows/build.yml` answers a question neither of the two above can:
+**does it still compile.** `make test` runs Dart on the Dart VM and Rust for
+the host; `make lint` runs the analyzers. Between them they never invoke a
+platform toolchain, so the Kotlin under `android/`, the C++ runner under
+`windows/`, the Gradle build, the NDK cross-compile and the Inno Setup script
+were all invisible to CI — a change to any of them could go green in both
+workflows and first be built by a release tag, which is the worst moment to
+find out. Two jobs, `make build-android` and `make installer`. It is the slow
+one, because Rust cross-compiles once per Android ABI; the caches carry most of
+that after the first run.
+
+`.github/workflows/release.yml` publishes to a GitHub Release when a tag is
+pushed: the **Android APK** and the **Windows installer**, one job each, both
+uploading to the same release. It only ever fires on `v0.*` — not `v*` —
 because that is what marks a release as beta in the tag itself: a `v1.0.0`
 push is a claim this pipeline should not be able to make on its own, so
 widening the pattern is left as a deliberate change for when that claim is
 actually true.
+
+Both release jobs start by running `.github/tag-matches-manifest.sh`, which
+fails the release if the tag and `pubspec.yaml` disagree about the version.
+There are three places a version lives and only two of them were checked:
+`test/version_test.dart` keeps the manifest and `lib/src/version.dart` in step,
+and nothing kept the tag in step with either — so a tag nobody bumped the
+manifest for would ship an APK whose Android `versionName` came from the tag
+and whose own settings screen came from the constant. Only `MAJOR.MINOR.PATCH`
+has to match, because the tags here carry a suffix the manifest does not
+(`v0.2.0+beta`), and that is a label on the release rather than a disagreement
+about which version it is.
+
+**The release APK is signed with the debug key** — that is what
+`android/app/build.gradle.kts` names as the release signing config. Survivable
+for a beta people sideload; not survivable for a store, or for any upgrade path
+across a later key change. A real signing config is the thing to arrange before
+this leaves beta.
 
 ## Contributing
 

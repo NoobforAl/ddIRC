@@ -1,0 +1,112 @@
+# Does it still compile.
+#
+# A separate workflow from Test and Lint, and not folded into either, because
+# it answers a question neither of them can. `make test` runs the Dart suite on
+# the Dart VM and the Rust suite for the host; `make lint` runs analyze, format,
+# rustfmt and clippy. Between them they never invoke a platform toolchain — so
+# the Kotlin under `android/`, the C++ runner under `windows/`, the Gradle
+# build, the NDK cross-compile and the Inno Setup script are all invisible to
+# them.
+#
+# That was not theoretical. The Android foreground service was rewritten across
+# three Kotlin files and a new one, and every one of those changes could have
+# failed to compile with both existing workflows green — the first build would
+# have been the release tag, which is the worst possible moment to find out.
+#
+# The cost is real: this is the slow workflow, because Rust cross-compiles once
+# per Android ABI. The caches carry most of it after the first run.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Kotlin, Gradle, and the Rust core cross-compiled for three ABIs.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: irc-core
+
+      - run: cargo install cargo-ndk --locked
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: stable
+          cache: true
+
+      # Gradle reads compileSdk and ndkVersion itself and fetches what is
+      # missing once the licences are accepted — see release.yml, where the
+      # same step explains why nothing is named by package id here.
+      - name: Accept the Android SDK licences
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+
+      - run: flutter pub get
+
+      # Debug, not release: this asks whether it compiles, and the release
+      # build additionally signs — with the debug key today, which is a
+      # separate problem and not one to discover here.
+      - run: make build-android
+
+  # The C++ runner, the Rust core for windows-msvc, and the installer script.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: irc-core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: stable
+          cache: true
+
+      # Neither is on a Windows runner by default.
+      - name: Inno Setup and make
+        run: |
+          choco install innosetup --no-progress -y
+          choco install make --no-progress -y
+
+      - run: flutter pub get
+
+      # The installer rather than the app, which builds the app on the way
+      # through: `installer` depends on `build-release`. What it adds is the
+      # Inno Setup script, which is otherwise only ever run by hand on one
+      # maintainer's machine and would fail at the one moment it matters.
+      #
+      # Nothing is uploaded. This is a compile check; release.yml is what
+      # publishes.
+      - name: Build the installer
+        shell: bash
+        run: make installer

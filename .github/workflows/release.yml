@@ -31,6 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: The tag has to agree with the manifest
+        run: .github/tag-matches-manifest.sh
+
       # Gradle needs a JVM of its own; subosito/flutter-action only installs
       # the Flutter SDK. 17 matches what the README asks for locally.
       - uses: actions/setup-java@v4
@@ -97,6 +100,11 @@ jobs:
 
       # `prerelease: true` throughout: nothing this pipeline can tag is
       # anything else, per the trigger pattern above.
+      #
+      # Both jobs upload to the same release rather than one of them creating
+      # it and the other waiting: this action creates the release if it is not
+      # there and adds to it if it is, so the two can run in parallel and
+      # whichever finishes second finds the release already made.
       - uses: softprops/action-gh-release@v2
         with:
           name: "ddIRC ${{ github.ref_name }} (beta)"
@@ -105,3 +113,58 @@ jobs:
             Beta build. See the warning at the top of the README before
             trusting this with anything that matters.
           files: build/release/*.apk
+
+  # The Windows installer, which until now was only ever built by hand.
+  #
+  # `make installer` rather than the three commands it stands for, for the same
+  # reason lint.yml and test.yml call their Makefile targets: one definition of
+  # what a release build is, so what a maintainer builds locally and what
+  # reaches a user cannot drift apart.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: The tag has to agree with the manifest
+        shell: bash
+        run: .github/tag-matches-manifest.sh
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.97.1"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: irc-core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.2"
+          channel: stable
+          cache: true
+
+      # Neither is on a Windows runner by default. Inno Setup is what wraps the
+      # build; `make` is what the rest of this project is driven by, and
+      # installing it is cheaper than keeping a second description of the
+      # release steps in this file.
+      - name: Inno Setup and make
+        run: |
+          choco install innosetup --no-progress -y
+          choco install make --no-progress -y
+
+      - run: flutter pub get
+
+      # Bash rather than PowerShell: the Makefile is a Unix makefile and its
+      # ISCC detection is a shell pipeline. Git Bash is on the runner already.
+      - name: Build the installer
+        shell: bash
+        run: make installer
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: "ddIRC ${{ github.ref_name }} (beta)"
+          prerelease: true
+          body: |
+            Beta build. See the warning at the top of the README before
+            trusting this with anything that matters.
+          files: build/installer/*.exe
