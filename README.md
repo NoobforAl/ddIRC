@@ -26,8 +26,9 @@ that: saved network profiles with several connections live at once, a channel
 list with unread and mention badges, a member panel with `ISUPPORT` privilege
 prefixes, a styled message view, settings for the app and for each channel and
 server, direct messages with a request before a stranger can reach you,
-notifications while the window is not in front, DCC file transfers, a bundled
-Tor, a local server, and a per-user Windows installer.
+notifications while the window is not in front, exporting and importing a
+network as a `.irc` file or a QR code, DCC file transfers, a bundled Tor, a
+local server, and a per-user Windows installer.
 
 **What is not.** The installer is unsigned, so SmartScreen warns the first
 person to run each release. Sending a file while a proxy is configured is
@@ -38,10 +39,11 @@ still to write. macOS and Linux are configured and built by nobody.
 **Verified running as a Windows desktop app** against Snoonet: connected over
 TLS, joined a channel, rendered the topic and member roster, sent messages and
 a `/me` action, changed preferences live, and disconnected cleanly. Android
-builds and installs, but has not yet been run on a device — and the Kotlin
-added for message notifications has never been compiled, because the toolchain
-it was written against could not be reached. Expect to fix something small
-there before anything else on Android is worth trying.
+builds, installs and has been run on a phone — including the network editor's
+merged **Add a network** menu. The Kotlin behind message notifications and the
+battery-optimization exemption compiles and has been built into a debug APK;
+it has not yet been confirmed keeping a connection alive overnight on a real
+device with the app backgrounded, which is the case the fix is actually for.
 
 ## Networks
 
@@ -147,6 +149,53 @@ Profiles are stored in `shared_preferences`; **SASL passwords are not**. Those
 go to the platform keychain via `flutter_secure_storage` — Android Keystore,
 DPAPI on Windows — are read only at connect time, and are zeroized by the core
 once authentication completes.
+
+### The `.irc` file, and scanning one in
+
+A saved network can leave the device it was created on. **Export**, in the
+network editor's header, writes the profile as `.irc` — plain YAML, with an
+extension of its own rather than borrowed `.yaml`, so a file manager or a chat
+attachment says what it is before anyone opens it:
+
+```yaml
+ddirc: 1
+networks:
+  - name: 'Libera'
+    host: 'irc.libera.chat'
+    port: 6697
+    nickname: 'ddirc'
+    channels: ['#ddirc']
+```
+
+One file can name more than one network, and every field in it is exactly
+what `Profile.toJson` already writes to `shared_preferences` — which is the
+whole reason this did not need a second schema to keep in step with the
+first. That also answers the question worth asking before sharing one:
+**no password is ever in it.** Every credential a profile can carry —
+SASL, the server password, NickServ, a proxy's own — lives in the platform
+keychain and never reaches `Profile.toJson` in the first place, so a `.irc`
+file is secret-free by construction rather than by a filter applied on the
+way out. See [SECURITY.md](SECURITY.md).
+
+**Import** reads the same format back, from a file or from a **QR code**
+carrying the same YAML as its payload — `lib/src/model/ircconfig.dart` is the
+one parser both go through, so a file and a scan are the same thing the
+moment there is text to read. Scanning uses
+[`mobile_scanner`](https://pub.dev/packages/mobile_scanner), the only new
+dependency any of this needed; it owns the Android camera permission itself,
+unlike the notification and background-service permissions this app asks for
+by hand over its own channel — see *Being told that something was said*,
+below. Either source lands on the same review screen, one row per network
+found and a checkbox on each, before anything is saved — the same way
+picking a network from Browse fills in the editor rather than connecting on
+the spot.
+
+**Add a network**, beside Browse, opens a menu rather than a form directly:
+*by hand*, *by QR code*, or *by `.irc` file*. These three used to be three
+buttons standing side by side — the rail was five icons deep before Browse
+and App settings even got a look, and the empty screen carried a button for
+each — and folding them behind one is what kept the rail a rail rather than a
+list.
 
 ## Window
 
@@ -993,6 +1042,17 @@ The Android foreground service added **nothing**. A notification, a channel and
 a permission are three framework APIs behind version guards, which is less code
 than reading a plugin's changelog — and one fewer thing between the app and a
 permission it has to justify to a store.
+
+The `.irc` file format added **one dependency that was already there**: `yaml`
+was pulled in transitively by our own tooling and is promoted to a direct
+dependency purely to parse an import reliably — writing one back out is a
+schema small and fixed enough to hand-roll, see `lib/src/model/ircconfig.dart`,
+so no writer package was added alongside it. QR scanning added
+[`mobile_scanner`](https://pub.dev/packages/mobile_scanner), which was
+unavoidable: nothing already in the tree reads a camera, and it earns its
+place by owning the Android permission prompt itself rather than asking this
+app to plumb one more manual `MethodChannel` flow beside the two it already
+maintains for notifications and the background service.
 
 The proxy support is the crate's own `proxy` feature, backed by
 `tokio-socks`. We take `tokio-socks` as a direct dependency as well, because

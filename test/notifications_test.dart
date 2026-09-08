@@ -16,7 +16,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ddirc/src/model/notifications.dart';
 import 'package:ddirc/src/model/settings.dart';
-import 'package:ddirc/src/ui/background_android.dart' show hostCallsFor;
+import 'package:ddirc/src/ui/background_android.dart'
+    show
+        batteryOptimizationExempt,
+        hostCallsFor,
+        requestBatteryOptimizationExemption;
 import 'package:ddirc/src/ui/notifier.dart';
 import 'package:ddirc/src/ui/notifier_android.dart';
 import 'package:ddirc/src/ui/presence.dart';
@@ -595,6 +599,54 @@ void main() {
           (call) async => throw PlatformException(code: 'boom'),
         );
         expect(await notifier.ensurePermitted(), isTrue);
+      });
+    });
+
+    // The other reason a background connection can go quiet with every
+    // in-app switch correctly set: Android suspending the process anyway,
+    // regardless of the foreground service, unless it is separately
+    // exempted from battery optimization.
+    group('battery optimization exemption', () {
+      test('reports what the host says', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          calls.add(call);
+          return call.method == 'batteryOptimizationExempt' ? false : null;
+        });
+
+        expect(await batteryOptimizationExempt(channel: channel), isFalse);
+        expect(calls.map((c) => c.method), ['batteryOptimizationExempt']);
+      });
+
+      test('a host that will not answer is assumed already exempt', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => throw PlatformException(code: 'boom'),
+        );
+        expect(await batteryOptimizationExempt(channel: channel), isTrue);
+      });
+
+      test('requesting it is one call, and never throws', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          calls.add(call);
+          return null;
+        });
+
+        await requestBatteryOptimizationExemption(channel: channel);
+        expect(calls.map((c) => c.method), [
+          'requestBatteryOptimizationExemption',
+        ]);
+      });
+
+      test('a failing host does not bring the app down', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => throw PlatformException(code: 'boom'),
+        );
+        await requestBatteryOptimizationExemption(channel: channel);
       });
     });
   });

@@ -1,15 +1,19 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../model/directory.dart';
 import '../../model/errors.dart';
+import '../../model/ircconfig.dart';
 import '../../model/profile.dart';
 import '../../model/proxy.dart';
 import '../../model/workspace.dart';
 import '../../rust/api/client.dart' as core;
 import '../../rust/api/types.dart' as rust;
 import '../../theme.dart';
+import '../layout.dart';
 import '../motion.dart';
 import '../network_menu.dart';
 import '../touchable.dart';
@@ -125,6 +129,10 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   bool _testing = false;
   String? _testNote;
   bool _testFailed = false;
+
+  /// What the last export attempt said, on the same terms as [_testNote].
+  String? _exportNote;
+  bool _exportFailed = false;
 
   /// Whether the Advanced group is unfolded.
   ///
@@ -519,6 +527,46 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         'in ${seconds}s.$auth Nothing was joined and nothing was saved.';
   }
 
+  /// Save this network as a `.irc` file, for moving it to another device or
+  /// handing it to somebody else.
+  ///
+  /// Only offered for a network that already exists: a new one still being
+  /// typed has nothing in [widget.profile] to read from, and exporting
+  /// whatever happens to be sitting in the form — validated or not — would be
+  /// a second, looser save button standing next to the one that means it.
+  ///
+  /// What is written is exactly what [ProfileStore] itself never risks: no
+  /// SASL password, no server password, no NickServ password, no proxy
+  /// credential. Every one of those lives in the platform keychain and stays
+  /// there — see [writeIrcConfig].
+  Future<void> _export() async {
+    final profile = widget.profile;
+    if (profile == null) return;
+
+    final location = await getSaveLocation(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'ddIRC network config', extensions: ['irc']),
+      ],
+      suggestedName: '${profile.name}.irc',
+    );
+    if (location == null || !mounted) return;
+
+    try {
+      await File(location.path).writeAsString(writeIrcConfig([profile]));
+      if (!mounted) return;
+      setState(() {
+        _exportNote = 'Saved to ${location.path}.';
+        _exportFailed = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _exportNote = 'Could not export: $e';
+        _exportFailed = true;
+      });
+    }
+  }
+
   Future<void> _delete() async {
     final profile = widget.profile;
     if (profile == null) return;
@@ -535,10 +583,22 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     final connected = WorkspaceScope.of(
       context,
     ).isConnected(widget.profile?.id ?? '');
+    final compact = context.layout.isCompact;
 
     return SettingsDialog(
       title: _isNew ? 'Add a network' : 'Edit network',
       subtitle: _isNew ? 'Every connection uses TLS' : widget.profile!.name,
+      actions: _isNew
+          ? const []
+          : [
+              IconButton(
+                onPressed: _busy ? null : _export,
+                icon: const Icon(Icons.save_alt, size: 18),
+                color: t.muted,
+                visualDensity: VisualDensity.compact,
+                tooltip: 'Export as a .irc file…',
+              ),
+            ],
       children: [
         SettingsSection(
           label: 'Server',
@@ -677,30 +737,69 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         // do nothing.
         if (_testNote != null)
           SettingsNote(text: _testNote!, isError: _testFailed),
-        SettingsActions(
-          children: [
-            if (!_isNew)
-              SettingsDangerButton(
-                label: connected ? 'Delete & disconnect' : 'Delete',
-                onPressed: _busy ? null : _delete,
-              ),
-            SettingsTertiaryButton(
-              label: 'Save',
-              onPressed: _busy ? null : () => _save(thenConnect: false),
-            ),
-            _testButton(),
-            SettingsPrimaryButton(
-              label: _busy
-                  ? 'Saving…'
-                  : connected
-                  ? 'Save & switch'
-                  : 'Save & connect',
-              onPressed: _busy ? null : () => _save(thenConnect: true),
-            ),
-          ],
-        ),
+        if (_exportNote != null)
+          SettingsNote(text: _exportNote!, isError: _exportFailed),
+        _actions(connected: connected, compact: compact),
         const SizedBox(height: 6),
       ],
+    );
+  }
+
+  /// The row of buttons at the bottom, in the shape the width has room for.
+  ///
+  /// [SettingsActions] wraps rather than overflows, which was enough while the
+  /// row held three buttons; a fourth — *Test connection* — made a phone-width
+  /// [Wrap] break into two right-aligned lines of uneven length, with the
+  /// destructive action sometimes landing beside a primary one it should never
+  /// be mistaken for. On a compact layout this stacks every button full width
+  /// instead, primary action on top the way a bottom sheet does, and *Delete*
+  /// set apart below a rule so it reads as the odd one out rather than a fourth
+  /// peer. A wide layout keeps the row unchanged — it never had the problem.
+  Widget _actions({required bool connected, required bool compact}) {
+    final save = SettingsPrimaryButton(
+      label: _busy
+          ? 'Saving…'
+          : connected
+          ? 'Save & switch'
+          : 'Save & connect',
+      onPressed: _busy ? null : () => _save(thenConnect: true),
+    );
+    final test = _testButton();
+    final plainSave = SettingsTertiaryButton(
+      label: 'Save',
+      onPressed: _busy ? null : () => _save(thenConnect: false),
+    );
+    final delete = _isNew
+        ? null
+        : SettingsDangerButton(
+            label: connected ? 'Delete & disconnect' : 'Delete',
+            onPressed: _busy ? null : _delete,
+          );
+
+    if (!compact) {
+      return SettingsActions(
+        children: [?delete, plainSave, test, save],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 4, 18, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          save,
+          const SizedBox(height: 8),
+          test,
+          const SizedBox(height: 8),
+          plainSave,
+          if (delete != null) ...[
+            const SizedBox(height: 12),
+            const Divider(height: Tokens.hairline),
+            const SizedBox(height: 12),
+            delete,
+          ],
+        ],
+      ),
     );
   }
 

@@ -1,9 +1,12 @@
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
+import '../model/ircconfig.dart';
 import '../model/profile.dart';
 import '../model/workspace.dart';
 import '../theme.dart';
 import '../version.dart';
+import 'add_network_menu.dart';
 import 'app_mark.dart';
 import 'layout.dart';
 import 'motion.dart';
@@ -11,7 +14,9 @@ import 'network_menu.dart';
 import 'network_rail.dart';
 import 'session_screen.dart';
 import 'settings/app_settings_dialog.dart';
+import 'settings/import_config_dialog.dart';
 import 'settings/network_picker_dialog.dart';
+import 'settings/qr_scan_dialog.dart';
 import 'settings/settings_chrome.dart';
 import 'settings/profile_editor_dialog.dart';
 import 'touchable.dart';
@@ -45,7 +50,7 @@ class WorkspaceScreen extends StatelessWidget {
             final rail = NetworkRail(
               workspace: workspace,
               onSelect: (profile) => _select(context, workspace, profile),
-              onAdd: () => _edit(context, workspace, null),
+              onAddChoice: (c) => _addChoice(context, workspace, c),
               onBrowse: () => _browse(context, workspace),
               onMenu: (profile, at) => _menu(context, workspace, profile, at),
               onAppSettings: () => AppSettingsDialog.show(context),
@@ -61,7 +66,8 @@ class WorkspaceScreen extends StatelessWidget {
                         ? _Empty(
                             workspace: workspace,
                             layout: layout,
-                            onAdd: () => _edit(context, workspace, null),
+                            onAddChoice: (c) =>
+                                _addChoice(context, workspace, c),
                             onBrowse: () => _browse(context, workspace),
                             onConnect: (p) => _select(context, workspace, p),
                             onMenu: (p, at) => _menu(context, workspace, p, at),
@@ -137,6 +143,83 @@ class WorkspaceScreen extends StatelessWidget {
     await _edit(context, workspace, null, preset: pick);
   }
 
+  /// What [showAddNetworkMenu] was asked for, dispatched to the flow it
+  /// names.
+  static Future<void> _addChoice(
+    BuildContext context,
+    Workspace workspace,
+    AddNetworkChoice choice,
+  ) => switch (choice) {
+    AddNetworkChoice.byHand => _edit(context, workspace, null),
+    AddNetworkChoice.scan => _scan(context),
+    AddNetworkChoice.import => _import(context),
+  };
+
+  /// Read a `.irc` file and offer what it names for import.
+  ///
+  /// Parsing happens here rather than inside [ImportConfigDialog], so a file
+  /// that turns out not to be a ddIRC config says so before a dialog opens
+  /// with nothing in it to show.
+  static Future<void> _import(BuildContext context) async {
+    final file = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'ddIRC network config', extensions: ['irc']),
+      ],
+    );
+    if (file == null || !context.mounted) return;
+
+    final List<Profile> networks;
+    try {
+      networks = parseIrcConfig(await file.readAsString());
+    } catch (e) {
+      if (context.mounted) await _importFailed(context, e);
+      return;
+    }
+
+    if (context.mounted) await ImportConfigDialog.show(context, networks);
+  }
+
+  /// Scan a QR code and offer what it decodes to for import.
+  ///
+  /// Shares every line after the scan with [_import]: a QR code and a file
+  /// are the same format the moment there is text to parse, so there is one
+  /// parser and one review dialog for both.
+  static Future<void> _scan(BuildContext context) async {
+    final text = await QrScanDialog.show(context);
+    if (text == null || !context.mounted) return;
+
+    final List<Profile> networks;
+    try {
+      networks = parseIrcConfig(text);
+    } catch (e) {
+      if (context.mounted) await _importFailed(context, e);
+      return;
+    }
+
+    if (context.mounted) await ImportConfigDialog.show(context, networks);
+  }
+
+  static Future<void> _importFailed(BuildContext context, Object error) {
+    return showDialog<void>(
+      context: context,
+      builder: (_) => SettingsDialog(
+        title: 'Could not import',
+        children: [
+          SettingsNote(text: '$error', isError: true),
+          SettingsActions(
+            children: [
+              SettingsPrimaryButton(
+                label: 'OK',
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
   static Future<void> _edit(
     BuildContext context,
     Workspace workspace,
@@ -171,7 +254,7 @@ class _Empty extends StatelessWidget {
   const _Empty({
     required this.workspace,
     required this.layout,
-    required this.onAdd,
+    required this.onAddChoice,
     required this.onBrowse,
     required this.onConnect,
     required this.onMenu,
@@ -180,8 +263,11 @@ class _Empty extends StatelessWidget {
 
   final Workspace workspace;
   final Layout layout;
-  final VoidCallback onAdd;
   final VoidCallback onBrowse;
+
+  /// By hand, by QR code or by file — see [showAddNetworkMenu].
+  final ValueChanged<AddNetworkChoice> onAddChoice;
+
   final ValueChanged<Profile> onConnect;
   final void Function(Profile profile, Offset at) onMenu;
   final VoidCallback onAppSettings;
@@ -293,16 +379,30 @@ class _Empty extends StatelessWidget {
                   ),
                 ),
               ),
-              TextButton.icon(
-                onPressed: onAdd,
-                icon: const Icon(Icons.add, size: 16),
-                label: Text(
-                  profiles.isEmpty ? 'Add one by hand' : 'Add another by hand',
-                ),
-                style: TextButton.styleFrom(
-                  foregroundColor: t.muted,
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  textStyle: const TextStyle(fontSize: 12.5),
+              // The other three ways a network arrives, behind one button
+              // rather than three: by hand, by QR code, or off a `.irc`
+              // file. All three end up at the same review step Browse does,
+              // so nothing here is saved by itself. A `Builder` reads the
+              // point to open the menu at from its own position at the
+              // moment of the tap, the same trick the rail's Add button
+              // uses — see `NetworkRail`.
+              Builder(
+                builder: (context) => TextButton.icon(
+                  onPressed: () async {
+                    final box = context.findRenderObject()! as RenderBox;
+                    final at = box.localToGlobal(box.size.center(Offset.zero));
+                    final choice = await showAddNetworkMenu(context, at);
+                    if (choice != null) onAddChoice(choice);
+                  },
+                  icon: const Icon(Icons.add, size: 16),
+                  label: Text(
+                    profiles.isEmpty ? 'Add a network' : 'Add another network',
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: t.muted,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                    textStyle: const TextStyle(fontSize: 12.5),
+                  ),
                 ),
               ),
               // App settings live in the rail, and on a narrow screen the rail

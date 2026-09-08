@@ -300,6 +300,16 @@ every cycle and produce a hot loop.
   networks a user joins and under what nick, so it is not nothing; it is
   ordinary configuration rather than a credential, and it is what a plain
   config file would hold on any other client.
+- **Exporting a network never includes a credential, for the same reason.** The
+  `.irc` file format — and the QR code that carries the same YAML — is written
+  from the same `Profile.toJson` the settings store already uses, which stops
+  at the keychain door; there is no separate export path that could disagree
+  about what counts as a secret. Importing assigns each network a fresh local
+  id rather than carrying over whatever the exporting device used, so nothing
+  about the file identifies the device that wrote it. Scanning a QR code
+  reads a decoded string locally; nothing about the payload is sent anywhere,
+  and the camera permission it needs is requested and owned by
+  `mobile_scanner` itself, not this app's code.
 
 ### App lock
 

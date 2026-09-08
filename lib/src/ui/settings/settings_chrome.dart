@@ -36,6 +36,7 @@ class SettingsDialog extends StatelessWidget {
     required this.children,
     this.width = 420,
     this.onBack,
+    this.actions = const [],
   });
 
   final String title;
@@ -53,6 +54,12 @@ class SettingsDialog extends StatelessWidget {
   /// deep that could only be left by retracing its own steps would be worse
   /// than the flat list it replaced.
   final VoidCallback? onBack;
+
+  /// Icon buttons between the title and the close button, for the rare
+  /// action that belongs in the header rather than the body — exporting the
+  /// network editor is currently the only one. Empty by default, so the
+  /// eight surfaces that do not need one say nothing about it.
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -178,6 +185,7 @@ class SettingsDialog extends StatelessWidget {
               ],
             ),
           ),
+          ...actions,
           IconButton(
             onPressed: () => Navigator.of(context).pop(),
             icon: const Icon(Icons.close, size: 18),

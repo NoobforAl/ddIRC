@@ -2,12 +2,16 @@ package dev.ddirc.ddirc
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -217,6 +221,14 @@ object AppEngine {
 
             "requestNotifications" -> requestNotifications(context, result)
 
+            "batteryOptimizationExempt" ->
+                result.success(batteryOptimizationExempt(context))
+
+            "requestBatteryOptimizationExemption" -> {
+                requestBatteryOptimizationExemption(context)
+                result.success(null)
+            }
+
             "notifyMessage" -> {
                 MessageNotifications.show(
                     context = context,
@@ -300,5 +312,48 @@ object AppEngine {
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             PERMISSION_REQUEST,
         )
+    }
+
+    /**
+     * Whether Android will actually let [ConnectionService] go on running once
+     * the window is gone, rather than suspending the process at its own
+     * discretion some time later.
+     *
+     * Unlike [notificationsAllowed], nothing this app does is refused by
+     * staying unexempted — the service still starts, and still runs for a
+     * while. What is lost is quieter: on a phone with an aggressive battery
+     * manager, the process can be cut regardless of the foreground service
+     * that is supposed to protect it, and that happens with no notification,
+     * no error and nothing for Dart to catch. This exemption is the one thing
+     * this app can actually ask the platform for about it.
+     */
+    private fun batteryOptimizationExempt(context: Context): Boolean {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    /**
+     * Send the user to the system prompt that grants the exemption above.
+     *
+     * A settings screen, not a permission dialog — there is no result to wait
+     * for here the way [requestNotifications] waits for one, and no activity
+     * is required to launch it, unlike that call. Dart finds out what
+     * happened by asking [batteryOptimizationExempt] again once the app is
+     * back in front, which is simpler than plumbing a result back through an
+     * activity that may not even be the one that launched this.
+     */
+    private fun requestBatteryOptimizationExemption(context: Context) {
+        val intent = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:${context.packageName}"),
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            // Some OEM builds ship without this screen at all. There is
+            // nothing to fall back to, and no exception worth reaching the
+            // user over a request they did not know had a second step.
+            Log.w(TAG, "no battery optimization settings screen on this device", e)
+        }
     }
 }

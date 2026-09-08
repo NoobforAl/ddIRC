@@ -15,11 +15,25 @@
          service runs whether or not it is granted; what is lost by refusing
          is only being told that it is running. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Lets the app ask to be exempted from battery optimization, so the
+         service above is not suspended by the platform regardless of the
+         permissions it already holds. This permission itself needs no grant
+         — it only allows the app to *raise* the system screen where the user
+         grants the exemption; nothing happens without that further step. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <!-- The optional app lock, off by default. Reads whatever biometrics are
          already enrolled — this asks for nothing new from the user beyond
          what unlocking the phone itself already required. -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+
+    <!-- Scanning a QR code to add a network. mobile_scanner requests this at
+         runtime itself — unlike the permissions above, ddIRC does not ask
+         for it by hand — and nothing that uses the camera runs until it is
+         granted. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
 
     <application
         android:label="@string/app_name"

@@ -68,6 +68,51 @@ class HostCallDispatcher {
   }
 }
 
+/// Whether ddIRC is exempt from Android's battery optimization.
+///
+/// Not a permission the way `AndroidNotifier.ensurePermitted` asks about one
+/// — nothing here is refused by staying unexempted. What is lost is quieter
+/// and worse: Android may still suspend the process holding
+/// [ForegroundService] up some time after the window closes, on exactly the
+/// phones — aggressive OEM battery managers, mostly — most likely to do it
+/// regardless of what the foreground service already asked for. This is the
+/// one further thing ddIRC can actually ask the platform for about it.
+///
+/// `true` on failure, the same convention `AndroidNotifier.ensurePermitted`
+/// uses for a host that could not be reached — a channel error should not
+/// turn into a warning about a problem nobody can confirm exists.
+Future<bool> batteryOptimizationExempt({
+  MethodChannel channel = backgroundChannel,
+}) async {
+  try {
+    return await channel.invokeMethod<bool>('batteryOptimizationExempt') ??
+        true;
+  } catch (e) {
+    debugPrint('background service: batteryOptimizationExempt failed ($e)');
+    return true;
+  }
+}
+
+/// Send the user to the system screen that grants the exemption above.
+///
+/// Fire-and-forget: what opens is its own settings screen, not a dialog with
+/// an answer to wait for, and Android does not promise a meaningful result
+/// back from it across every device this ships on. The caller finds out what
+/// happened the ordinary way — by asking [batteryOptimizationExempt] again
+/// once the app is back in front, which is also why the Notifications page
+/// re-checks on resume rather than awaiting a reply here.
+Future<void> requestBatteryOptimizationExemption({
+  MethodChannel channel = backgroundChannel,
+}) async {
+  try {
+    await channel.invokeMethod<void>('requestBatteryOptimizationExemption');
+  } catch (e) {
+    debugPrint(
+      'background service: requestBatteryOptimizationExemption failed ($e)',
+    );
+  }
+}
+
 /// Staying connected on Android, where the process is not ours to keep.
 ///
 /// Nothing here holds a connection. As on desktop, the connections live in the

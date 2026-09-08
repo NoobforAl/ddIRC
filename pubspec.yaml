@@ -88,6 +88,21 @@ dependencies:
   # honest way to hardcode it. First-party. Pinned like every other dependency.
   path_provider: 2.1.5
 
+  # Parses a `.irc` network config on import (and whatever a scanned QR code
+  # decodes to). Already pulled in transitively by our own tooling, so this
+  # only promotes it to a direct dependency rather than adding a new one to the
+  # tree. Writing a `.irc` file is a small, fixed schema and does not need a
+  # writer package — see `lib/src/model/ircconfig.dart`. Pinned like every
+  # other dependency.
+  yaml: 3.1.3
+
+  # Reads a QR code through the camera to import a `.irc` config without
+  # typing it in. Owns the Android CAMERA runtime-permission request itself,
+  # unlike the notification/background-service permissions this app asks for
+  # by hand — see `lib/src/ui/settings/qr_scan_dialog.dart`. Pinned like every
+  # other dependency.
+  mobile_scanner: 7.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

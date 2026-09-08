@@ -6,6 +6,7 @@ import '../model/session.dart';
 import '../model/workspace.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
+import 'add_network_menu.dart';
 import 'motion.dart';
 import 'touchable.dart';
 
@@ -22,7 +23,7 @@ class NetworkRail extends StatelessWidget {
     super.key,
     required this.workspace,
     required this.onSelect,
-    required this.onAdd,
+    required this.onAddChoice,
     required this.onBrowse,
     required this.onMenu,
     required this.onAppSettings,
@@ -30,8 +31,10 @@ class NetworkRail extends StatelessWidget {
 
   final Workspace workspace;
   final ValueChanged<Profile> onSelect;
-  final VoidCallback onAdd;
   final VoidCallback onBrowse;
+
+  /// By hand, by QR code or by file — see [showAddNetworkMenu].
+  final ValueChanged<AddNetworkChoice> onAddChoice;
 
   /// Right-click or long-press on a network, with the point to open at.
   final void Function(Profile profile, Offset at) onMenu;
@@ -78,10 +81,21 @@ class NetworkRail extends StatelessWidget {
             tooltip: 'Browse networks',
             onTap: onBrowse,
           ),
-          _RailButton(
-            icon: Icons.add,
-            tooltip: 'Add a network by hand',
-            onTap: onAdd,
+          // A `Builder` rather than a `GlobalKey`, so this stays a plain
+          // `_RailButton` like its neighbours: the point the menu opens at
+          // is read from this build context at the moment of the tap, which
+          // needs no identity kept between rebuilds the way a key would.
+          Builder(
+            builder: (context) => _RailButton(
+              icon: Icons.add,
+              tooltip: 'Add a network',
+              onTap: () async {
+                final box = context.findRenderObject()! as RenderBox;
+                final at = box.localToGlobal(box.size.center(Offset.zero));
+                final choice = await showAddNetworkMenu(context, at);
+                if (choice != null) onAddChoice(choice);
+              },
+            ),
           ),
           // The rail is the only surface on screen in every state, so it is
           // also the only place app settings can always be reached from.

@@ -8,6 +8,7 @@ import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../../version.dart';
 import '../background.dart';
+import '../background_android.dart';
 import '../motion.dart';
 import '../notifier.dart' show notificationHelpFor, notificationsSupportedOn;
 import 'app_lock_section.dart';
@@ -105,12 +106,36 @@ class AppSettingsDialog extends StatefulWidget {
   State<AppSettingsDialog> createState() => _AppSettingsDialogState();
 }
 
-class _AppSettingsDialogState extends State<AppSettingsDialog> {
+class _AppSettingsDialogState extends State<AppSettingsDialog>
+    with WidgetsBindingObserver {
   /// Null on the index.
   _Page? _page;
 
   void _open(_Page page) => setState(() => _page = page);
   void _back() => setState(() => _page = null);
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Re-reads the battery exemption once the app is back in front.
+  ///
+  /// The request that grants it opens a system settings screen rather than a
+  /// dialog with an answer to hand back, so this is how the note below finds
+  /// out whether the user actually granted it: the app resuming is the same
+  /// moment that screen would have just been left.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -396,6 +421,14 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
               value: settings.runInBackground,
               onChanged: (v) => settings.runInBackground = v,
             ),
+            // Android only, and only worth asking about once the switch above
+            // is actually asking for something. The switch keeps its promise
+            // as far as this app can keep it; this is the one further step
+            // that is the platform's to grant, not this app's, and it is
+            // easy to never learn exists — see `batteryOptimizationExempt`.
+            if (defaultTargetPlatform == TargetPlatform.android &&
+                settings.runInBackground)
+              _batteryOptimizationNote(),
           ],
         ),
       // The other half of the same promise: one keeps the socket open while
@@ -433,6 +466,42 @@ class _AppSettingsDialogState extends State<AppSettingsDialog> {
           ],
         ),
     ];
+  }
+
+  /// Says so, and offers the fix, only while the exemption is actually
+  /// missing.
+  ///
+  /// A blank widget while the answer is still loading rather than a
+  /// placeholder — the common case is already exempt, and a note that flashes
+  /// on for a frame before disappearing on every visit to this page would
+  /// train the eye to skip it, which is exactly the note this one cannot
+  /// afford to be skipped.
+  Widget _batteryOptimizationNote() {
+    return FutureBuilder<bool>(
+      future: batteryOptimizationExempt(),
+      builder: (context, snapshot) {
+        if (snapshot.data != false) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SettingsNote(
+              text:
+                  'Some phones suspend ddIRC anyway, regardless of this '
+                  'switch, unless it is separately exempted from battery '
+                  'optimization — worth doing if a background connection '
+                  'keeps dropping for no reason shown here.',
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+              child: SettingsSecondaryButton(
+                label: 'Exempt ddIRC from battery optimization…',
+                onPressed: () => requestBatteryOptimizationExemption(),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   List<Widget> _privacy(BuildContext context) {
