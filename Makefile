@@ -81,7 +81,7 @@ PROFILES ?= --profile proxy --profile tor
 
 .DEFAULT_GOAL := help
 .PHONY: help fix fmt lint test test-integration build build-release installer check-iscc \
-        build-android build-android-release \
+        build-android build-android-release keystore keystore-secrets \
         build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
         dev-proxy dev-tor dev-tor-logs dev-onion-cert
@@ -99,6 +99,8 @@ help:
 	@echo "  make installer         wrap it in a per-user .exe (needs Inno Setup)"
 	@echo "  make build-android     debug APK  (needs the Android SDK and NDK)"
 	@echo "  make build-android-release   release APK — the thing that ships"
+	@echo "  make keystore          make a release signing key, under android/"
+	@echo "  make keystore-secrets  push that key to GitHub Actions secrets"
 	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
@@ -167,15 +169,66 @@ build:
 # build anything at all. Cargokit drives cargo-ndk from inside the Gradle
 # build, so nothing here calls it.
 #
-# The release build is currently signed with the debug key, which is what
-# `android/app/build.gradle.kts` still names as its release signing config.
-# Fine for a beta people sideload and not fine for a store, and worth knowing
-# before this output is handed to anyone.
+# The release build is signed with android/ddirc-release.jks when `make
+# keystore` has made one, and with the debug key otherwise — see the comment
+# above android/app/build.gradle.kts's signingConfigs block. Debug-signed is
+# fine for a beta people sideload and not fine for a store; `make keystore`
+# is the way off that.
 build-android:
 	$(FLUTTER) build apk --debug
 
 build-android-release:
 	$(FLUTTER) build apk --release
+
+## A release keystore + android/key.properties, both under android/ rather
+## than in a machine-wide keystore directory — deliberately, so this key can
+## never be picked up by, or confused with, an unrelated keystore for some
+## other app already sitting in a global location on this machine. Both are
+## covered by android/.gitignore and so can never be committed.
+#
+# Refuses to run if a keystore is already there: this is a once-per-app
+# operation, and every APK ever built with the old key becomes un-updatable
+# the moment it is silently replaced.
+keystore:
+	@if [ -f android/ddirc-release.jks ]; then \
+	    echo "android/ddirc-release.jks already exists — delete it yourself first if you really mean to replace it."; \
+	    exit 1; \
+	fi
+	@read -s -p "Keystore password: " storepass; echo; \
+	read -s -p "Key password (blank = same as keystore password): " keypass; echo; \
+	keypass=$${keypass:-$$storepass}; \
+	keytool -genkeypair -v -keystore android/ddirc-release.jks \
+	    -keyalg RSA -keysize 2048 -validity 10000 -alias ddirc \
+	    -storepass "$$storepass" -keypass "$$keypass" && \
+	{ \
+	    echo "storePassword=$$storepass"; \
+	    echo "keyPassword=$$keypass"; \
+	    echo "keyAlias=ddirc"; \
+	    echo "storeFile=ddirc-release.jks"; \
+	} > android/key.properties
+	@echo "-> android/ddirc-release.jks, android/key.properties (both gitignored)"
+	@echo "   make build-android-release now signs with this key."
+	@echo "   make keystore-secrets pushes the same key to GitHub for CI."
+
+## Pushes the keystore `make keystore` made to this repo's GitHub Actions
+## secrets, so release.yml can sign the CI build the same way. Reads
+## android/key.properties rather than asking again — it is the same key, so
+## it has to be the same passwords — and needs `gh auth login` done already;
+## `gh` infers which repo from the git remote, same as everywhere else it is
+## used unprefixed in this project.
+keystore-secrets:
+	@if [ ! -f android/key.properties ]; then \
+	    echo "android/key.properties not found — run 'make keystore' first."; \
+	    exit 1; \
+	fi
+	@storepass=$$(grep '^storePassword=' android/key.properties | cut -d= -f2-); \
+	keypass=$$(grep '^keyPassword=' android/key.properties | cut -d= -f2-); \
+	alias=$$(grep '^keyAlias=' android/key.properties | cut -d= -f2-); \
+	base64 -w0 android/ddirc-release.jks | gh secret set ANDROID_KEYSTORE_BASE64 && \
+	printf '%s' "$$storepass" | gh secret set ANDROID_KEYSTORE_PASSWORD && \
+	printf '%s' "$$keypass"  | gh secret set ANDROID_KEY_PASSWORD && \
+	printf '%s' "$$alias"    | gh secret set ANDROID_KEY_ALIAS
+	@echo "-> ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD, ANDROID_KEY_ALIAS set on the repo."
 
 ## The other desktops and iOS. Each has to run on that host - there is no
 ## cross-compiling a Flutter runner - and none of them has been built yet.

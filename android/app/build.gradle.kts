@@ -1,8 +1,29 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+// The release keystore. `make keystore` writes it, and the four values below,
+// to android/ddirc-release.jks and android/key.properties — both gitignored,
+// both inside the repo rather than somewhere global, so this key can never be
+// confused with an unrelated one already sitting in a machine-wide keystore
+// directory. CI has no key.properties, so it sets the same four names as env
+// vars instead, decoded from repo secrets in release.yml. Neither present —
+// a fresh checkout nobody has run `make keystore` on yet — leaves storeFile
+// null, and buildTypes.release below falls back to the debug key so
+// `flutter run --release` still works.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+fun signingProp(propertyName: String, envName: String): String? =
+    keystoreProperties.getProperty(propertyName) ?: System.getenv(envName)
 
 android {
     namespace = "dev.ddirc.ddirc"
@@ -48,11 +69,27 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            val path = signingProp("storeFile", "ANDROID_KEYSTORE_PATH")
+            if (path != null) {
+                storeFile = rootProject.file(path)
+                storePassword = signingProp("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = signingProp("keyAlias", "ANDROID_KEY_ALIAS")
+                keyPassword = signingProp("keyPassword", "ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // The real key once one exists (see the comment above); the debug
+            // key otherwise, so a fresh checkout can still build.
+            signingConfig = if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

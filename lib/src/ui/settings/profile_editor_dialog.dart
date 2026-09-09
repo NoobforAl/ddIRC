@@ -777,9 +777,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           );
 
     if (!compact) {
-      return SettingsActions(
-        children: [?delete, plainSave, test, save],
-      );
+      return SettingsActions(children: [?delete, plainSave, test, save]);
     }
 
     return Padding(
