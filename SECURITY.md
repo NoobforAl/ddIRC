@@ -300,6 +300,37 @@ every cycle and produce a hot loop.
   networks a user joins and under what nick, so it is not nothing; it is
   ordinary configuration rather than a credential, and it is what a plain
   config file would hold on any other client.
+- **One configured keychain handle, not several default ones.** Every stored
+  credential goes through the single instance in `lib/src/model/secrets.dart`.
+  `flutter_secure_storage` takes its options per instance rather than globally,
+  so a second `FlutterSecureStorage()` built elsewhere would quietly get the
+  package defaults back — two of which are wrong for this app.
+- **Apple platforms use `first_unlock`, not the default `unlocked`.** The
+  default makes a keychain item readable only while the screen is unlocked,
+  which is right for an app that runs while someone is looking at it and wrong
+  for one holding an IRC connection open in the background: a reconnect that
+  happens while the phone is in a pocket could not read the password it
+  authenticates with, and would register unauthenticated instead. Items are
+  still not synchronized to iCloud (`synchronizable` is false).
+- **Android excludes its secret store from backup and device transfer.**
+  Auto-backup copies shared preferences to the cloud, but the Keystore key that
+  decrypts them is hardware-bound and does not travel. A restore onto a new
+  phone therefore produced ciphertext with no key to read it, which the plugin
+  resolves by deleting it — so every saved password vanished silently on a
+  phone migration while every profile survived, leaving networks that looked
+  correct and simply would not authenticate. `res/xml/backup_rules.xml` and
+  `res/xml/data_extraction_rules.xml` exclude both preference files, so the new
+  device starts with empty password fields: the same end state, arrived at
+  visibly rather than silently. Apple's restore is not broken this way and
+  excludes nothing.
+- **Importing a network may carry one; exporting one never does.** A `.irc`
+  file written by hand may set `password`, `saslPassword`, `nickservPassword`
+  and a proxy's `password`. They are read once, moved into the keychain by the
+  import screen, and held nowhere else — `ImportedNetwork` exists only between
+  parsing a file and saving what it named, and the `Profile` that outlives it
+  still has nowhere to put a credential. A file carrying one is plain text like
+  any other file, which is why the import screen says so when it sees one.
+  Nothing in the app ever *writes* such a file.
 - **Exporting a network never includes a credential, for the same reason.** The
   `.irc` file format — and the QR code that carries the same YAML — is written
   from the same `Profile.toJson` the settings store already uses, which stops

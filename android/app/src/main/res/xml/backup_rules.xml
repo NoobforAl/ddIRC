@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto-backup rules for Android 11 and below (API 29-30), where the attribute
+  is `android:fullBackupContent`. Android 12+ reads data_extraction_rules.xml
+  instead; the two files say the same thing and both have to, because minSdk
+  is 29 and the app runs on both.
+
+  Everything is backed up except the two preference files holding secrets.
+
+  Those are excluded because restoring them cannot work. The ciphertext is
+  encrypted with a key in the Android Keystore, and a Keystore key is
+  hardware-bound and non-exportable: it does not travel with the backup. So a
+  restore onto a new phone brings back ciphertext with no key to read it, and
+  flutter_secure_storage's answer to an unreadable entry is to delete it.
+
+  Left alone, that means every saved password vanishes silently on a phone
+  migration while every network survives — profiles live in plain settings and
+  restore fine — so the user sees their networks exactly as before and simply
+  cannot authenticate, with nothing on screen to say why.
+
+  Excluding them makes the outcome honest instead: the password fields are
+  empty on the new device, which is a thing the user can see and fix, and is
+  the true state of affairs either way.
+-->
+<full-backup-content>
+    <!-- The credentials themselves. -->
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
+    <!-- The Keystore-wrapped key that encrypts them, equally unusable once
+         moved off the device that made it. -->
+    <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+</full-backup-content>

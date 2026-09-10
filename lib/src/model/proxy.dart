@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart' as core;
 import 'profile.dart';
+import 'secrets.dart';
 import 'tor.dart';
 
 /// Where a server gets its proxy from.
@@ -227,7 +228,7 @@ class ProxySettings extends ChangeNotifier {
     } catch (e) {
       debugPrint('proxy settings unavailable, starting direct: $e');
     }
-    final settings = ProxySettings._(prefs, const FlutterSecureStorage(), tor);
+    final settings = ProxySettings._(prefs, secrets, tor);
     settings._read();
     // The address of the built-in route appears and disappears with Tor, so
     // anything reading `active` has to be told when that happens.

@@ -725,6 +725,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
                       'accepted. Kept in the platform keychain, never in app '
                       'settings.',
                 ),
+                const SecretStorageNote(),
               ],
             ),
             _proxySection(t),

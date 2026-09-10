@@ -34,10 +34,15 @@ Profile _profile({
   autoConnect: autoConnect,
 );
 
+/// The networks a file names, without their credentials — what every test
+/// below the credentials group is actually about.
+List<Profile> _parse(String source) =>
+    parseIrcConfig(source).map((n) => n.profile).toList();
+
 void main() {
   group('round trip', () {
     test('the fields every network has', () {
-      final networks = parseIrcConfig(writeIrcConfig([_profile()]));
+      final networks = _parse(writeIrcConfig([_profile()]));
       expect(networks, hasLength(1));
       final network = networks.single;
       expect(network.name, 'Libera');
@@ -47,7 +52,7 @@ void main() {
     });
 
     test('a channel name is not read back as a comment', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([
           _profile(channels: const ['#ddirc', '#offtopic']),
         ]),
@@ -56,7 +61,7 @@ void main() {
     });
 
     test('alternate nicknames', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([
           _profile(altNicks: const ['ddirc_', 'ddirc__']),
         ]),
@@ -65,21 +70,21 @@ void main() {
     });
 
     test('a SASL account, with no password beside it', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([_profile(saslAccount: 'alice')]),
       );
       expect(networks.single.saslAccount, 'alice');
     });
 
     test('a network set to connect directly', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([_profile(proxyMode: ProxyMode.direct)]),
       );
       expect(networks.single.proxyMode, ProxyMode.direct);
     });
 
     test('a network with its own proxy', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([
           _profile(
             proxyMode: ProxyMode.custom,
@@ -100,14 +105,14 @@ void main() {
     });
 
     test('connect at launch', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([_profile(autoConnect: true)]),
       );
       expect(networks.single.autoConnect, isTrue);
     });
 
     test('more than one network in one file', () {
-      final networks = parseIrcConfig(
+      final networks = _parse(
         writeIrcConfig([
           _profile(name: 'Libera', host: 'irc.libera.chat'),
           _profile(name: 'OFTC', host: 'irc.oftc.net'),
@@ -117,7 +122,7 @@ void main() {
     });
 
     test('a fresh id, never the one that was written', () {
-      final networks = parseIrcConfig(writeIrcConfig([_profile()]));
+      final networks = _parse(writeIrcConfig([_profile()]));
       expect(networks.single.id, isNot('ignored'));
     });
 
@@ -149,7 +154,7 @@ networks:
     port: 6697
     nickname: 'ddirc'
 ''';
-      expect(parseIrcConfig(text).map((n) => n.name), ['Fine']);
+      expect(_parse(text).map((n) => n.name), ['Fine']);
     });
 
     test('text that is not YAML throws', () {
@@ -165,6 +170,93 @@ networks:
         () => parseIrcConfig('ddirc: 1\nnetworks: []'),
         throwsFormatException,
       );
+    });
+
+    test('a file whose every network is bad throws, rather than importing '
+        'nothing at all', () {
+      // This used to return an empty list, which opened the import screen
+      // with nothing in it to show and no explanation.
+      expect(
+        () => parseIrcConfig(
+          "ddirc: 1\nnetworks:\n  - name: 'X'\n    host: 'a'\n"
+          "    port: '6697'\n    nickname: 'b'\n",
+        ),
+        throwsFormatException,
+      );
+    });
+  });
+
+  group('credentials', () {
+    ImportedNetwork one(String body) => parseIrcConfig(
+      "ddirc: 1\nnetworks:\n  - host: 'irc.libera.chat'\n    port: 6697\n"
+      "    nickname: 'ddirc'\n$body",
+    ).single;
+
+    test('a server password, under either spelling', () {
+      expect(one("    password: 'hunter2'\n").serverPassword, 'hunter2');
+      expect(one("    serverPassword: 'hunter2'\n").serverPassword, 'hunter2');
+    });
+
+    test('the explicit spelling wins over the alias', () {
+      final network = one(
+        "    password: 'alias'\n    serverPassword: 'explicit'\n",
+      );
+      expect(network.serverPassword, 'explicit');
+    });
+
+    test('a SASL account and its password', () {
+      final network = one(
+        "    saslAccount: 'alice'\n    saslPassword: 'hunter2'\n",
+      );
+      expect(network.profile.saslAccount, 'alice');
+      expect(network.saslPassword, 'hunter2');
+    });
+
+    test('a NickServ password', () {
+      expect(one("    nickservPassword: 'hunter2'\n").nickservPassword,
+          'hunter2');
+    });
+
+    test('a proxy password, nested where the proxy is', () {
+      final network = one(
+        "    proxyMode: 'custom'\n    proxy:\n      host: '127.0.0.1'\n"
+        "      port: 9050\n      username: 'bob'\n      password: 'hunter2'\n",
+      );
+      expect(network.proxyPassword, 'hunter2');
+      expect(network.profile.proxy?.username, 'bob');
+    });
+
+    test('an all-digit password is not lost to YAML reading it as a number',
+        () {
+      expect(one('    password: 123456\n').serverPassword, '123456');
+    });
+
+    test('an empty password is the same as none', () {
+      expect(one("    password: ''\n").serverPassword, isNull);
+    });
+
+    test('a file with no credentials says so', () {
+      expect(one('').carriesSecret, isFalse);
+      expect(one("    password: 'x'\n").carriesSecret, isTrue);
+    });
+
+    test('no password ever survives a round trip back out', () {
+      // The asymmetry that is the whole point: read one, never write one.
+      final network = one(
+        "    saslAccount: 'alice'\n    password: 'hunter2'\n"
+        "    saslPassword: 'hunter2'\n    nickservPassword: 'hunter2'\n",
+      );
+      final text = writeIrcConfig([network.profile]);
+      expect(text, isNot(contains('hunter2')));
+      expect(text.toLowerCase(), isNot(contains('password')));
+      expect(text, contains('alice'), reason: 'the account is not a secret');
+    });
+
+    test('a password is never on the Profile itself', () {
+      final network = one(
+        "    password: 'hunter2'\n    saslPassword: 'hunter2'\n",
+      );
+      expect('${network.profile.toJson()}', isNot(contains('hunter2')));
     });
   });
 }

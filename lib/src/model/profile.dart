@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+import 'secrets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart';
@@ -218,7 +220,7 @@ class ProfileStore extends ChangeNotifier {
     } catch (e) {
       debugPrint('profiles unavailable, starting empty: $e');
     }
-    final store = ProfileStore._(prefs, const FlutterSecureStorage());
+    final store = ProfileStore._(prefs, secrets);
     store._read();
     return store;
   }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:yaml/yaml.dart';
 
 import 'profile.dart';
@@ -17,13 +18,81 @@ import 'proxy.dart';
 /// parser, and a QR that could only ever encode a single network would have
 /// become a second format the first time somebody asked to share two at once.
 ///
-/// What is never in here: a password. [Profile.toJson] already stops at the
-/// door of the keychain — SASL, the server password, NickServ, a proxy's own
-/// credential all live in `flutter_secure_storage` and never reach the JSON
-/// [ProfileStore] writes, which is the same shape this format writes to YAML
-/// instead. Handing this file to someone hands them where to connect, never
-/// what to authenticate with.
+/// ## Passwords cross in, and never back out
+///
+/// The format reads credentials and never writes them. That asymmetry is the
+/// whole design, and it is deliberate rather than an omission:
+///
+/// * **Reading** them means a file somebody writes by hand can carry a
+///   complete network — paste the password in, import once, done. Refusing to
+///   read one did not make anybody safer; it made them retype a password they
+///   had already written down somewhere less careful than a file they control.
+/// * **Writing** them would put a credential into every file the app hands
+///   out, including the one exported to move a network between two of the
+///   user's own devices and the QR code shown on a screen in a room. That is a
+///   different act with a different audience, and [writeIrcConfig] does not do
+///   it — see the round-trip test that asserts the word never appears.
+///
+/// So an imported password goes straight to the platform keychain, exactly
+/// where the editor would have put it, and the file it came from is the only
+/// copy that stays in the clear. A `.irc` file carrying one is as sensitive as
+/// the password it holds, and the import screen says so.
 const _kVersion = 1;
+
+/// A network read out of a `.irc` file, with whatever credentials rode along.
+///
+/// Separate from [Profile] rather than fields on it, because [Profile] is the
+/// object the app keeps in memory for the life of the session and the one
+/// thing it must never hold is a password — see [ProfileStore], which splits
+/// configuration from secrets for exactly this reason. This type exists only
+/// between parsing a file and saving what it named: short-lived, never stored,
+/// never handed to anything that persists.
+@immutable
+class ImportedNetwork {
+  const ImportedNetwork({
+    required this.profile,
+    this.serverPassword,
+    this.saslPassword,
+    this.nickservPassword,
+    this.proxyPassword,
+  });
+
+  /// The network itself, already carrying a fresh local id.
+  final Profile profile;
+
+  /// Sent as `PASS` before registration. `password` in the file, which is what
+  /// the IRC protocol calls it and what every other client's config calls it.
+  final String? serverPassword;
+
+  /// The password for [Profile.saslAccount].
+  final String? saslPassword;
+
+  /// Used to identify to NickServ when SASL was not accepted.
+  final String? nickservPassword;
+
+  /// The credential for this network's own proxy, when it brings one.
+  final String? proxyPassword;
+
+  /// Whether the file this came from had a secret in it.
+  ///
+  /// Drives the warning on the import screen. A file with no password in it
+  /// is an address book and needs no caveat; one with a password in it is a
+  /// credential sitting in the clear on a disk, and saying so once at the
+  /// moment of import is the only chance to say it usefully.
+  bool get carriesSecret =>
+      serverPassword != null ||
+      saslPassword != null ||
+      nickservPassword != null ||
+      proxyPassword != null;
+
+  ImportedNetwork withProfile(Profile profile) => ImportedNetwork(
+    profile: profile,
+    serverPassword: serverPassword,
+    saslPassword: saslPassword,
+    nickservPassword: nickservPassword,
+    proxyPassword: proxyPassword,
+  );
+}
 
 /// Turn a `.irc` file's text — or whatever a scanned QR code decoded to —
 /// into networks ready to review and save.
@@ -32,14 +101,20 @@ const _kVersion = 1;
 /// entry is dropped rather than failing the whole import, because a file
 /// somebody shared with five networks in it should not be refused over one
 /// bad line. Throws [FormatException] only when there is nothing to salvage
-/// at all — the text is not YAML, or names no networks.
+/// at all — the text is not YAML, or names no networks, or names none that
+/// survived being read.
+///
+/// That last case used to return an empty list, which the import screen then
+/// opened with nothing in it to show. A file whose every entry was rejected
+/// has failed, and it says so here rather than looking like an import that
+/// found no networks worth mentioning.
 ///
 /// Each network gets a fresh [ProfileStore.newId] rather than keeping
 /// whatever id the exporting device wrote: that id is local housekeeping —
 /// it keys a keychain entry on the device that saved it — and carrying one
 /// over would risk two unrelated networks, saved on two different phones,
 /// ending up addressed by the same key on a third.
-List<Profile> parseIrcConfig(String source) {
+List<ImportedNetwork> parseIrcConfig(String source) {
   final Object? doc;
   try {
     doc = loadYaml(source);
@@ -55,14 +130,49 @@ List<Profile> parseIrcConfig(String source) {
     throw const FormatException('No networks found in this file.');
   }
 
-  return [
-    for (final entry in networks)
-      if (entry is YamlMap)
-        Profile.fromJson({
-          ..._plain(entry) as Map<String, Object?>,
-          'id': ProfileStore.newId(),
-        }),
-  ].whereType<Profile>().toList(growable: false);
+  final imported = <ImportedNetwork>[];
+  for (final entry in networks) {
+    if (entry is! YamlMap) continue;
+    final map = _plain(entry) as Map<String, Object?>;
+    final profile = Profile.fromJson({...map, 'id': ProfileStore.newId()});
+    if (profile == null) continue;
+    imported.add(
+      ImportedNetwork(
+        profile: profile,
+        // `password` is the spelling the protocol uses for PASS, and the one
+        // somebody writing this file by hand will reach for first;
+        // `serverPassword` matches what the editor labels the same field.
+        // Both mean the same thing, and the explicit one wins.
+        serverPassword: _secret(map['serverPassword']) ?? _secret(
+          map['password'],
+        ),
+        saslPassword: _secret(map['saslPassword']),
+        nickservPassword: _secret(map['nickservPassword']),
+        proxyPassword: _secret(
+          map['proxy'] is Map ? (map['proxy']! as Map)['password'] : null,
+        ),
+      ),
+    );
+  }
+
+  if (imported.isEmpty) {
+    throw const FormatException(
+      'Every network in this file was missing something. Each one needs a '
+      'host, a nickname, and a port written as a plain number.',
+    );
+  }
+  return List.unmodifiable(imported);
+}
+
+/// A credential as written, or null if there is nothing usable there.
+///
+/// A number is accepted and stringified because an all-digit password written
+/// unquoted is read by YAML as an integer, and silently dropping it would be
+/// the same trap a quoted `port` already sets — see the format docs.
+String? _secret(Object? value) {
+  if (value is String) return value.isEmpty ? null : value;
+  if (value is num) return '$value';
+  return null;
 }
 
 /// Write one or more profiles as a `.irc` file.
@@ -74,6 +184,10 @@ List<Profile> parseIrcConfig(String source) {
 /// selectively escaped — a channel name starting with `#` is a YAML comment
 /// the moment it is not — which costs a couple of characters and buys not
 /// having to enumerate every character that would otherwise need it.
+///
+/// **No credential is ever written here**, and none can be: this takes
+/// [Profile]s, and a [Profile] has nowhere to hold one. Reading a password is
+/// something the format does; producing one is not. See [ImportedNetwork].
 String writeIrcConfig(List<Profile> profiles) {
   final buffer = StringBuffer('ddirc: $_kVersion\nnetworks:\n');
   for (final profile in profiles) {

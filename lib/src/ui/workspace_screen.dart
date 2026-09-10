@@ -168,7 +168,7 @@ class WorkspaceScreen extends StatelessWidget {
     );
     if (file == null || !context.mounted) return;
 
-    final List<Profile> networks;
+    final List<ImportedNetwork> networks;
     try {
       networks = parseIrcConfig(await file.readAsString());
     } catch (e) {
@@ -188,7 +188,7 @@ class WorkspaceScreen extends StatelessWidget {
     final text = await QrScanDialog.show(context);
     if (text == null || !context.mounted) return;
 
-    final List<Profile> networks;
+    final List<ImportedNetwork> networks;
     try {
       networks = parseIrcConfig(text);
     } catch (e) {

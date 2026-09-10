@@ -1376,6 +1376,48 @@ class SettingsNote extends StatelessWidget {
   }
 }
 
+/// Where a password typed on this screen ends up, said in the open.
+///
+/// Everything else in these dialogs explains itself on request, behind a
+/// [HelpDot], because it is explaining a control the user went looking for.
+/// This is different, and it is the one disclosure that earns permanent
+/// space: it answers *where does this go* for somebody typing a credential,
+/// which is a question they are entitled to have answered without first
+/// having to find a '?' and suspect there is something to find. A hidden
+/// answer to that question is not an answer — it is an invitation to assume
+/// the worst.
+///
+/// One widget rather than the sentence written twice, so the editor and the
+/// import screen cannot drift into describing the same storage differently —
+/// and so that if it ever stops being true, it stops being true in one place.
+class SecretStorageNote extends StatelessWidget {
+  const SecretStorageNote({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.lock_outline, size: 13, color: t.faint),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              'Kept as a secret in the device keychain — Android Keystore, '
+              'the iOS and macOS Keychain, DPAPI on Windows. Never in app '
+              'settings, never in a log, and never written back out to a '
+              '.irc file.',
+              style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// A hairline between sections.
 class SettingsRule extends StatelessWidget {
   const SettingsRule({super.key});
