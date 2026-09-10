@@ -204,4 +204,63 @@ void main() {
       expect(find.text(_child), findsOneWidget);
     },
   );
+
+  _styling();
+}
+
+/// The lock screen's text is styled by a [Material], not by each [Text]
+/// defending itself.
+///
+/// This screen is a sibling of the workspace inside a [Stack], so nothing
+/// above it provides a [DefaultTextStyle] unless it brings its own. Without
+/// one, MaterialApp substitutes a debug fallback — 48px red monospace with a
+/// double yellow underline — and the text on the lock screen quietly looks
+/// like a crash. It was patched once by writing `TextDecoration.none` on the
+/// two Text widgets that existed at the time, which fixed those two and left
+/// the next one to rediscover the problem.
+///
+/// So the assertion is about the cause. Checking the rendered style would
+/// pass just as well against the old per-Text patch; checking for the
+/// Material is what fails if someone removes it.
+void _styling() {
+  testWidgets('the lock screen carries its own Material, so its text is not '
+      'painted in the debug fallback style', (tester) async {
+    final settings = await _settings(enabled: true);
+    await _pump(tester, settings, Biometrics.fake((_) async => false));
+    await tester.pumpAndSettle();
+
+    expect(find.text(_locked), findsOneWidget);
+
+    // Not merely "a Material exists somewhere" — one above this text.
+    expect(
+      find.ancestor(of: find.text(_locked), matching: find.byType(Material)),
+      findsWidgets,
+    );
+
+    // And the fallback is genuinely gone rather than overridden field by
+    // field: nothing on this screen asks for an underline of any colour.
+    final style = DefaultTextStyle.of(tester.element(find.text(_locked))).style;
+    expect(style.decoration ?? TextDecoration.none, TextDecoration.none);
+    expect(style.fontSize, isNot(48.0));
+  });
+
+  testWidgets('and it still swallows taps meant for the workspace behind it', (
+    tester,
+  ) async {
+    // The Material added for the text above is deliberately transparent, and
+    // a transparent Material does not absorb hit tests. The ColoredBox around
+    // it does, and that is the half that matters: a lock screen that let a
+    // tap through would be a picture of a lock.
+    final settings = await _settings(enabled: true);
+    await _pump(tester, settings, Biometrics.fake((_) async => false));
+    await tester.pumpAndSettle();
+
+    // The child is still mounted underneath — this is an overlay, not a swap
+    // — so it has a render object, and the question is simply whether a tap
+    // aimed at the lock screen reaches it.
+    final child = tester.renderObject(find.text(_child));
+    final hits = tester.hitTestOnBinding(tester.getCenter(find.text(_locked)));
+
+    expect(hits.path.map((entry) => entry.target), isNot(contains(child)));
+  });
 }

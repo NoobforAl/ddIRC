@@ -70,9 +70,7 @@ void main() {
     });
 
     test('a SASL account, with no password beside it', () {
-      final networks = _parse(
-        writeIrcConfig([_profile(saslAccount: 'alice')]),
-      );
+      final networks = _parse(writeIrcConfig([_profile(saslAccount: 'alice')]));
       expect(networks.single.saslAccount, 'alice');
     });
 
@@ -105,9 +103,7 @@ void main() {
     });
 
     test('connect at launch', () {
-      final networks = _parse(
-        writeIrcConfig([_profile(autoConnect: true)]),
-      );
+      final networks = _parse(writeIrcConfig([_profile(autoConnect: true)]));
       expect(networks.single.autoConnect, isTrue);
     });
 
@@ -213,8 +209,10 @@ networks:
     });
 
     test('a NickServ password', () {
-      expect(one("    nickservPassword: 'hunter2'\n").nickservPassword,
-          'hunter2');
+      expect(
+        one("    nickservPassword: 'hunter2'\n").nickservPassword,
+        'hunter2',
+      );
     });
 
     test('a proxy password, nested where the proxy is', () {
@@ -226,10 +224,12 @@ networks:
       expect(network.profile.proxy?.username, 'bob');
     });
 
-    test('an all-digit password is not lost to YAML reading it as a number',
-        () {
-      expect(one('    password: 123456\n').serverPassword, '123456');
-    });
+    test(
+      'an all-digit password is not lost to YAML reading it as a number',
+      () {
+        expect(one('    password: 123456\n').serverPassword, '123456');
+      },
+    );
 
     test('an empty password is the same as none', () {
       expect(one("    password: ''\n").serverPassword, isNull);

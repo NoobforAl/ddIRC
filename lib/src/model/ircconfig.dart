@@ -143,9 +143,8 @@ List<ImportedNetwork> parseIrcConfig(String source) {
         // somebody writing this file by hand will reach for first;
         // `serverPassword` matches what the editor labels the same field.
         // Both mean the same thing, and the explicit one wins.
-        serverPassword: _secret(map['serverPassword']) ?? _secret(
-          map['password'],
-        ),
+        serverPassword:
+            _secret(map['serverPassword']) ?? _secret(map['password']),
         saslPassword: _secret(map['saslPassword']),
         nickservPassword: _secret(map['nickservPassword']),
         proxyPassword: _secret(

@@ -132,41 +132,61 @@ class _LockScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
 
+    // Two layers, and each is doing one job the other cannot.
+    //
+    // [ColoredBox] paints the background and, because its hit-test behaviour
+    // is opaque, swallows every tap that would otherwise reach the workspace
+    // still mounted behind this. That second part is the whole point of a
+    // lock screen and is not negotiable.
+    //
+    // [Material] is here for the text. This screen is a sibling of the
+    // workspace inside a [Stack], not a child of it, so the workspace's own
+    // Material is in the other branch and nothing above this provides a
+    // [DefaultTextStyle]. Without one, MaterialApp falls back to a debug
+    // style — 48px red monospace with a double yellow underline, labelled
+    // in the framework as "consider putting your text in a Material" — and
+    // every [Text] here has to override it field by field to look right. Two
+    // of them used to carry a `decoration: TextDecoration.none` for exactly
+    // that reason: a symptom patched twice, where the cause was one missing
+    // widget, and a patch the next piece of text added to this screen would
+    // have had to remember for itself.
+    //
+    // [MaterialType.transparency] because the background is already painted
+    // and a second opaque layer would only paint it again — and because a
+    // transparent Material deliberately does not absorb hit tests, leaving
+    // that job with the ColoredBox that already does it correctly.
     return ColoredBox(
       color: t.bg,
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _BadgedMark(color: t.muted),
-              const SizedBox(height: 22),
-              Text(
-                'ddIRC is locked',
-                style: TextStyle(
-                  color: t.text,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                  decoration: TextDecoration.none,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _BadgedMark(color: t.muted),
+                const SizedBox(height: 22),
+                Text(
+                  'ddIRC is locked',
+                  style: TextStyle(
+                    color: t.text,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.2,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Unlock with your fingerprint, face or device passcode to '
-                'get back in.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: t.faint,
-                  fontSize: 12,
-                  height: 1.4,
-                  decoration: TextDecoration.none,
+                const SizedBox(height: 8),
+                Text(
+                  'Unlock with your fingerprint, face or device passcode to '
+                  'get back in.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: t.faint, fontSize: 12, height: 1.4),
                 ),
-              ),
-              const SizedBox(height: 26),
-              _UnlockButton(busy: busy, onPressed: busy ? null : onRetry),
-            ],
+                const SizedBox(height: 26),
+                _UnlockButton(busy: busy, onPressed: busy ? null : onRetry),
+              ],
+            ),
           ),
         ),
       ),
