@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../model/profile.dart';
 import '../model/media.dart';
 import '../model/notice.dart';
+import '../model/people.dart';
 import '../model/session.dart';
 import '../model/transfer.dart';
 import '../model/settings.dart';
@@ -20,6 +21,7 @@ import 'menu.dart';
 import 'message_view.dart';
 import 'motion.dart';
 import 'notice_bar.dart';
+import 'person_dialog.dart';
 import 'send_file_sheet.dart';
 import 'touchable.dart';
 import 'transfer_bar.dart';
@@ -78,6 +80,9 @@ class _SessionScreenState extends State<SessionScreen> {
   void initState() {
     super.initState();
     session.addListener(_onChanged);
+    // What the user wrote about people is drawn on every nick, so an edit
+    // has to reach the scrollback and the roster the same way a message does.
+    People.instance.addListener(_onChanged);
     _composer.addListener(_onTyped);
     // On the focus node rather than an ancestor Shortcuts: the focused node is
     // asked first, so arrows and Enter can be claimed for the list before the
@@ -152,6 +157,7 @@ class _SessionScreenState extends State<SessionScreen> {
   @override
   void dispose() {
     session.removeListener(_onChanged);
+    People.instance.removeListener(_onChanged);
     _composer.removeListener(_onTyped);
     _composerFocus.onKeyEvent = null;
     _composer.dispose();
@@ -162,6 +168,10 @@ class _SessionScreenState extends State<SessionScreen> {
 
   void _onChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _editPerson(String nick) {
+    PersonDialog.show(context, profileId: session.profileId, nick: nick);
   }
 
   Future<void> _submit() async {
@@ -345,6 +355,8 @@ class _SessionScreenState extends State<SessionScreen> {
         ? const SizedBox.shrink()
         : MemberList(
             members: active.members,
+            colorNicks: SettingsScope.of(context).colorNicks,
+            self: session.nick,
             // Closable either way. Beside the conversation the cross puts the
             // setting back; in a drawer it dismisses the drawer. A panel the
             // user turned on and cannot turn off from where they are looking
@@ -353,6 +365,8 @@ class _SessionScreenState extends State<SessionScreen> {
                 ? () => SettingsScope.of(context).showMembers = false
                 : () => Navigator.of(context).maybePop(),
             onOpenDirect: _openDirect,
+            profileId: session.profileId,
+            onEditPerson: _editPerson,
           );
 
     return Scaffold(
@@ -469,6 +483,8 @@ class _SessionScreenState extends State<SessionScreen> {
                     // Rebuild the scroll state when switching conversations.
                     key: ValueKey(active.name),
                     conversation: active,
+                    profileId: session.profileId,
+                    onPersonTap: _editPerson,
                   ),
           ),
         ),

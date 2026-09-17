@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import '../rust/api/client.dart' as core;
 import 'errors.dart';
 import 'log.dart';
+import 'personas.dart';
 import 'profile.dart';
 import 'proxy.dart';
 import 'session.dart';
@@ -195,11 +196,18 @@ class Workspace extends ChangeNotifier {
       // the app-wide proxy and this server's own is the app's to make, and
       // the core is better off being handed an answer.
       final proxy = await resolveProxy(profile, proxies, profiles);
+      // An identity's nick stands in for the one typed on the profile. Minted
+      // once and remembered per network, so a reconnect is the same handle;
+      // resolved here rather than on the profile because it lives in the store.
+      final personaNick = profile.usesPersona
+          ? await Personas.instance.nickFor(profile.personaId!, profile.id)
+          : null;
       final config = profile.toConfig(
         saslPassword: password,
         serverPassword: serverPassword,
         nickservPassword: nickservPassword,
         proxy: proxy,
+        nicknameOverride: personaNick,
       );
       if (proxy != null) {
         AppLog.instance.debug(

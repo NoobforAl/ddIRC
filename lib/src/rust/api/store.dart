@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 /// Open, or create, the history database at `path`.
 ///
@@ -55,6 +55,149 @@ Future<void> storeForget({
   profileId: profileId,
   conversation: conversation,
 );
+
+/// Everyone the user has annotated, on every network.
+Future<List<Person>> storePeople() =>
+    RustLib.instance.api.crateApiStoreStorePeople();
+
+/// Write what is known about one person, replacing what was there. A person
+/// with every field cleared loses their row.
+Future<void> storeSetPerson({required Person person}) =>
+    RustLib.instance.api.crateApiStoreStoreSetPerson(person: person);
+
+/// Forget everyone on one network — for when the network itself is forgotten.
+Future<void> storeForgetPeople({required String profileId}) =>
+    RustLib.instance.api.crateApiStoreStoreForgetPeople(profileId: profileId);
+
+/// Every identity the user has made.
+Future<List<Persona>> storePersonas() =>
+    RustLib.instance.api.crateApiStoreStorePersonas();
+
+/// Create or rename an identity.
+Future<void> storeSetPersona({required Persona persona}) =>
+    RustLib.instance.api.crateApiStoreStoreSetPersona(persona: persona);
+
+/// Forget an identity, and every remembered nick that was hers.
+Future<void> storeForgetPersona({required String id}) =>
+    RustLib.instance.api.crateApiStoreStoreForgetPersona(id: id);
+
+/// Every remembered (persona, network) → nick, for the app to hold in memory.
+Future<List<PersonaNick>> storePersonaNicks() =>
+    RustLib.instance.api.crateApiStoreStorePersonaNicks();
+
+/// Remember the nick a persona wears on a network, replacing any earlier one.
+Future<void> storeSetPersonaNick({required PersonaNick nick}) =>
+    RustLib.instance.api.crateApiStoreStoreSetPersonaNick(nick: nick);
+
+/// Forget every persona's nick on one network — for when the network itself
+/// is forgotten, alongside [`store_forget_people`].
+Future<void> storeForgetPersonaNicks({required String networkId}) => RustLib
+    .instance
+    .api
+    .crateApiStoreStoreForgetPersonaNicks(networkId: networkId);
+
+/// What the user has written down about one person on one network: a name
+/// to show instead of the nick, a note, a colour, a picture.
+///
+/// The user's annotation, never anything the person sent. Kept in the same
+/// database as history and behind the same switch, because it is still a
+/// record of who they talk to. `nick` is folded to lower case by the caller.
+class Person {
+  final String profileId;
+  final String nick;
+  final String? alias;
+  final String? note;
+
+  /// ARGB, as `Color.value` on the Dart side.
+  final PlatformInt64? color;
+
+  /// A small PNG, downscaled before it gets here.
+  final Uint8List? avatar;
+
+  /// Seed for a generated pixel avatar, when no picture was chosen.
+  final PlatformInt64? pixelSeed;
+
+  const Person({
+    required this.profileId,
+    required this.nick,
+    this.alias,
+    this.note,
+    this.color,
+    this.avatar,
+    this.pixelSeed,
+  });
+
+  @override
+  int get hashCode =>
+      profileId.hashCode ^
+      nick.hashCode ^
+      alias.hashCode ^
+      note.hashCode ^
+      color.hashCode ^
+      avatar.hashCode ^
+      pixelSeed.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Person &&
+          runtimeType == other.runtimeType &&
+          profileId == other.profileId &&
+          nick == other.nick &&
+          alias == other.alias &&
+          note == other.note &&
+          color == other.color &&
+          avatar == other.avatar &&
+          pixelSeed == other.pixelSeed;
+}
+
+/// One of the user's own identities: a private label a network never sees.
+///
+/// The nick a persona actually connects under is per network and lives in
+/// [`PersonaNick`], because one identity wears a different, unlinkable handle
+/// on each server it touches.
+class Persona {
+  final String id;
+  final String label;
+
+  const Persona({required this.id, required this.label});
+
+  @override
+  int get hashCode => id.hashCode ^ label.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Persona &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          label == other.label;
+}
+
+/// The nick one persona wears on one saved network, generated once and kept.
+class PersonaNick {
+  final String personaId;
+  final String networkId;
+  final String nick;
+
+  const PersonaNick({
+    required this.personaId,
+    required this.networkId,
+    required this.nick,
+  });
+
+  @override
+  int get hashCode => personaId.hashCode ^ networkId.hashCode ^ nick.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PersonaNick &&
+          runtimeType == other.runtimeType &&
+          personaId == other.personaId &&
+          networkId == other.networkId &&
+          nick == other.nick;
+}
 
 /// What the store currently holds, for the settings screen to report.
 class StoreStats {

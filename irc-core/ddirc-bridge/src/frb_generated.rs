@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 565125055;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1440969084;
 
 // Section: executor
 
@@ -860,6 +860,105 @@ fn wire__crate__api__store__store_forget_impl(
         },
     )
 }
+fn wire__crate__api__store__store_forget_people_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_forget_people",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_profile_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_forget_people(api_profile_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_forget_persona_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_forget_persona",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_forget_persona(api_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_forget_persona_nicks_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_forget_persona_nicks",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_network_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_forget_persona_nicks(api_network_id)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__store__store_is_open_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -922,6 +1021,102 @@ fn wire__crate__api__store__store_open_impl(
         },
     )
 }
+fn wire__crate__api__store__store_people_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_people",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_people()?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_persona_nicks_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_persona_nicks",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_persona_nicks()?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_personas_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_personas",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_personas()?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__store__store_recent_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -955,6 +1150,105 @@ fn wire__crate__api__store__store_recent_impl(
                         api_conversation,
                         api_limit,
                     )?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_set_person_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_set_person",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_person = <crate::api::store::Person>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_set_person(api_person)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_set_persona_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_set_persona",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_persona = <crate::api::store::Persona>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_set_persona(api_persona)?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__store__store_set_persona_nick_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_set_persona_nick",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_nick = <crate::api::store::PersonaNick>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, String>((move || {
+                    let output_ok = crate::api::store::store_set_persona_nick(api_nick)?;
                     std::result::Result::Ok(output_ok)
                 })())
             }
@@ -1637,6 +1931,42 @@ impl SseDecode for Vec<crate::api::types::MemberView> {
     }
 }
 
+impl SseDecode for Vec<crate::api::store::Person> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::store::Person>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::store::Persona> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::store::Persona>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::store::PersonaNick> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::store::PersonaNick>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1726,6 +2056,17 @@ impl SseDecode for Option<String> {
     }
 }
 
+impl SseDecode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<i64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::server::LocalServerInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1791,6 +2132,65 @@ impl SseDecode for Option<u8> {
         } else {
             return None;
         }
+    }
+}
+
+impl SseDecode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<Vec<u8>>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for crate::api::store::Person {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_profileId = <String>::sse_decode(deserializer);
+        let mut var_nick = <String>::sse_decode(deserializer);
+        let mut var_alias = <Option<String>>::sse_decode(deserializer);
+        let mut var_note = <Option<String>>::sse_decode(deserializer);
+        let mut var_color = <Option<i64>>::sse_decode(deserializer);
+        let mut var_avatar = <Option<Vec<u8>>>::sse_decode(deserializer);
+        let mut var_pixelSeed = <Option<i64>>::sse_decode(deserializer);
+        return crate::api::store::Person {
+            profile_id: var_profileId,
+            nick: var_nick,
+            alias: var_alias,
+            note: var_note,
+            color: var_color,
+            avatar: var_avatar,
+            pixel_seed: var_pixelSeed,
+        };
+    }
+}
+
+impl SseDecode for crate::api::store::Persona {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_label = <String>::sse_decode(deserializer);
+        return crate::api::store::Persona {
+            id: var_id,
+            label: var_label,
+        };
+    }
+}
+
+impl SseDecode for crate::api::store::PersonaNick {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_personaId = <String>::sse_decode(deserializer);
+        let mut var_networkId = <String>::sse_decode(deserializer);
+        let mut var_nick = <String>::sse_decode(deserializer);
+        return crate::api::store::PersonaNick {
+            persona_id: var_personaId,
+            network_id: var_networkId,
+            nick: var_nick,
+        };
     }
 }
 
@@ -2056,14 +2456,30 @@ fn pde_ffi_dispatcher_primary_impl(
         22 => wire__crate__api__store__store_clear_impl(port, ptr, rust_vec_len, data_len),
         23 => wire__crate__api__store__store_close_impl(port, ptr, rust_vec_len, data_len),
         24 => wire__crate__api__store__store_forget_impl(port, ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__store__store_open_impl(port, ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__store__store_recent_impl(port, ptr, rust_vec_len, data_len),
-        28 => wire__crate__api__store__store_stats_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__client__test_connection_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__tor__tor_port_impl(port, ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__tor__tor_start_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__tor__tor_status_stream_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__tor__tor_stop_impl(port, ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__store__store_forget_people_impl(port, ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__store__store_forget_persona_impl(port, ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__store__store_forget_persona_nicks_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        29 => wire__crate__api__store__store_open_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__store__store_people_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__store__store_persona_nicks_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__store__store_personas_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__store__store_recent_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__store__store_set_person_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__store__store_set_persona_impl(port, ptr, rust_vec_len, data_len),
+        36 => {
+            wire__crate__api__store__store_set_persona_nick_impl(port, ptr, rust_vec_len, data_len)
+        }
+        37 => wire__crate__api__store__store_stats_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__client__test_connection_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__tor__tor_port_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__tor__tor_start_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__tor__tor_status_stream_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__tor__tor_stop_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2077,8 +2493,8 @@ fn pde_ffi_dispatcher_sync_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         5 => wire__crate__api__client__default_tls_port_impl(ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__store__store_is_open_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__client__tor_socks_port_impl(ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__store__store_is_open_impl(ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__client__tor_socks_port_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2493,6 +2909,65 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::types::MemberView>
     for crate::api::types::MemberView
 {
     fn into_into_dart(self) -> crate::api::types::MemberView {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::store::Person {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.profile_id.into_into_dart().into_dart(),
+            self.nick.into_into_dart().into_dart(),
+            self.alias.into_into_dart().into_dart(),
+            self.note.into_into_dart().into_dart(),
+            self.color.into_into_dart().into_dart(),
+            self.avatar.into_into_dart().into_dart(),
+            self.pixel_seed.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::store::Person {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::store::Person> for crate::api::store::Person {
+    fn into_into_dart(self) -> crate::api::store::Person {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::store::Persona {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.label.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::store::Persona {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::store::Persona> for crate::api::store::Persona {
+    fn into_into_dart(self) -> crate::api::store::Persona {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::store::PersonaNick {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.persona_id.into_into_dart().into_dart(),
+            self.network_id.into_into_dart().into_dart(),
+            self.nick.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::store::PersonaNick
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::store::PersonaNick>
+    for crate::api::store::PersonaNick
+{
+    fn into_into_dart(self) -> crate::api::store::PersonaNick {
         self
     }
 }
@@ -3101,6 +3576,36 @@ impl SseEncode for Vec<crate::api::types::MemberView> {
     }
 }
 
+impl SseEncode for Vec<crate::api::store::Person> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::store::Person>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::store::Persona> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::store::Persona>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::store::PersonaNick> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::store::PersonaNick>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<u8> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3170,6 +3675,16 @@ impl SseEncode for Option<String> {
     }
 }
 
+impl SseEncode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <i64>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::server::LocalServerInfo> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3227,6 +3742,46 @@ impl SseEncode for Option<u8> {
         if let Some(value) = self {
             <u8>::sse_encode(value, serializer);
         }
+    }
+}
+
+impl SseEncode for Option<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <Vec<u8>>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for crate::api::store::Person {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.profile_id, serializer);
+        <String>::sse_encode(self.nick, serializer);
+        <Option<String>>::sse_encode(self.alias, serializer);
+        <Option<String>>::sse_encode(self.note, serializer);
+        <Option<i64>>::sse_encode(self.color, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.avatar, serializer);
+        <Option<i64>>::sse_encode(self.pixel_seed, serializer);
+    }
+}
+
+impl SseEncode for crate::api::store::Persona {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.label, serializer);
+    }
+}
+
+impl SseEncode for crate::api::store::PersonaNick {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.persona_id, serializer);
+        <String>::sse_encode(self.network_id, serializer);
+        <String>::sse_encode(self.nick, serializer);
     }
 }
 

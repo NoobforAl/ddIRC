@@ -53,10 +53,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DccOffer dco_decode_box_autoadd_dcc_offer(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
+
+  @protected
   LocalServerInfo dco_decode_box_autoadd_local_server_info(dynamic raw);
 
   @protected
   MemberView dco_decode_box_autoadd_member_view(dynamic raw);
+
+  @protected
+  Person dco_decode_box_autoadd_person(dynamic raw);
+
+  @protected
+  Persona dco_decode_box_autoadd_persona(dynamic raw);
+
+  @protected
+  PersonaNick dco_decode_box_autoadd_persona_nick(dynamic raw);
 
   @protected
   ProxyConfig dco_decode_box_autoadd_proxy_config(dynamic raw);
@@ -107,6 +119,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MemberView> dco_decode_list_member_view(dynamic raw);
 
   @protected
+  List<Person> dco_decode_list_person(dynamic raw);
+
+  @protected
+  List<Persona> dco_decode_list_persona(dynamic raw);
+
+  @protected
+  List<PersonaNick> dco_decode_list_persona_nick(dynamic raw);
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
@@ -131,6 +152,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
+
+  @protected
   LocalServerInfo? dco_decode_opt_box_autoadd_local_server_info(dynamic raw);
 
   @protected
@@ -147,6 +171,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int? dco_decode_opt_box_autoadd_u_8(dynamic raw);
+
+  @protected
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  Person dco_decode_person(dynamic raw);
+
+  @protected
+  Persona dco_decode_persona(dynamic raw);
+
+  @protected
+  PersonaNick dco_decode_persona_nick(dynamic raw);
 
   @protected
   ProbeReport dco_decode_probe_report(dynamic raw);
@@ -230,12 +266,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DccOffer sse_decode_box_autoadd_dcc_offer(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
   LocalServerInfo sse_decode_box_autoadd_local_server_info(
     SseDeserializer deserializer,
   );
 
   @protected
   MemberView sse_decode_box_autoadd_member_view(SseDeserializer deserializer);
+
+  @protected
+  Person sse_decode_box_autoadd_person(SseDeserializer deserializer);
+
+  @protected
+  Persona sse_decode_box_autoadd_persona(SseDeserializer deserializer);
+
+  @protected
+  PersonaNick sse_decode_box_autoadd_persona_nick(SseDeserializer deserializer);
 
   @protected
   ProxyConfig sse_decode_box_autoadd_proxy_config(SseDeserializer deserializer);
@@ -290,6 +338,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MemberView> sse_decode_list_member_view(SseDeserializer deserializer);
 
   @protected
+  List<Person> sse_decode_list_person(SseDeserializer deserializer);
+
+  @protected
+  List<Persona> sse_decode_list_persona(SseDeserializer deserializer);
+
+  @protected
+  List<PersonaNick> sse_decode_list_persona_nick(SseDeserializer deserializer);
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
@@ -314,6 +371,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
   LocalServerInfo? sse_decode_opt_box_autoadd_local_server_info(
     SseDeserializer deserializer,
   );
@@ -336,6 +396,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer);
+
+  @protected
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  Person sse_decode_person(SseDeserializer deserializer);
+
+  @protected
+  Persona sse_decode_persona(SseDeserializer deserializer);
+
+  @protected
+  PersonaNick sse_decode_persona_nick(SseDeserializer deserializer);
 
   @protected
   ProbeReport sse_decode_probe_report(SseDeserializer deserializer);
@@ -437,6 +509,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_local_server_info(
     LocalServerInfo self,
     SseSerializer serializer,
@@ -445,6 +523,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_member_view(
     MemberView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_person(Person self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_persona(Persona self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_persona_nick(
+    PersonaNick self,
     SseSerializer serializer,
   );
 
@@ -515,6 +605,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_person(List<Person> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_persona(List<Persona> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_persona_nick(
+    List<PersonaNick> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
@@ -551,6 +653,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_local_server_info(
     LocalServerInfo? self,
     SseSerializer serializer,
@@ -576,6 +684,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_list_prim_u_8_strict(
+    Uint8List? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_person(Person self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_persona(Persona self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_persona_nick(PersonaNick self, SseSerializer serializer);
 
   @protected
   void sse_encode_probe_report(ProbeReport self, SseSerializer serializer);

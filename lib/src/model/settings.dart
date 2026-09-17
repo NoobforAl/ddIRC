@@ -56,6 +56,7 @@ class AppSettings extends ChangeNotifier {
   static const _kDensity = 'ui.density';
   static const _kThemeMode = 'ui.themeMode';
   static const _kColors = 'ui.mircColors';
+  static const _kNickColors = 'ui.nickColors';
   static const _kChatLog = 'log.chat';
   static const _kSaveMessages = 'db.messages';
   static const _kDebugLog = 'log.debug';
@@ -85,6 +86,7 @@ class AppSettings extends ChangeNotifier {
   bool _twentyFourHour = true;
   bool _showSystemMessages = true;
   bool _renderColors = true;
+  bool _colorNicks = true;
 
   /// Both off, and both stay off until asked for. A chat log is the most
   /// sensitive file the app can write, and a debug log is dead weight to
@@ -172,6 +174,7 @@ class AppSettings extends ChangeNotifier {
     _showSystemMessages =
         prefs.getBool(_kSystemMessages) ?? _showSystemMessages;
     _renderColors = prefs.getBool(_kColors) ?? _renderColors;
+    _colorNicks = prefs.getBool(_kNickColors) ?? _colorNicks;
     _saveChatLogs = prefs.getBool(_kChatLog) ?? _saveChatLogs;
     _saveMessages = prefs.getBool(_kSaveMessages) ?? _saveMessages;
     _saveDebugLogs = prefs.getBool(_kDebugLog) ?? _saveDebugLogs;
@@ -212,6 +215,7 @@ class AppSettings extends ChangeNotifier {
   bool get twentyFourHour => _twentyFourHour;
   bool get showSystemMessages => _showSystemMessages;
   bool get renderColors => _renderColors;
+  bool get colorNicks => _colorNicks;
   bool get saveChatLogs => _saveChatLogs;
   bool get saveMessages => _saveMessages;
   bool get saveDebugLogs => _saveDebugLogs;
@@ -237,6 +241,10 @@ class AppSettings extends ChangeNotifier {
 
   set renderColors(bool value) => _set(_kColors, value, () {
     _renderColors = value;
+  });
+
+  set colorNicks(bool value) => _set(_kNickColors, value, () {
+    _colorNicks = value;
   });
 
   set saveChatLogs(bool value) => _set(_kChatLog, value, () {
@@ -433,6 +441,47 @@ class AppSettings extends ChangeNotifier {
     final hour = t.hour % 12 == 0 ? 12 : t.hour % 12;
     return '$hour:$minute ${t.hour < 12 ? 'am' : 'pm'}';
   }
+
+  /// Name the day a line arrived on, for the rule between one day and the
+  /// next in a scrollback that spans more than one.
+  ///
+  /// Relative for the two days anyone thinks of relatively, and a full date
+  /// past that: "3 days ago" is a subtraction the reader has to do again
+  /// every time, and restored history can be weeks old. Not a setting â€”
+  /// there is only one sensible answer. Static, and given `now`, so it can be
+  /// tested against a fixed clock.
+  static String describeDay(DateTime at, {DateTime? now}) {
+    final today = _dateOnly(now ?? DateTime.now());
+    final day = _dateOnly(at);
+    final gap = today.difference(day).inDays;
+    if (gap == 0) return 'Today';
+    if (gap == 1) return 'Yesterday';
+    final month = _months[day.month - 1];
+    return day.year == today.year
+        ? '${day.day} $month'
+        : '${day.day} $month ${day.year}';
+  }
+
+  /// Whether two instants fall on the same calendar day, locally.
+  static bool sameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  static DateTime _dateOnly(DateTime t) => DateTime(t.year, t.month, t.day);
+
+  static const _months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
 }
 
 /// Where the settings file is, for showing in the settings screen.

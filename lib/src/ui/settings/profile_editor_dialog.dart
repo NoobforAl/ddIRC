@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../model/directory.dart';
 import '../../model/errors.dart';
 import '../../model/ircconfig.dart';
+import '../../model/personas.dart';
 import '../../model/profile.dart';
 import '../../model/proxy.dart';
 import '../../model/workspace.dart';
@@ -18,6 +19,7 @@ import '../motion.dart';
 import '../network_menu.dart';
 import '../touchable.dart';
 import 'network_picker_dialog.dart';
+import 'persona_picker.dart';
 import 'proxy_form.dart';
 import 'settings_chrome.dart';
 
@@ -157,6 +159,9 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       widget.profile?.proxyMode ?? ProxyMode.followDefault;
   late bool _autoConnect = widget.profile?.autoConnect ?? false;
 
+  /// The identity this network connects as, or null for the fixed nickname.
+  late String? _personaId = widget.profile?.personaId;
+
   bool get _isNew => widget.profile == null;
 
   @override
@@ -289,11 +294,16 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       errors[_Input.port] = 'Must be 1-65535.';
     }
 
+    // A fixed nickname is only required when the network is not hiding behind
+    // an identity; a persona brings its own random one, so the field is free
+    // to be empty.
     final nick = _text(_Input.nick);
-    if (nick.isEmpty) {
-      errors[_Input.nick] = 'Pick a nickname — it is how people address you.';
-    } else if (nick.contains(RegExp(r'\s'))) {
-      errors[_Input.nick] = 'No spaces in a nickname.';
+    if (_personaId == null) {
+      if (nick.isEmpty) {
+        errors[_Input.nick] = 'Pick a nickname — it is how people address you.';
+      } else if (nick.contains(RegExp(r'\s'))) {
+        errors[_Input.nick] = 'No spaces in a nickname.';
+      }
     }
 
     // Half a SASL credential authenticates nobody. On an existing profile a
@@ -324,6 +334,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       channels: _channelList(),
       saslAccount: _text(_Input.account).isEmpty ? null : _text(_Input.account),
       autoConnect: _autoConnect,
+      personaId: _personaId,
       proxyMode: _proxyMode,
       // Kept even when the mode is not Custom, so switching to the app
       // default and back does not mean typing the address again. Nothing
@@ -442,6 +453,19 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     final store = ProfileScope.of(context);
     final proxies = ProxyScope.of(context);
 
+    // Under an identity the probe dials with its remembered nick, or — for a
+    // network too new to have one — a throwaway that is never stored: a test
+    // is supposed to leave nothing behind, a random nick least of all.
+    final personaNick = _personaId == null
+        ? null
+        : (widget.profile != null
+                  ? Personas.instance.assignedNick(
+                      _personaId!,
+                      widget.profile!.id,
+                    )
+                  : null) ??
+              Personas.newNick();
+
     String note;
     var failed = true;
     try {
@@ -455,10 +479,11 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         // NickServ — sending a password to a service is a side effect, and a
         // test is supposed to leave nothing behind.
         proxy: await _proxyForTest(profile, store, proxies),
+        nicknameOverride: personaNick,
       );
       final report = await core.testConnection(config: config);
       failed = false;
-      note = _describe(report, profile);
+      note = _describe(report, personaNick ?? profile.nickname);
     } catch (error) {
       note = describeError(error);
     }
@@ -508,14 +533,21 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   }
 
   /// What a successful test found, in one sentence.
-  String _describe(rust.ProbeReport report, Profile profile) {
+  ///
+  /// [asked] is the nick the probe dialled with — the fixed one, or an
+  /// identity's random handle — so the "not the name you asked for" note reads
+  /// against what was actually attempted rather than the profile's own field,
+  /// which under an identity is blank.
+  String _describe(rust.ProbeReport report, String asked) {
+    final host = _text(_Input.host);
+    final port = _text(_Input.port);
     final seconds = (report.elapsedMs.toInt() / 1000).toStringAsFixed(1);
-    final where = '${profile.host}:${profile.port}';
-    final nick = report.nickname == profile.nickname
+    final where = '$host:$port';
+    final nick = report.nickname == asked
         ? 'as ${report.nickname}'
         // The server gave us a different name than the one asked for, which is
         // worth saying now rather than leaving to be noticed after connecting.
-        : 'as ${report.nickname} — not the ${profile.nickname} you asked for';
+        : 'as ${report.nickname} — not the $asked you asked for';
     final auth = switch (report.auth) {
       rust.AuthOutcome_Sasl() => ' SASL accepted.',
       rust.AuthOutcome_NickServFallback(:final reason) =>
@@ -668,14 +700,19 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         SettingsSection(
           label: 'Identity',
           children: [
-            _field(
-              _Input.nick,
-              'Nickname',
-              help:
-                  'How people address you on this network, and how you appear '
-                  'in every channel. No spaces. If it is already taken the '
-                  'server offers you the next one down — the connection test '
-                  'below says which name you actually got.',
+            PersonaPicker(
+              selected: _personaId,
+              networkId: widget.profile?.id,
+              onChanged: (id) => setState(() => _personaId = id),
+              fixedNickField: _field(
+                _Input.nick,
+                'Nickname',
+                help:
+                    'How people address you on this network, and how you '
+                    'appear in every channel. No spaces. If it is already '
+                    'taken the server offers you the next one down — the '
+                    'connection test below says which name you actually got.',
+              ),
             ),
           ],
         ),

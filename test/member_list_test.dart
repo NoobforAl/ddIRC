@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ddirc/src/rust/api/types.dart';
 import 'package:ddirc/src/theme.dart';
 import 'package:ddirc/src/ui/member_list.dart';
+import 'package:ddirc/src/ui/nick_color.dart';
 import 'package:ddirc/src/ui/touchable.dart';
 
 MemberView _member(String nick, {bool away = false}) =>
@@ -19,16 +20,40 @@ MemberView _member(String nick, {bool away = false}) =>
     // here sorts the way one off the wire does.
     MemberView(nick: nick, away: away, sortKey: 'ffff${nick.toLowerCase()}');
 
-Future<void> _pump(WidgetTester tester, List<String> nicks) {
+Future<void> _pump(
+  WidgetTester tester,
+  List<String> nicks, {
+  bool away = false,
+  bool colorNicks = true,
+  String? self,
+}) {
   return tester.pumpWidget(
     MaterialApp(
       theme: Tokens.themeFor(Tokens.dark),
       home: Scaffold(
-        body: MemberList(members: [for (final n in nicks) _member(n)]),
+        body: MemberList(
+          members: [for (final n in nicks) _member(n, away: away)],
+          colorNicks: colorNicks,
+          self: self,
+        ),
       ),
     ),
   );
 }
+
+/// The colour a nick is drawn in, read off the animated style that carries
+/// it rather than the bare [Text], which inherits.
+Color? _colorOf(WidgetTester tester, String nick) => tester
+    .widget<AnimatedDefaultTextStyle>(
+      find
+          .ancestor(
+            of: find.text(nick),
+            matching: find.byType(AnimatedDefaultTextStyle),
+          )
+          .first,
+    )
+    .style
+    .color;
 
 /// How strongly the row for [nick] is drawn, where no [Opacity] layer at all
 /// counts as full strength.
@@ -142,5 +167,30 @@ void main() {
           .first,
     );
     expect(touchable.onTap, isNull);
+  });
+
+  testWidgets('each nick wears its own colour, unless away or switched off', (
+    tester,
+  ) async {
+    await _pump(tester, ['ada', 'grace']);
+    expect(_colorOf(tester, 'ada'), NickPalette.of('ada', Tokens.dark));
+    expect(_colorOf(tester, 'grace'), NickPalette.of('grace', Tokens.dark));
+
+    // Someone who is not here has stepped out of the colour scheme too.
+    await _pump(tester, ['ada'], away: true);
+    await tester.pumpAndSettle();
+    expect(_colorOf(tester, 'ada'), Tokens.dark.faint);
+
+    await _pump(tester, ['ada'], colorNicks: false);
+    await tester.pumpAndSettle();
+    expect(_colorOf(tester, 'ada'), Tokens.dark.text);
+  });
+
+  testWidgets('your own nick keeps the accent, whatever the case', (
+    tester,
+  ) async {
+    await _pump(tester, ['Ada', 'grace'], self: 'ada');
+    expect(_colorOf(tester, 'Ada'), Tokens.dark.accent);
+    expect(_colorOf(tester, 'grace'), NickPalette.of('grace', Tokens.dark));
   });
 }

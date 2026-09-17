@@ -110,6 +110,7 @@ class Tokens extends ThemeExtension<Tokens> {
     required this.onAccent,
     required this.mention,
     required this.mentionRule,
+    required this.own,
     required this.ok,
     required this.warn,
     required this.bad,
@@ -145,6 +146,13 @@ class Tokens extends ThemeExtension<Tokens> {
   final Color mention;
   final Color mentionRule;
 
+  /// The block behind the user's own messages. The same accent as [mention]
+  /// at a touch more weight, and told apart by shape rather than hue: a
+  /// mention is a full-width wash with a rule on its leading edge, an own
+  /// message a rounded block sitting on the right. The two never share a
+  /// line, so the colours can afford to be cousins.
+  final Color own;
+
   final Color ok;
   final Color warn;
   final Color bad;
@@ -164,6 +172,7 @@ class Tokens extends ThemeExtension<Tokens> {
     onAccent: Color(0xFF101012),
     mention: Color(0x1A7FB3FF),
     mentionRule: Color(0xFF7FB3FF),
+    own: Color(0x1F7FB3FF),
     ok: Color(0xFF6FCF8B),
     warn: Color(0xFFE0B341),
     bad: Color(0xFFE06C6C),
@@ -186,6 +195,7 @@ class Tokens extends ThemeExtension<Tokens> {
     onAccent: Color(0xFFFFFFFF),
     mention: Color(0x142A62C4),
     mentionRule: Color(0xFF2A62C4),
+    own: Color(0x162A62C4),
     ok: Color(0xFF1E7F45),
     warn: Color(0xFF8A6100),
     bad: Color(0xFFC0392F),
@@ -257,6 +267,7 @@ class Tokens extends ThemeExtension<Tokens> {
     Color? onAccent,
     Color? mention,
     Color? mentionRule,
+    Color? own,
     Color? ok,
     Color? warn,
     Color? bad,
@@ -275,6 +286,7 @@ class Tokens extends ThemeExtension<Tokens> {
       onAccent: onAccent ?? this.onAccent,
       mention: mention ?? this.mention,
       mentionRule: mentionRule ?? this.mentionRule,
+      own: own ?? this.own,
       ok: ok ?? this.ok,
       warn: warn ?? this.warn,
       bad: bad ?? this.bad,
@@ -300,6 +312,7 @@ class Tokens extends ThemeExtension<Tokens> {
       onAccent: Color.lerp(onAccent, other.onAccent, t)!,
       mention: Color.lerp(mention, other.mention, t)!,
       mentionRule: Color.lerp(mentionRule, other.mentionRule, t)!,
+      own: Color.lerp(own, other.own, t)!,
       ok: Color.lerp(ok, other.ok, t)!,
       warn: Color.lerp(warn, other.warn, t)!,
       bad: Color.lerp(bad, other.bad, t)!,
@@ -363,12 +376,16 @@ class MircPalette {
   }) {
     final color = _raw(index);
     if (color == null) return fallback;
-    if (_contrast(color, on) < 2.0) return fallback;
+    if (contrast(color, on) < 2.0) return fallback;
     return color;
   }
 
   /// WCAG relative-luminance contrast ratio.
-  static double _contrast(Color a, Color b) {
+  ///
+  /// Public because the nick palette is checked against the same bar, in a
+  /// test rather than at runtime: those colours are ours, so a bad one is a
+  /// bug to fix, not a value to nudge.
+  static double contrast(Color a, Color b) {
     final la = _luminance(a);
     final lb = _luminance(b);
     final (hi, lo) = la > lb ? (la, lb) : (lb, la);

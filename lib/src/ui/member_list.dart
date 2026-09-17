@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../model/people.dart';
 import '../rust/api/types.dart';
 import '../theme.dart';
+import 'avatar.dart';
+import 'menu.dart';
 import 'motion.dart';
+import 'nick_color.dart';
 import 'touchable.dart';
 
 /// Channel members, ordered by privilege then name (the core sorts them).
@@ -21,10 +25,29 @@ class MemberList extends StatefulWidget {
     required this.members,
     this.onClose,
     this.onOpenDirect,
+    this.colorNicks = true,
+    this.self,
+    this.profileId,
+    this.onEditPerson,
   });
 
   final List<MemberView> members;
   final VoidCallback? onClose;
+
+  /// Whether each nick wears its [NickPalette] colour. Passed in rather than
+  /// read from the settings scope so the list can stand on its own.
+  final bool colorNicks;
+
+  /// Our own nick, which keeps the accent here as it does on its messages.
+  final String? self;
+
+  /// Which network these people are on, for what the user has written about
+  /// them. Null draws everyone as the server names them.
+  final String? profileId;
+
+  /// Open what the user has written about one of them. Offered on the row's
+  /// context menu, so the tap stays what it was: a conversation.
+  final ValueChanged<String>? onEditPerson;
 
   /// Open a conversation with one of them.
   ///
@@ -142,6 +165,20 @@ class _MemberListState extends State<MemberList> {
                       key: ValueKey(members[i].nick),
                       member: members[i],
                       fresh: _fresh.contains(members[i].nick),
+                      colorNicks: widget.colorNicks,
+                      isSelf:
+                          widget.self != null &&
+                          members[i].nick.toLowerCase() ==
+                              widget.self!.toLowerCase(),
+                      card: widget.profileId == null
+                          ? null
+                          : People.instance.of(
+                              widget.profileId!,
+                              members[i].nick,
+                            ),
+                      onEdit: widget.onEditPerson == null
+                          ? null
+                          : () => widget.onEditPerson!(members[i].nick),
                       onTap: widget.onOpenDirect == null
                           ? null
                           : () => widget.onOpenDirect!(members[i].nick),
@@ -159,12 +196,46 @@ class _MemberRow extends StatelessWidget {
     super.key,
     required this.member,
     required this.fresh,
+    required this.colorNicks,
+    required this.isSelf,
+    this.card,
     this.onTap,
+    this.onEdit,
   });
 
   final MemberView member;
   final bool fresh;
+  final bool colorNicks;
+  final bool isSelf;
+
+  /// What the user has written about this person, if anything.
+  final PersonCard? card;
   final VoidCallback? onTap;
+  final VoidCallback? onEdit;
+
+  Future<void> _menu(BuildContext context, Offset at) async {
+    final action = await showPointerMenu<String>(
+      context,
+      at: at,
+      items: [
+        if (onTap != null)
+          const PopupMenuItem(
+            value: 'message',
+            child: MenuRow(icon: Icons.chat_bubble_outline, label: 'Message'),
+          ),
+        const PopupMenuItem(
+          value: 'edit',
+          child: MenuRow(icon: Icons.edit_outlined, label: 'Edit person…'),
+        ),
+      ],
+    );
+    switch (action) {
+      case 'message':
+        onTap?.call();
+      case 'edit':
+        onEdit?.call();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -180,6 +251,7 @@ class _MemberRow extends StatelessWidget {
       play: fresh,
       child: Touchable(
         onTap: onTap,
+        onContextMenu: onEdit == null ? null : (at) => _menu(context, at),
         builder: (context, touch) => Container(
           // The row's own press and hover wash, as everywhere else — the theme
           // removes Material's ripple, so feedback has to be painted here.
@@ -202,17 +274,50 @@ class _MemberRow extends StatelessWidget {
                   child: Text(prefix ?? ''),
                 ),
               ),
+              if (card?.hasPicture ?? false) ...[
+                Avatar(card: card, size: 18),
+                const SizedBox(width: 7),
+              ],
               Expanded(
-                child: AnimatedDefaultTextStyle(
-                  duration: fade,
-                  curve: Motion.curve,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: away ? t.faint : t.text,
-                    fontSize: 13,
-                    fontStyle: away ? FontStyle.italic : FontStyle.normal,
-                  ),
-                  child: Text(member.nick),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedDefaultTextStyle(
+                      duration: fade,
+                      curve: Motion.curve,
+                      overflow: TextOverflow.ellipsis,
+                      // Away dims to the same grey for everyone: someone who
+                      // is not here has stepped out of the colour scheme too.
+                      // A colour the user chose comes before the one the nick
+                      // hashes to; nothing comes before away.
+                      style: TextStyle(
+                        color: away
+                            ? t.faint
+                            : isSelf
+                            ? t.accent
+                            : card?.color ??
+                                  (colorNicks
+                                      ? NickPalette.of(member.nick, t)
+                                      : t.text),
+                        fontSize: 13,
+                        fontStyle: away ? FontStyle.italic : FontStyle.normal,
+                      ),
+                      // The name the user gave them, if any. The nick itself
+                      // is one hover away, and always in the dialog.
+                      child: Tooltip(
+                        message: card?.alias == null ? '' : member.nick,
+                        child: Text(card?.alias ?? member.nick),
+                      ),
+                    ),
+                    if (card?.note case final note?)
+                      Text(
+                        note,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: t.faint, fontSize: 11),
+                      ),
+                  ],
                 ),
               ),
             ],

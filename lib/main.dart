@@ -11,6 +11,8 @@ import 'package:flutter/material.dart';
 
 import 'src/model/app_lock.dart';
 import 'src/model/history.dart';
+import 'src/model/people.dart';
+import 'src/model/personas.dart';
 import 'src/model/local_server.dart';
 import 'src/model/log.dart';
 import 'src/model/profile.dart';
@@ -92,9 +94,16 @@ void _followLogSettings(AppSettings settings) {
 /// Rust yet at that point. Everything else about it is the same: a listener,
 /// not a read at startup, so turning history off stops it immediately.
 void _followHistorySetting(AppSettings settings) {
-  void apply() => unawaited(
-    MessageHistory.instance.configure(enabled: settings.saveMessages),
-  );
+  Future<void> follow() async {
+    await MessageHistory.instance.configure(enabled: settings.saveMessages);
+    // What the user wrote about people, and the identities they connect
+    // under, ride on the same switch: once the database is open, what memory
+    // holds and what disk holds are reconciled for both.
+    await People.instance.sync();
+    await Personas.instance.sync();
+  }
+
+  void apply() => unawaited(follow());
 
   apply();
   settings.addListener(apply);

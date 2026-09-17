@@ -28,6 +28,7 @@ class Profile {
     this.proxyMode = ProxyMode.followDefault,
     this.proxy,
     this.autoConnect = false,
+    this.personaId,
   });
 
   /// Stable across renames, because it keys both the stored password and the
@@ -59,6 +60,19 @@ class Profile {
   /// connections nobody asked for is the kind of default that has to be opted
   /// into rather than out of.
   final bool autoConnect;
+
+  /// Which of the user's identities this network connects as, or null to use
+  /// the fixed [nickname] typed here.
+  ///
+  /// When set, the app connects under a random per-network nick belonging to
+  /// that identity rather than [nickname] — the whole point being that the
+  /// same person looks like nobody in particular, and like nobody they are on
+  /// any other network. Resolved at connect time, because the nick lives in
+  /// the history store and only exists once that is open. See `Personas`.
+  final String? personaId;
+
+  /// Whether this network hides behind one of the user's identities.
+  bool get usesPersona => personaId != null;
 
   bool get usesSasl => (saslAccount ?? '').isNotEmpty;
 
@@ -94,6 +108,7 @@ class Profile {
     ProxyMode? proxyMode,
     ProxyEndpoint? proxy,
     bool? autoConnect,
+    Object? personaId = _keep,
   }) {
     return Profile(
       id: id,
@@ -107,8 +122,18 @@ class Profile {
       proxyMode: proxyMode ?? this.proxyMode,
       proxy: proxy ?? this.proxy,
       autoConnect: autoConnect ?? this.autoConnect,
+      // A sentinel, not `?? this`, because clearing the identity — going back
+      // to a fixed nick — means passing null, and a plain `??` could never
+      // tell that apart from "leave it alone".
+      personaId: identical(personaId, _keep)
+          ? this.personaId
+          : personaId as String?,
     );
   }
+
+  /// The "leave this field as it is" marker for [copyWith], for the one field
+  /// whose null is a real value.
+  static const _keep = Object();
 
   /// Build the config the core connects with.
   ///
@@ -123,12 +148,20 @@ class Profile {
     String? serverPassword,
     String? nickservPassword,
     ProxyConfig? proxy,
+    String? nicknameOverride,
   }) {
-    final fallback = altNicks.isEmpty ? ['${nickname}_'] : altNicks;
+    // An identity's nick replaces the one typed here, and takes its own
+    // fallbacks with it: the configured [altNicks] are the user's other real
+    // handles, and reaching for one of those the moment the random nick is
+    // taken would undo the anonymity the identity is for.
+    final nick = nicknameOverride ?? nickname;
+    final fallback = nicknameOverride != null
+        ? ['${nick}_', '${nick}1']
+        : (altNicks.isEmpty ? ['${nickname}_'] : altNicks);
     return ServerConfig(
       host: host,
       port: port,
-      nickname: nickname,
+      nickname: nick,
       altNicks: fallback,
       channels: channels,
       saslAccount: (saslAccount ?? '').isEmpty ? null : saslAccount,
@@ -153,6 +186,7 @@ class Profile {
     'proxyMode': proxyMode.name,
     'proxy': proxy?.toJson(),
     'autoConnect': autoConnect,
+    'personaId': personaId,
   };
 
   static Profile? fromJson(Map<String, Object?> json) {
@@ -183,6 +217,11 @@ class Profile {
       // Anything but a stored `true` is false, so a profile from before this
       // existed - or one with a corrupted value - stays off.
       autoConnect: json['autoConnect'] == true,
+      // Absent on every network saved before identities existed, which reads
+      // back as null: a fixed nick, exactly as it was.
+      personaId: json['personaId'] is String
+          ? json['personaId']! as String
+          : null,
     );
   }
 

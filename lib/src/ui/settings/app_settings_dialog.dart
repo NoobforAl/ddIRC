@@ -381,6 +381,14 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
             value: settings.renderColors,
             onChanged: (v) => settings.renderColors = v,
           ),
+          SettingsSwitch(
+            label: 'Colour nicknames',
+            description:
+                'Give each person a stable colour, in the member list and '
+                'on their messages. Yours stays the accent.',
+            value: settings.colorNicks,
+            onChanged: (v) => settings.colorNicks = v,
+          ),
         ],
       ),
     ];

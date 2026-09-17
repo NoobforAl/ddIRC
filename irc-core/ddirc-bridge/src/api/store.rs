@@ -159,3 +159,158 @@ pub fn store_clear() -> Result<(), String> {
 pub fn store_forget(profile_id: String, conversation: String) -> Result<(), String> {
     store::forget(&profile_id, &conversation).map_err(|e| e.to_string())
 }
+
+/// What the user has written down about one person on one network: a name
+/// to show instead of the nick, a note, a colour, a picture.
+///
+/// The user's annotation, never anything the person sent. Kept in the same
+/// database as history and behind the same switch, because it is still a
+/// record of who they talk to. `nick` is folded to lower case by the caller.
+pub struct Person {
+    pub profile_id: String,
+    pub nick: String,
+    pub alias: Option<String>,
+    pub note: Option<String>,
+    /// ARGB, as `Color.value` on the Dart side.
+    pub color: Option<i64>,
+    /// A small PNG, downscaled before it gets here.
+    pub avatar: Option<Vec<u8>>,
+    /// Seed for a generated pixel avatar, when no picture was chosen.
+    pub pixel_seed: Option<i64>,
+}
+
+impl From<store::Person> for Person {
+    fn from(p: store::Person) -> Self {
+        Person {
+            profile_id: p.profile_id,
+            nick: p.nick,
+            alias: p.alias,
+            note: p.note,
+            color: p.color,
+            avatar: p.avatar,
+            pixel_seed: p.pixel_seed,
+        }
+    }
+}
+
+impl From<Person> for store::Person {
+    fn from(p: Person) -> Self {
+        store::Person {
+            profile_id: p.profile_id,
+            nick: p.nick,
+            alias: p.alias,
+            note: p.note,
+            color: p.color,
+            avatar: p.avatar,
+            pixel_seed: p.pixel_seed,
+        }
+    }
+}
+
+/// Everyone the user has annotated, on every network.
+pub fn store_people() -> Result<Vec<Person>, String> {
+    store::people()
+        .map(|people| people.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Write what is known about one person, replacing what was there. A person
+/// with every field cleared loses their row.
+pub fn store_set_person(person: Person) -> Result<(), String> {
+    store::set_person(&person.into()).map_err(|e| e.to_string())
+}
+
+/// Forget everyone on one network — for when the network itself is forgotten.
+pub fn store_forget_people(profile_id: String) -> Result<(), String> {
+    store::forget_people(&profile_id).map_err(|e| e.to_string())
+}
+
+/// One of the user's own identities: a private label a network never sees.
+///
+/// The nick a persona actually connects under is per network and lives in
+/// [`PersonaNick`], because one identity wears a different, unlinkable handle
+/// on each server it touches.
+pub struct Persona {
+    pub id: String,
+    pub label: String,
+}
+
+/// The nick one persona wears on one saved network, generated once and kept.
+pub struct PersonaNick {
+    pub persona_id: String,
+    pub network_id: String,
+    pub nick: String,
+}
+
+impl From<store::Persona> for Persona {
+    fn from(p: store::Persona) -> Self {
+        Persona {
+            id: p.id,
+            label: p.label,
+        }
+    }
+}
+
+impl From<Persona> for store::Persona {
+    fn from(p: Persona) -> Self {
+        store::Persona {
+            id: p.id,
+            label: p.label,
+        }
+    }
+}
+
+impl From<store::PersonaNick> for PersonaNick {
+    fn from(n: store::PersonaNick) -> Self {
+        PersonaNick {
+            persona_id: n.persona_id,
+            network_id: n.network_id,
+            nick: n.nick,
+        }
+    }
+}
+
+impl From<PersonaNick> for store::PersonaNick {
+    fn from(n: PersonaNick) -> Self {
+        store::PersonaNick {
+            persona_id: n.persona_id,
+            network_id: n.network_id,
+            nick: n.nick,
+        }
+    }
+}
+
+/// Every identity the user has made.
+pub fn store_personas() -> Result<Vec<Persona>, String> {
+    store::personas()
+        .map(|list| list.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Create or rename an identity.
+pub fn store_set_persona(persona: Persona) -> Result<(), String> {
+    store::set_persona(&persona.into()).map_err(|e| e.to_string())
+}
+
+/// Forget an identity, and every remembered nick that was hers.
+pub fn store_forget_persona(id: String) -> Result<(), String> {
+    store::forget_persona(&id).map_err(|e| e.to_string())
+}
+
+/// Every remembered (persona, network) → nick, for the app to hold in memory.
+pub fn store_persona_nicks() -> Result<Vec<PersonaNick>, String> {
+    store::persona_nicks()
+        .map(|list| list.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Remember the nick a persona wears on a network, replacing any earlier one.
+pub fn store_set_persona_nick(nick: PersonaNick) -> Result<(), String> {
+    store::set_persona_nick(&nick.into()).map_err(|e| e.to_string())
+}
+
+/// Forget every persona's nick on one network — for when the network itself
+/// is forgotten, alongside [`store_forget_people`].
+pub fn store_forget_persona_nicks(network_id: String) -> Result<(), String> {
+    store::forget_persona_nicks_for_network(&network_id).map_err(|e| e.to_string())
+}

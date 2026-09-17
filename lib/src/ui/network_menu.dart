@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../model/people.dart';
+import '../model/personas.dart';
 import '../model/profile.dart';
 import '../model/settings.dart';
 import '../model/workspace.dart';
@@ -61,6 +63,10 @@ Future<void> forgetNetwork(BuildContext context, Profile profile) async {
 
   workspace.forget(profile.id);
   await settings.forgetProfile(profile.id);
+  await People.instance.forgetProfile(profile.id);
+  // The identities stay; only the throwaway nicks they wore on this one
+  // network go with it.
+  await Personas.instance.forgetNetwork(profile.id);
   await store.remove(profile.id);
 }
 

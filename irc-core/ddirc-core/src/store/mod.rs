@@ -32,9 +32,31 @@
 //! history is styled exactly as it was and there is no second representation
 //! of a message to keep in step with the first.
 //!
+//! The one other thing kept is what the user has written down *about* people:
+//! a name to show instead of a nick, a note, a colour, a picture. That is the
+//! user's own annotation rather than anyone's speech, but it is still a record
+//! of who they talk to, so it rides on the same switch and lives in the same
+//! file. See [`People`](people).
+//!
+//! Alongside that are the user's own *identities*: a private label per
+//! identity, and the throwaway nick each one wears on each network. A map of
+//! which random handles all belong to one person is exactly what wants keeping
+//! private, so it lives here too, behind the same switch. See [`Persona`].
+//!
 //! Nothing else is kept. No passwords, no capability negotiation, no
 //! connection log: this is a record of conversations, and everything about how
 //! the connection was made belongs in the debug log if it belongs anywhere.
+//!
+//! # Where the file is, and who can read it
+//!
+//! The caller resolves the path to the app's own per-user data directory —
+//! `%APPDATA%` on Windows, `~/Library/Application Support` on macOS,
+//! `~/.local/share` on Linux, the app's private files dir on Android — which
+//! every platform already keeps out of other users' reach. On the Unix-likes
+//! that is a convention of the directory rather than a property of the file,
+//! so [`open`] also narrows the file itself to its owner: a database created
+//! under a permissive umask should not be readable by every account on the
+//! machine just because the folder above it happened to be.
 
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -47,7 +69,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 /// is what SQLite provides the pragma for. A file from a *newer* build is
 /// refused rather than opened: silently reading a schema we do not know would
 /// mean losing whatever the newer columns held the moment we wrote to it.
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 3;
 
 /// How many lines the store keeps in total, across every network.
 ///
@@ -151,6 +173,7 @@ pub fn open(path: &str) -> Result<(), StoreError> {
     }
 
     let connection = Connection::open(path)?;
+    restrict_to_owner(path);
     // WAL, because the write pattern is an append every couple of seconds and
     // the read pattern is a scrollback query at the same time; the rollback
     // journal would have those two waiting on each other.
@@ -170,6 +193,35 @@ pub fn open(path: &str) -> Result<(), StoreError> {
 
     *store().lock().unwrap_or_else(|e| e.into_inner()) = Some(connection);
     Ok(())
+}
+
+/// Owner-only permissions on the database and its journal, where the
+/// platform has such a thing.
+///
+/// The WAL and shared-memory files sit beside the database with the same
+/// name and a suffix; they carry the same content and get the same treatment.
+/// Best effort: a filesystem that cannot do this is not a reason to refuse
+/// to open the store, only to leave it as the directory's own permissions put
+/// it. On Windows the per-user profile directory is already access-controlled
+/// and there is nothing to add.
+fn restrict_to_owner(path: &str) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for suffix in ["", "-wal", "-shm"] {
+            let file = format!("{path}{suffix}");
+            if Path::new(&file).exists() {
+                let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        if let Some(parent) = Path::new(path).parent() {
+            let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
 }
 
 /// Close the store. Idempotent, so the UI never has to track whether it is open.
@@ -195,8 +247,24 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
         return Ok(());
     }
 
-    // One statement per version as the schema grows. At version 1 there is
-    // nothing to migrate *from*, so this is the create.
+    // A ladder: each step brings a file from the version below it, and a file
+    // at zero climbs every rung. `IF NOT EXISTS` throughout, so a step that
+    // was applied but whose version bump never landed is harmless to repeat.
+    if version < 1 {
+        migrate_to_1(connection)?;
+    }
+    if version < 2 {
+        migrate_to_2(connection)?;
+    }
+    if version < 3 {
+        migrate_to_3(connection)?;
+    }
+    connection.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
+    Ok(())
+}
+
+/// Version 1: the lines. Nothing to migrate *from*, so this is the create.
+fn migrate_to_1(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS lines (
              id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,7 +284,57 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
          CREATE INDEX IF NOT EXISTS lines_by_conversation
              ON lines (profile_id, conversation, at_ms, id);",
     )?;
-    connection.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
+    Ok(())
+}
+
+/// Version 2: what the user has written down about people.
+///
+/// One row per (network, nick), the nick folded to lower case by the caller
+/// so `Alice` and `alice` are one person here as they are on IRC. Every
+/// column but the key is optional: a row exists because at least one of them
+/// is set, and [`set_person`] deletes it when the last one is cleared.
+fn migrate_to_2(connection: &Connection) -> Result<(), StoreError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS people (
+             profile_id  TEXT NOT NULL,
+             nick        TEXT NOT NULL,
+             alias       TEXT,
+             note        TEXT,
+             color       INTEGER,
+             avatar      BLOB,
+             pixel_seed  INTEGER,
+             PRIMARY KEY (profile_id, nick)
+         );",
+    )?;
+    Ok(())
+}
+
+/// Version 3: the user's identities, and the nick each one wears on each
+/// network.
+///
+/// A *persona* is a name the user keeps for their own reference — "Work",
+/// say — that a network never sees. What a network sees is a nick generated
+/// once and remembered here, in `persona_nicks`, keyed by the persona and the
+/// saved network it connects through: the same handle every time on that one
+/// server, and nothing tying it to the same person's handle anywhere else.
+///
+/// Kept here rather than beside the saved networks (which live in plain
+/// preferences) precisely because a map of "these random nicks are all the
+/// same person" is the thing the feature exists to keep private. It rides on
+/// the history switch for the same reason [`people`](self) does.
+fn migrate_to_3(connection: &Connection) -> Result<(), StoreError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS personas (
+             id     TEXT PRIMARY KEY,
+             label  TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS persona_nicks (
+             persona_id  TEXT NOT NULL,
+             network_id  TEXT NOT NULL,
+             nick        TEXT NOT NULL,
+             PRIMARY KEY (persona_id, network_id)
+         );",
+    )?;
     Ok(())
 }
 
@@ -366,6 +484,223 @@ pub fn forget(profile_id: &str, conversation: &str) -> Result<(), StoreError> {
             params![profile_id, conversation],
         )?;
         connection.execute_batch("VACUUM")?;
+        Ok(())
+    })
+}
+
+/// What the user has written down about one person on one network.
+///
+/// The user's annotation, not the person's: nothing here came over the wire.
+/// `nick` is stored folded to lower case, because that is how IRC compares
+/// nicks and a note on `Alice` is a note on `alice`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Person {
+    pub profile_id: String,
+    pub nick: String,
+    /// Shown in place of the nick.
+    pub alias: Option<String>,
+    pub note: Option<String>,
+    /// An ARGB colour to use instead of the one the nick hashes to.
+    pub color: Option<i64>,
+    /// A small PNG, already downscaled by the caller.
+    pub avatar: Option<Vec<u8>>,
+    /// The seed for a generated pixel avatar, when no picture was chosen.
+    pub pixel_seed: Option<i64>,
+}
+
+impl Person {
+    /// Whether there is anything here worth a row.
+    pub fn is_blank(&self) -> bool {
+        self.alias.is_none()
+            && self.note.is_none()
+            && self.color.is_none()
+            && self.avatar.is_none()
+            && self.pixel_seed.is_none()
+    }
+}
+
+/// Everyone the user has written something about, on every network.
+///
+/// All at once rather than per network, because the whole table is small
+/// — a row per person the user cared to annotate — and the UI wants it in
+/// memory for every render of every nick anyway.
+pub fn people() -> Result<Vec<Person>, StoreError> {
+    with(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT profile_id, nick, alias, note, color, avatar, pixel_seed
+             FROM people ORDER BY profile_id, nick",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(Person {
+                profile_id: row.get(0)?,
+                nick: row.get(1)?,
+                alias: row.get(2)?,
+                note: row.get(3)?,
+                color: row.get(4)?,
+                avatar: row.get(5)?,
+                pixel_seed: row.get(6)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+/// Write what is known about one person, replacing what was there.
+///
+/// A person with nothing left to say about them loses their row rather than
+/// keeping an empty one: the table is a list of people the user annotated,
+/// and clearing every field is un-annotating them.
+pub fn set_person(person: &Person) -> Result<(), StoreError> {
+    if person.is_blank() {
+        return forget_person(&person.profile_id, &person.nick);
+    }
+    with(|connection| {
+        connection.execute(
+            "INSERT INTO people (profile_id, nick, alias, note, color, avatar, pixel_seed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (profile_id, nick) DO UPDATE SET
+                 alias = excluded.alias,
+                 note = excluded.note,
+                 color = excluded.color,
+                 avatar = excluded.avatar,
+                 pixel_seed = excluded.pixel_seed",
+            params![
+                person.profile_id,
+                person.nick,
+                person.alias,
+                person.note,
+                person.color,
+                person.avatar,
+                person.pixel_seed,
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+/// Forget one person on one network.
+pub fn forget_person(profile_id: &str, nick: &str) -> Result<(), StoreError> {
+    with(|connection| {
+        connection.execute(
+            "DELETE FROM people WHERE profile_id = ?1 AND nick = ?2",
+            params![profile_id, nick],
+        )?;
+        Ok(())
+    })
+}
+
+/// Forget everyone on one network — for when the network itself is forgotten.
+pub fn forget_people(profile_id: &str) -> Result<(), StoreError> {
+    with(|connection| {
+        connection.execute(
+            "DELETE FROM people WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// One of the user's identities: a private label, and nothing a network sees.
+///
+/// The nick a persona actually wears on a given network is not here — that is
+/// per network, and lives in [`PersonaNick`] — because one persona can connect
+/// through several networks and wears a different, unlinkable handle on each.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Persona {
+    pub id: String,
+    pub label: String,
+}
+
+/// The nick one persona wears on one saved network, generated once and kept.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PersonaNick {
+    pub persona_id: String,
+    pub network_id: String,
+    pub nick: String,
+}
+
+/// Every identity the user has made.
+pub fn personas() -> Result<Vec<Persona>, StoreError> {
+    with(|connection| {
+        let mut statement =
+            connection.prepare("SELECT id, label FROM personas ORDER BY label, id")?;
+        let rows = statement.query_map([], |row| {
+            Ok(Persona {
+                id: row.get(0)?,
+                label: row.get(1)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+/// Create or rename an identity.
+pub fn set_persona(persona: &Persona) -> Result<(), StoreError> {
+    with(|connection| {
+        connection.execute(
+            "INSERT INTO personas (id, label) VALUES (?1, ?2)
+             ON CONFLICT (id) DO UPDATE SET label = excluded.label",
+            params![persona.id, persona.label],
+        )?;
+        Ok(())
+    })
+}
+
+/// Forget an identity, and every remembered nick that belonged to it.
+///
+/// Both in one transaction: a persona without its nicks, or nicks without
+/// their persona, is a half-deleted identity neither the app nor the user has
+/// a use for.
+pub fn forget_persona(id: &str) -> Result<(), StoreError> {
+    with(|connection| {
+        let transaction = connection.unchecked_transaction()?;
+        transaction.execute("DELETE FROM personas WHERE id = ?1", params![id])?;
+        transaction.execute(
+            "DELETE FROM persona_nicks WHERE persona_id = ?1",
+            params![id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    })
+}
+
+/// Every remembered (persona, network) → nick, for the app to hold in memory.
+pub fn persona_nicks() -> Result<Vec<PersonaNick>, StoreError> {
+    with(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT persona_id, network_id, nick FROM persona_nicks ORDER BY persona_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(PersonaNick {
+                persona_id: row.get(0)?,
+                network_id: row.get(1)?,
+                nick: row.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+/// Remember the nick a persona wears on a network, replacing any earlier one.
+pub fn set_persona_nick(nick: &PersonaNick) -> Result<(), StoreError> {
+    with(|connection| {
+        connection.execute(
+            "INSERT INTO persona_nicks (persona_id, network_id, nick) VALUES (?1, ?2, ?3)
+             ON CONFLICT (persona_id, network_id) DO UPDATE SET nick = excluded.nick",
+            params![nick.persona_id, nick.network_id, nick.nick],
+        )?;
+        Ok(())
+    })
+}
+
+/// Forget every persona's nick on one network — for when the network is
+/// forgotten, alongside [`forget_people`].
+pub fn forget_persona_nicks_for_network(network_id: &str) -> Result<(), StoreError> {
+    with(|connection| {
+        connection.execute(
+            "DELETE FROM persona_nicks WHERE network_id = ?1",
+            params![network_id],
+        )?;
         Ok(())
     })
 }
@@ -582,5 +917,202 @@ mod tests {
 
         close();
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    fn person(nick: &str) -> Person {
+        Person {
+            profile_id: "p1".to_owned(),
+            nick: nick.to_owned(),
+            ..Person::default()
+        }
+    }
+
+    #[test]
+    fn a_person_is_written_read_back_and_replaced() {
+        let _store = TempStore::new("people");
+        set_person(&Person {
+            alias: Some("Alice from ops".to_owned()),
+            note: Some("runs the mail server".to_owned()),
+            color: Some(0xFFE57373),
+            avatar: Some(vec![1, 2, 3]),
+            pixel_seed: None,
+            ..person("alice")
+        })
+        .unwrap();
+
+        let everyone = people().unwrap();
+        assert_eq!(everyone.len(), 1);
+        assert_eq!(everyone[0].alias.as_deref(), Some("Alice from ops"));
+        assert_eq!(everyone[0].avatar.as_deref(), Some(&[1, 2, 3][..]));
+
+        // A second write is a replacement, not a second row.
+        set_person(&Person {
+            pixel_seed: Some(42),
+            ..person("alice")
+        })
+        .unwrap();
+        let everyone = people().unwrap();
+        assert_eq!(everyone.len(), 1);
+        assert_eq!(everyone[0].alias, None, "replaced, not merged");
+        assert_eq!(everyone[0].pixel_seed, Some(42));
+    }
+
+    #[test]
+    fn clearing_every_field_removes_the_row() {
+        let _store = TempStore::new("people-blank");
+        set_person(&Person {
+            note: Some("x".to_owned()),
+            ..person("bob")
+        })
+        .unwrap();
+        set_person(&person("bob")).unwrap();
+        assert!(people().unwrap().is_empty());
+    }
+
+    #[test]
+    fn people_are_forgotten_one_at_a_time_or_a_network_at_a_time() {
+        let _store = TempStore::new("people-forget");
+        for nick in ["alice", "bob"] {
+            set_person(&Person {
+                note: Some("x".to_owned()),
+                ..person(nick)
+            })
+            .unwrap();
+        }
+        set_person(&Person {
+            profile_id: "p2".to_owned(),
+            note: Some("x".to_owned()),
+            ..person("carol")
+        })
+        .unwrap();
+
+        forget_person("p1", "alice").unwrap();
+        assert_eq!(people().unwrap().len(), 2);
+        forget_people("p1").unwrap();
+        let left = people().unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].profile_id, "p2");
+    }
+
+    #[test]
+    fn a_version_one_file_is_brought_up_to_date() {
+        let _guard = lock();
+        let directory = std::env::temp_dir().join("ddirc-store-v1");
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("history.db");
+
+        // A file as the previous release left it: lines only, version 1.
+        {
+            let connection = Connection::open(&path).unwrap();
+            migrate_to_1(&connection).unwrap();
+            connection.execute_batch("PRAGMA user_version = 1").unwrap();
+        }
+
+        open(path.to_str().unwrap()).unwrap();
+        // Both tables answer, and the version is now this build's.
+        assert!(people().unwrap().is_empty());
+        assert!(recent("p1", "#one", 1).unwrap().is_empty());
+        let version: i32 =
+            with(|c| Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        close();
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    #[test]
+    fn a_persona_is_created_renamed_and_forgotten() {
+        let _store = TempStore::new("personas");
+        set_persona(&Persona {
+            id: "id1".to_owned(),
+            label: "Work".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(personas().unwrap().len(), 1);
+        assert_eq!(personas().unwrap()[0].label, "Work");
+
+        // Same id, new label: a rename, not a second identity.
+        set_persona(&Persona {
+            id: "id1".to_owned(),
+            label: "Day job".to_owned(),
+        })
+        .unwrap();
+        let all = personas().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].label, "Day job");
+
+        forget_persona("id1").unwrap();
+        assert!(personas().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_personas_nick_is_remembered_per_network_and_replaced() {
+        let _store = TempStore::new("persona-nicks");
+        set_persona_nick(&PersonaNick {
+            persona_id: "id1".to_owned(),
+            network_id: "netA".to_owned(),
+            nick: "q7f3kx".to_owned(),
+        })
+        .unwrap();
+        set_persona_nick(&PersonaNick {
+            persona_id: "id1".to_owned(),
+            network_id: "netB".to_owned(),
+            nick: "m2p8wz".to_owned(),
+        })
+        .unwrap();
+
+        let mut nicks = persona_nicks().unwrap();
+        nicks.sort_by(|a, b| a.network_id.cmp(&b.network_id));
+        assert_eq!(nicks.len(), 2);
+        assert_eq!(nicks[0].nick, "q7f3kx");
+        assert_eq!(nicks[1].nick, "m2p8wz");
+
+        // Rewriting the same (persona, network) replaces rather than adds —
+        // the nick on a network is settled, one value.
+        set_persona_nick(&PersonaNick {
+            persona_id: "id1".to_owned(),
+            network_id: "netA".to_owned(),
+            nick: "renamed".to_owned(),
+        })
+        .unwrap();
+        let after = persona_nicks().unwrap();
+        assert_eq!(after.len(), 2);
+    }
+
+    #[test]
+    fn forgetting_a_persona_takes_its_nicks_and_leaves_the_rest() {
+        let _store = TempStore::new("persona-forget");
+        for (persona, network) in [("id1", "netA"), ("id1", "netB"), ("id2", "netA")] {
+            set_persona_nick(&PersonaNick {
+                persona_id: persona.to_owned(),
+                network_id: network.to_owned(),
+                nick: "x".to_owned(),
+            })
+            .unwrap();
+        }
+
+        forget_persona("id1").unwrap();
+        let left = persona_nicks().unwrap();
+        assert_eq!(left.len(), 1, "only id2's nick remains");
+        assert_eq!(left[0].persona_id, "id2");
+    }
+
+    #[test]
+    fn forgetting_a_network_takes_every_personas_nick_on_it() {
+        let _store = TempStore::new("persona-net-forget");
+        for (persona, network) in [("id1", "netA"), ("id2", "netA"), ("id1", "netB")] {
+            set_persona_nick(&PersonaNick {
+                persona_id: persona.to_owned(),
+                network_id: network.to_owned(),
+                nick: "x".to_owned(),
+            })
+            .unwrap();
+        }
+
+        forget_persona_nicks_for_network("netA").unwrap();
+        let left = persona_nicks().unwrap();
+        assert_eq!(left.len(), 1, "only the nick on netB survives");
+        assert_eq!(left[0].network_id, "netB");
     }
 }

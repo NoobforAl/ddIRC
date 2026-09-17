@@ -105,6 +105,19 @@ class Conversation {
   /// direct mention is worth interrupting for in a way ambient chatter is not.
   int unreadMentions = 0;
 
+  /// The first line to arrive since this conversation was last looked at.
+  ///
+  /// Where the scrollback opens, and where the "new messages" rule is drawn.
+  /// Deliberately not cleared by [markRead]: that runs the moment a tab is
+  /// picked, before anything is on screen, and the whole point is to still
+  /// know afterwards where reading should start. It is cleared when the user
+  /// *leaves* â€” see [SessionModel.select] â€” and the next arrival sets it again.
+  ///
+  /// The line itself rather than its index. The list is trimmed from the
+  /// front at the cap and history is inserted in front of it, both of which
+  /// move every index; the line stays the line.
+  ChatLine? unreadMarker;
+
   void add(
     ChatLine line, {
     required bool active,
@@ -117,6 +130,10 @@ class Conversation {
     // System noise (joins, parts) should not make a channel look like it has
     // something to say.
     if (active || line.isSystem) return;
+    // Before the mute check, not after. Muting is about not being
+    // interrupted, and has nothing to say about what has been read: a muted
+    // channel still opens at the first thing you have not seen.
+    unreadMarker ??= line;
     // A muted channel still collects its messages; it just stops asking to be
     // read. Nothing is ever dropped on the floor.
     switch (notify) {
@@ -753,6 +770,14 @@ class SessionModel extends ChangeNotifier {
       _tabs.add(key);
       _invalidateLists();
     }
+    // Leaving is what forgets where reading started, not arriving: the view
+    // for the conversation being left is still on screen at this point, and
+    // the one being opened needs the marker for as long as it is looked at.
+    // Re-selecting the open tab is not leaving it.
+    final previous = _active;
+    if (previous != null && previous != key) {
+      _conversations[previous]?.unreadMarker = null;
+    }
     _active = key;
     final conversation = _conversations[key]!;
     conversation.markRead();
@@ -772,6 +797,9 @@ class SessionModel extends ChangeNotifier {
     _invalidateLists();
 
     if (_active == key) {
+      // Closing the tab being read is leaving it. A background tab keeps its
+      // marker: opening it again from the list should still say where to start.
+      _conversations[key]!.unreadMarker = null;
       _active = _tabs.isEmpty ? null : _tabs[index.clamp(0, _tabs.length - 1)];
       if (_active != null) _conversations[_active]!.markRead();
     }

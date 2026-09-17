@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../model/session.dart';
 import '../model/settings.dart';
 import '../theme.dart';
+import 'count_badge.dart';
 import 'motion.dart';
 import 'touchable.dart';
 
@@ -288,40 +289,14 @@ class _ChannelRow extends StatelessWidget {
                       // would otherwise re-scale the badge on every message.
                       key: const ValueKey('badge'),
                       padding: const EdgeInsets.only(left: 8),
-                      child: _Badge(count: unread, highlighted: mentions > 0),
+                      child: CountBadge(
+                        count: unread,
+                        highlighted: mentions > 0,
+                      ),
                     )
                   : null,
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.count, required this.highlighted});
-
-  final int count;
-  final bool highlighted;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-      decoration: BoxDecoration(
-        // A mention is worth interrupting for; ambient chatter is not.
-        color: highlighted ? t.accent : t.badge,
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Text(
-        count > 99 ? '99+' : '$count',
-        style: TextStyle(
-          color: highlighted ? t.onAccent : t.text,
-          fontSize: 10.5,
-          fontWeight: FontWeight.w600,
-          fontFeatures: const [FontFeature.tabularFigures()],
         ),
       ),
     );
