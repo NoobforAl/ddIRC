@@ -80,7 +80,7 @@ COMPOSE ?= docker compose -f dev/compose.yaml
 PROFILES ?= --profile proxy --profile tor
 
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test test-integration build build-release installer check-iscc \
+.PHONY: help fix fmt lint test test-integration dev build build-release installer check-iscc \
         build-android build-android-release keystore keystore-secrets \
         build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
@@ -94,6 +94,7 @@ help:
 	@echo "  make lint     analyze Dart, clippy Rust (warnings are errors)"
 	@echo "  make test     run the Dart and Rust test suites (hermetic)"
 	@echo "  make test-integration  end-to-end, needs make dev-server"
+	@echo "  make dev      run the app on Windows with hot reload (r) and its log"
 	@echo "  make build    debug build for Windows"
 	@echo "  make build-release     release build for Windows"
 	@echo "  make installer         wrap it in a per-user .exe (needs Inno Setup)"
@@ -156,6 +157,27 @@ test:
 # machines with no Docker.
 test-integration:
 	$(CARGO) test $(MANIFEST) -p ddirc-core --test dev_server -- --ignored
+
+## The app, in a developer's hands: built if needed, launched, and left
+## attached to this terminal.
+#
+# `flutter run` rather than starting the built exe, because the terminal is
+# the point. Every debug log line the app writes lands here as it happens, `r`
+# hot-reloads the Dart side without losing the open connections, `R` restarts
+# it, and `q` quits. Rust changes still need a restart: the core is compiled
+# in, and hot reload does not reach it.
+#
+# Phony above for a reason that is not the usual one: `dev/` is a directory in
+# this repo, and without it Make would look at that, find it up to date, and
+# report "Nothing to be done" instead of running anything.
+#
+# Windows by default, since that is where this Makefile runs; the other hosts
+# are a device id away:
+#
+#     make dev DEVICE=linux
+DEVICE ?= windows
+dev:
+	$(FLUTTER) run -d $(DEVICE)
 
 build:
 	$(FLUTTER) build windows --debug
