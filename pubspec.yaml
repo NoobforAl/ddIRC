@@ -41,7 +41,7 @@ dependencies:
 
   # First-party, and the only thing settings need: a small key/value store on
   # every platform we target. Pinned like every other dependency.
-  shared_preferences: 2.5.3
+  shared_preferences: 2.5.5
 
   # Hides the native title bar so the app can draw its own window controls.
   # Pinned like every other dependency.
@@ -67,7 +67,7 @@ dependencies:
 
   # Profile passwords: Android Keystore, and DPAPI on Windows. Never
   # shared_preferences. Pinned like every other dependency.
-  flutter_secure_storage: 11.0.0
+  flutter_secure_storage: 11.2.0
 
   # Biometric/PIN app lock — Android Keystore biometrics, Face/Touch ID,
   # Windows Hello. Federated: pulls in local_auth_android, local_auth_darwin
@@ -86,7 +86,7 @@ dependencies:
   # Where log files may be written. Every platform answers this differently and
   # two of them (Android, iOS) can only be asked at runtime, so there is no
   # honest way to hardcode it. First-party. Pinned like every other dependency.
-  path_provider: 2.1.5
+  path_provider: 2.1.6
 
   # Parses a `.irc` network config on import (and whatever a scanned QR code
   # decodes to). Already pulled in transitively by our own tooling, so this
@@ -94,14 +94,14 @@ dependencies:
   # tree. Writing a `.irc` file is a small, fixed schema and does not need a
   # writer package — see `lib/src/model/ircconfig.dart`. Pinned like every
   # other dependency.
-  yaml: 3.1.3
+  yaml: 3.1.4
 
   # Reads a QR code through the camera to import a `.irc` config without
   # typing it in. Owns the Android CAMERA runtime-permission request itself,
   # unlike the notification/background-service permissions this app asks for
   # by hand — see `lib/src/ui/settings/qr_scan_dialog.dart`. Pinned like every
   # other dependency.
-  mobile_scanner: 7.4.0
+  mobile_scanner: 7.4.2
 
 dev_dependencies:
   flutter_test:

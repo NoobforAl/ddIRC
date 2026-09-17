@@ -54,15 +54,17 @@ tokio-rustls = { version = "0.26" }
 rcgen = "0.14"
 # Tor, embedded. The version is pinned to a minor because arti's own crates
 # move together and mixing them is not supported.
-arti-client = { version = "0.45.0", default-features = false, features = [
+#
+# `flowctl-cc` (congestion control) was a feature flag through 0.45; 0.46
+# stabilised it and dropped the flag, so it is on now without being named.
+arti-client = { version = "0.46.0", default-features = false, features = [
     "tokio",
     "rustls",
     "static-sqlite",
     "compression",
-    "flowctl-cc",
     "onion-service-client",
 ] }
-tor-rtcompat = { version = "0.45.0", default-features = false, features = ["tokio", "rustls"] }
+tor-rtcompat = { version = "0.46.0", default-features = false, features = ["tokio", "rustls"] }
 tracing = "0.1"
 # The message store, when the user opts into one.
 #
@@ -79,7 +81,10 @@ tracing = "0.1"
 # set we do not use); `backup`, `serialize` and the rest stay off deliberately —
 # a message log needs INSERT, SELECT and DELETE, and nothing here should be
 # able to attach a second database or load an extension.
-rusqlite = { version = "0.37", features = ["bundled"] }
+# Held to 0.39 rather than the latest 0.40: embedded Tor's `tor-dirmgr` also
+# links SQLite through rusqlite and caps it below 0.40, and only one crate in
+# the graph may link `sqlite3`. Bump this in step with arti, not ahead of it.
+rusqlite = { version = "0.39", features = ["bundled"] }
 flutter_rust_bridge = "=2.13.0"
 zeroize = { version = "1", features = ["derive"] }
 
