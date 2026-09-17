@@ -374,6 +374,80 @@ pub fn chain(error: &dyn std::error::Error) -> String {
     parts.join(": ")
 }
 
+/// Describe a server's `ERROR` line, sent as it closes the connection.
+///
+/// Every major ircd wraps the actual reason in boilerplate about the link —
+/// solanum, and so hackint and Libera, send
+///
+/// ```text
+/// ERROR :Closing Link: 203.0.113.7 (You need to identify via SASL to use this server.)
+/// ```
+///
+/// and InspIRCd sends `Closing link: (user@host) [reason]`. The address is
+/// ours and the reason is the only part the user can act on, so the wrapper
+/// is peeled off. Anything that does not look like that is shown as sent.
+///
+/// A SASL requirement gets a line of its own, because a network that refuses
+/// unauthenticated connections from some addresses — hackint does, for hosts
+/// with no reverse DNS — is refusing the *profile*, not the *attempt*, and no
+/// number of retries will change the answer. The hint is only added when the
+/// profile has no SASL account, since with one the problem is different: the
+/// credentials were offered and something else went wrong.
+pub fn explain_farewell(text: &str, config: &ServerConfig) -> String {
+    let reason = closing_link_reason(text).unwrap_or(text).trim();
+    let reason = if reason.is_empty() {
+        text.trim()
+    } else {
+        reason
+    };
+
+    let mut message = format!("{} closed the connection: {reason}", config.host);
+    if reason.to_ascii_lowercase().contains("sasl") && config.sasl_account.is_none() {
+        message.push_str(
+            " This network requires an account from your address. Register \
+             a nickname with it, then add the account and password to this \
+             network's SASL settings.",
+        );
+    }
+    message
+}
+
+/// Whether a farewell is one that retrying cannot change.
+///
+/// A server that wants SASL from this address will want it from the next
+/// attempt too, and a ban is a ban. Reconnecting into either every few
+/// seconds gains nothing and, on networks that count connection attempts, can
+/// turn a refusal into a longer one. Everything else — throttling, a server
+/// going down for maintenance, a link that simply dropped — may well be
+/// different in a minute, and is left to the backoff.
+///
+/// Matched on words rather than a list of exact sentences, because every ircd
+/// phrases these differently and the words are what they share: `K-Lined`,
+/// `G-Lined`, `Z-Lined` and their kin, and "banned" for the ones that say so
+/// in plain English.
+pub fn is_refusal(farewell: &str) -> bool {
+    let text = farewell.to_ascii_lowercase();
+    text.contains("sasl") || text.contains("-lined") || text.contains("banned")
+}
+
+/// The reason inside a `Closing Link: <address> (<reason>)` farewell, if the
+/// text has that shape. `[...]` is accepted alongside `(...)` for InspIRCd.
+fn closing_link_reason(text: &str) -> Option<&str> {
+    let rest = text
+        .strip_prefix("Closing Link:")
+        .or_else(|| text.strip_prefix("Closing link:"))?;
+    let rest = rest.trim_end();
+    let (open, close) = match rest.chars().last()? {
+        ')' => ('(', ')'),
+        ']' => ('[', ']'),
+        _ => return None,
+    };
+    let inner = rest.strip_suffix(close)?;
+    // The last group, not the first: InspIRCd's `(user@host)` comes earlier.
+    let start = inner.rfind(open)?;
+    Some(&inner[start + 1..])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -757,5 +831,93 @@ mod tests {
         assert!(message.contains("after the tunnel was open"), "{message}");
         assert!(message.contains("127.0.0.1:9050"), "{message}");
         assert!(!message.contains("typo"), "{message}");
+    }
+
+    #[test]
+    fn a_closing_link_farewell_keeps_only_the_reason() {
+        // What hackint sends a host it will not take without SASL. The
+        // address in the middle is ours, and nothing to act on.
+        let message = explain_farewell(
+            "Closing Link: 203.0.113.7 (You need to identify via SASL to use this server.)",
+            &config(),
+        );
+        assert!(
+            message.starts_with("irc.example.org closed the connection: "),
+            "{message}"
+        );
+        assert!(
+            message.contains("You need to identify via SASL"),
+            "{message}"
+        );
+        assert!(!message.contains("203.0.113.7"), "{message}");
+        assert!(!message.contains("Closing Link"), "{message}");
+    }
+
+    #[test]
+    fn a_sasl_requirement_says_what_to_do_without_an_account() {
+        let farewell =
+            "Closing Link: 203.0.113.7 (You need to identify via SASL to use this server.)";
+        let without = explain_farewell(farewell, &config());
+        assert!(without.contains("SASL settings"), "{without}");
+
+        // With an account the credentials were offered and refused, or the
+        // server never asked: different problems, and the hint would mislead.
+        let with = explain_farewell(
+            farewell,
+            &ServerConfig {
+                sasl_account: Some("alice".to_owned()),
+                ..config()
+            },
+        );
+        assert!(!with.contains("SASL settings"), "{with}");
+    }
+
+    #[test]
+    fn inspircd_farewells_take_the_bracketed_reason() {
+        let message = explain_farewell(
+            "Closing link: (alice@203.0.113.7) [Registration timeout]",
+            &config(),
+        );
+        assert!(message.ends_with(": Registration timeout"), "{message}");
+        assert!(!message.contains("alice@"), "{message}");
+    }
+
+    #[test]
+    fn an_unfamiliar_farewell_is_shown_as_sent() {
+        let message = explain_farewell("Too many connections from your host", &config());
+        assert_eq!(
+            message,
+            "irc.example.org closed the connection: Too many connections from your host"
+        );
+        // A wrapper with nothing inside must not produce an empty reason.
+        let empty = explain_farewell("Closing Link: 203.0.113.7 ()", &config());
+        assert!(empty.contains("Closing Link"), "{empty}");
+    }
+
+    #[test]
+    fn a_refusal_is_one_that_will_not_change_by_itself() {
+        for farewell in [
+            "Closing Link: 203.0.113.7 (You need to identify via SASL to use this server.)",
+            "Closing Link: 203.0.113.7 (SASL authentication to a NickServ account with a              verified email address is required to connect from your current network.)",
+            "Closing Link: 203.0.113.7 (K-Lined: open proxy)",
+            "Closing Link: 203.0.113.7 (G-Lined)",
+            "Closing link: (alice@203.0.113.7) [Z-Lined: spam source]",
+            "You are banned from this server",
+        ] {
+            assert!(is_refusal(farewell), "should stop retrying: {farewell}");
+        }
+    }
+
+    #[test]
+    fn a_setback_is_still_worth_retrying() {
+        for farewell in [
+            "Closing Link: 203.0.113.7 (Reconnecting too fast, throttled.)",
+            "Closing Link: 203.0.113.7 (Server shutting down)",
+            "Closing link: (alice@203.0.113.7) [Registration timeout]",
+            "Closing Link: 203.0.113.7 (Ping timeout: 120 seconds)",
+            "Too many connections from your host",
+        ] {
+            assert!(!is_refusal(farewell), "should keep retrying: {farewell}");
+        }
     }
 }

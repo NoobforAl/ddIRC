@@ -98,6 +98,12 @@ const knownNetworks = <KnownNetwork>[
         'The largest network. Most free-software projects moved here in 2021 '
         'and stayed.',
     sasl: true,
+    note:
+        'Libera refuses unauthenticated connections from many addresses — '
+        'VPNs, cloud and hosting ranges, Tor. If it closes the link asking '
+        'for SASL, register a nickname from a connection it does accept (its '
+        'webchat at web.libera.chat, for one), verify the email, then put the '
+        'account and password in the SASL fields.',
     channels: [
       KnownChannel('#libera', 'network help, and the busiest room on it'),
       KnownChannel('#linux', 'general Linux talk'),
@@ -193,6 +199,12 @@ const knownNetworks = <KnownNetwork>[
         'The hacker community\'s network — CCC, congresses, and the people '
         'who run their own infrastructure.',
     sasl: true,
+    note:
+        'hackint refuses unauthenticated connections from many addresses — '
+        'VPNs, hosting ranges, anything without reverse DNS. If it closes the '
+        'link asking for SASL, register a nickname with NickServ from a '
+        'connection it does accept — its webchat at hackint.org/webchat, for '
+        'one — then put the account and password in the SASL fields.',
     channels: [
       KnownChannel('#hackint', 'network help'),
       KnownChannel('#ccc', 'Chaos Computer Club'),

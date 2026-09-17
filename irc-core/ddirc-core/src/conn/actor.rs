@@ -184,6 +184,12 @@ enum Disposition {
     UserQuit,
     /// The connection dropped; reconnect after backoff.
     Lost(String),
+    /// The server turned us away for a reason no amount of retrying will
+    /// change — it wants SASL and we have none to offer, or we are banned.
+    /// Stop and wait to be asked, however many times this has worked before:
+    /// a network that has just said no to a connection does not warm to the
+    /// same one arriving every few seconds, and some answer that with a ban.
+    Refused(String),
 }
 
 /// A handle for driving a connection from outside the actor.
@@ -410,23 +416,26 @@ impl Actor {
                 Err(error) => Disposition::Lost(self.describe(&error)),
             };
 
-            let reason = match disposition {
+            let (reason, refused) = match disposition {
                 Disposition::UserQuit => {
                     self.status(ConnectionStatus::Disconnected, None);
                     return;
                 }
-                Disposition::Lost(reason) => reason,
+                Disposition::Lost(reason) => (reason, false),
+                Disposition::Refused(reason) => (reason, true),
             };
 
             // The session is per-connection; membership does not survive a drop.
             self.session = Session::new(self.config.nickname.clone());
 
-            // Stop, rather than retry, when nothing has ever worked here and
-            // the patience above is spent. The actor deliberately stays alive:
-            // exiting would close the command channel and take the UI's own
-            // "Try again" with it, which is the one thing the user is being
-            // asked to do.
-            if !self.ever_registered && backoff.attempt() >= MAX_ATTEMPTS_BEFORE_FIRST_SUCCESS {
+            // Stop, rather than retry, when the server has refused us outright,
+            // or when nothing has ever worked here and the patience above is
+            // spent. The actor deliberately stays alive: exiting would close
+            // the command channel and take the UI's own "Try again" with it,
+            // which is the one thing the user is being asked to do.
+            let out_of_patience =
+                !self.ever_registered && backoff.attempt() >= MAX_ATTEMPTS_BEFORE_FIRST_SUCCESS;
+            if refused || out_of_patience {
                 self.status(ConnectionStatus::Disconnected, Some(reason));
                 loop {
                     match commands.recv().await {
@@ -497,6 +506,11 @@ impl Actor {
         let mut sasl = SaslNegotiator::new(self.sasl_credentials());
         let mut auth = AuthOutcome::Anonymous;
         let mut registered = false;
+        // The server's parting words, when it has any. An `ERROR` line is
+        // followed by the socket closing, and the close on its own says only
+        // "connection closed by server" — which is what hackint's refusal to
+        // take an unauthenticated connection looked like until this was kept.
+        let mut farewell: Option<String> = None;
 
         // The registration burst is not rate limited: servers expect it
         // immediately, and throttling it looks like a stalled client.
@@ -593,10 +607,30 @@ impl Actor {
                 }
 
                 message = stream.next() => {
-                    let Some(message) = message else {
-                        return Ok(Disposition::Lost("connection closed by server".to_owned()));
+                    // A close that follows an `ERROR` is the server doing
+                    // what it said, however the socket reports it: a clean
+                    // end and a dropped TLS session are the same refusal.
+                    let message = match (message, farewell.take()) {
+                        (Some(Ok(message)), reason) => {
+                            farewell = reason;
+                            message
+                        }
+                        (None | Some(Err(_)), Some(reason)) => {
+                            let explained = diagnose::explain_farewell(&reason, &self.config);
+                            return Ok(if diagnose::is_refusal(&reason) {
+                                Disposition::Refused(explained)
+                            } else {
+                                Disposition::Lost(explained)
+                            });
+                        }
+                        (None, None) => {
+                            return Ok(Disposition::Lost("connection closed by server".to_owned()));
+                        }
+                        (Some(Err(error)), None) => return Err(error.into()),
                     };
-                    let message = message?;
+                    if let Irc::ERROR(reason) = &message.command {
+                        farewell = Some(format::strip(reason));
+                    }
 
                     // SASL runs before anything else and is never rate limited.
                     if !sasl.is_finished() {
