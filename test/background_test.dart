@@ -196,8 +196,8 @@ void main() {
 
   group('the tray menu', () {
     test('offers a way back in and a way out, and nothing else', () {
-      final keys = backgroundMenu().items!
-          .where((i) => i.key != null)
+      final keys = backgroundMenu
+          .where((i) => !i.isSeparator)
           .map((i) => i.key)
           .toList();
       // The way back is the half that makes hiding safe; without it a closed
@@ -207,8 +207,8 @@ void main() {
     });
 
     test('every item that is not a separator is labelled', () {
-      for (final item in backgroundMenu().items!) {
-        if (item.type == 'separator') continue;
+      for (final item in backgroundMenu) {
+        if (item.isSeparator) continue;
         expect(item.label, isNotNull);
         expect(item.label, isNotEmpty);
       }

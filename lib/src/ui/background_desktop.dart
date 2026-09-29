@@ -1,12 +1,7 @@
-// The 0.5-shaped tray API, which tray_manager 0.7 keeps as a deprecated
-// bridge onto its new native core. It behaves as before; porting to the
-// native API (TrayIcon, Menu, MenuItem) is its own change, with a desktop
-// check of the tray on each platform.
-// ignore_for_file: deprecated_member_use
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:tray_manager/legacy.dart';
+import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 
 import '../model/settings.dart';
@@ -17,18 +12,33 @@ import 'background.dart';
 const showItemKey = 'show';
 const quitItemKey = 'quit';
 
+/// One row of the tray's menu: an item with a key and a label, or a
+/// separator (no key, no label).
+///
+/// Plain data rather than the native menu itself, so what the menu offers can
+/// be read and tested without a native library behind it; [BackgroundPresence]
+/// builds the real one from this.
+@immutable
+class TrayEntry {
+  const TrayEntry(this.key, this.label);
+  const TrayEntry.separator() : key = null, label = null;
+
+  final String? key;
+  final String? label;
+
+  bool get isSeparator => key == null;
+}
+
 /// The tray's menu: a way back in, and a way out.
 ///
 /// Two items and nothing else. Everything the app can do it can do better in
 /// its own window, and a tray menu that grows into a second interface is a
 /// second interface to keep in step.
-Menu backgroundMenu() => Menu(
-  items: [
-    MenuItem(key: showItemKey, label: 'Show ddIRC'),
-    MenuItem.separator(),
-    MenuItem(key: quitItemKey, label: 'Quit ddIRC'),
-  ],
-);
+const backgroundMenu = <TrayEntry>[
+  TrayEntry(showItemKey, 'Show ddIRC'),
+  TrayEntry.separator(),
+  TrayEntry(quitItemKey, 'Quit ddIRC'),
+];
 
 /// Keeping the app running once its window is closed, on desktop.
 ///
@@ -48,9 +58,7 @@ Menu backgroundMenu() => Menu(
 /// this class is in charge of closing: it always is, so that quitting through
 /// the window's own close button says goodbye to the servers exactly as
 /// quitting through the tray does.
-class BackgroundPresence
-    with TrayListener, WindowListener
-    implements BackgroundKeeper {
+class BackgroundPresence with WindowListener implements BackgroundKeeper {
   BackgroundPresence({required this.settings, required this.workspace});
 
   final AppSettings settings;
@@ -58,8 +66,19 @@ class BackgroundPresence
   /// Read for the tooltip, and closed down on the way out.
   final Workspace workspace;
 
-  bool _trayUp = false;
   bool _quitting = false;
+
+  /// The native tray icon and what hangs off it, all null while the tray is
+  /// down. Kept together because they live and die together: the menu and
+  /// its items are owned here, not by the icon, and each has a native handle
+  /// that has to be released.
+  tray.TrayIcon? _icon;
+  tray.Image? _image;
+  tray.Menu? _menu;
+  final List<(tray.MenuItem, tray.ListenerId)> _items = [];
+  tray.ListenerId? _clicks;
+
+  bool get _trayUp => _icon != null;
   String? _tooltip;
 
   /// Reentrancy guard. The settings listener is synchronous and the work it
@@ -75,7 +94,6 @@ class BackgroundPresence
   @override
   Future<void> start() async {
     windowManager.addListener(this);
-    trayManager.addListener(this);
     // Always intercepted, so closing the window is always this class's
     // decision rather than sometimes its and sometimes the platform's. Which
     // of the two things it then does is the setting's business, not this
@@ -91,7 +109,7 @@ class BackgroundPresence
     settings.removeListener(_onSettingsChanged);
     workspace.removeListener(_onConnectionsChanged);
     windowManager.removeListener(this);
-    trayManager.removeListener(this);
+    _takeDown();
   }
 
   /// Bring the window back, from hidden or from minimised.
@@ -118,10 +136,7 @@ class BackgroundPresence
     _quitting = true;
     try {
       workspace.closeAll();
-      if (_trayUp) {
-        await trayManager.destroy();
-        _trayUp = false;
-      }
+      _takeDown();
       await Future<void>.delayed(quitGrace);
     } catch (e) {
       debugPrint('could not close down cleanly: $e');
@@ -164,15 +179,12 @@ class BackgroundPresence
   Future<void> _apply() async {
     final wanted = settings.runInBackground;
     if (wanted && !_trayUp) {
-      await trayManager.setIcon(_iconAsset, isTemplate: _iconIsTemplate);
-      await trayManager.setContextMenu(backgroundMenu());
-      _trayUp = true;
+      _putUp();
       // The icon is new, so whatever the tooltip last said was said to a
       // different icon and has to be said again.
       _tooltip = null;
     } else if (!wanted && _trayUp) {
-      await trayManager.destroy();
-      _trayUp = false;
+      _takeDown();
       _tooltip = null;
     }
     if (_trayUp) await _refreshTooltip();
@@ -182,7 +194,95 @@ class BackgroundPresence
     final text = trayTooltip(workspace.sessions.length);
     if (text == _tooltip) return;
     _tooltip = text;
-    await trayManager.setToolTip(text);
+    _icon?.setTooltip(text);
+  }
+
+  /// Put the icon up, with its menu, listening for clicks.
+  void _putUp() {
+    final image = tray.ImageAsset.fromAsset(_iconAsset);
+    final icon = tray.TrayIcon.create();
+    final menu = tray.Menu.create();
+    if (image == null || icon == null || menu == null) {
+      image?.dispose();
+      icon?.dispose();
+      menu?.dispose();
+      throw StateError('the tray is not available here');
+    }
+
+    for (final entry in backgroundMenu) {
+      if (entry.isSeparator) {
+        menu.addSeparator();
+        continue;
+      }
+      final item = tray.MenuItem.createWithLabelAndType(
+        entry.label!,
+        tray.MenuItemType.normal,
+      );
+      if (item == null) continue;
+      final key = entry.key!;
+      final listening = item.addListener((event) {
+        if (event is tray.MenuItemClickedEvent) _onMenu(key);
+      });
+      _items.add((item, listening));
+      menu.addItem(item);
+    }
+
+    icon
+      ..isIconTemplate = _iconIsTemplate
+      ..icon = image
+      ..setContextMenu(menu)
+      ..setVisible(true);
+    // Left click restores on Windows and Linux, where the menu belongs on the
+    // right button. The macOS menu bar has no right-button convention: a
+    // click there opens the menu, and opening the menu is all it does.
+    icon.setContextMenuTrigger(
+      defaultTargetPlatform == TargetPlatform.macOS
+          ? tray.ContextMenuTrigger.clicked
+          : tray.ContextMenuTrigger.rightClicked,
+    );
+    _clicks = icon.addListener((event) {
+      if (event is tray.TrayIconClickedEvent &&
+          defaultTargetPlatform != TargetPlatform.macOS) {
+        unawaited(show());
+      }
+    });
+
+    _image = image;
+    _icon = icon;
+    _menu = menu;
+  }
+
+  /// Take the icon down and release everything native that hung off it.
+  ///
+  /// The menu items go on the next turn of the event loop rather than now: a
+  /// click on "Quit" runs inside that item's own native callback, and the
+  /// item has to outlive it.
+  void _takeDown() {
+    final icon = _icon;
+    if (icon == null) return;
+    final clicks = _clicks;
+    if (clicks != null) icon.removeListener(clicks);
+    icon
+      ..setVisible(false)
+      ..dispose();
+    _icon = null;
+    _clicks = null;
+
+    final items = List.of(_items);
+    final menu = _menu;
+    final image = _image;
+    _items.clear();
+    _menu = null;
+    _image = null;
+    Timer.run(() {
+      for (final (item, listening) in items) {
+        item
+          ..removeListener(listening)
+          ..dispose();
+      }
+      menu?.dispose();
+      image?.dispose();
+    });
   }
 
   /// Windows and Linux show the mark as it appears everywhere else — the tray
@@ -211,24 +311,8 @@ class BackgroundPresence
     }
   }
 
-  @override
-  void onTrayIconMouseDown() {
-    // Left click restores on Windows and Linux, where the menu belongs on the
-    // right button. The macOS menu bar has no right-button convention: a click
-    // there opens the menu, and opening the menu is all it does.
-    if (defaultTargetPlatform == TargetPlatform.macOS) {
-      unawaited(trayManager.popUpContextMenu());
-    } else {
-      unawaited(show());
-    }
-  }
-
-  @override
-  void onTrayIconRightMouseDown() => unawaited(trayManager.popUpContextMenu());
-
-  @override
-  void onTrayMenuItemClick(MenuItem menuItem) {
-    switch (menuItem.key) {
+  void _onMenu(String key) {
+    switch (key) {
       case showItemKey:
         unawaited(show());
       case quitItemKey:
