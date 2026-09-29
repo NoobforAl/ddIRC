@@ -256,7 +256,9 @@ class _UnlockButton extends StatelessWidget {
         disabledForegroundColor: t.faint,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+        ),
         textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
       ),
     );

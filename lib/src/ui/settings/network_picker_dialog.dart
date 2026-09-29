@@ -385,7 +385,7 @@ class _Note extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(11, 9, 11, 9),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(Tokens.radiusM),
         border: Border.all(
           color: t.warn.withValues(alpha: 0.35),
           width: Tokens.hairline,
@@ -450,7 +450,9 @@ class _BackButton extends StatelessWidget {
       style: TextButton.styleFrom(
         foregroundColor: t.muted,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+        ),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
       child: const Text('Back'),

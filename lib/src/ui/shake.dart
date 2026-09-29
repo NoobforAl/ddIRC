@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
 import 'motion.dart';
 
 /// Nudges its child sideways whenever [tick] changes.
@@ -75,6 +76,6 @@ class _ShakeState extends State<Shake> with SingleTickerProviderStateMixin {
 /// jump. We colour the existing border and put the message underneath instead,
 /// so nothing moves except the shake.
 InputBorder outlinedBorder(Color color, double width) => OutlineInputBorder(
-  borderRadius: BorderRadius.circular(7),
+  borderRadius: BorderRadius.circular(Tokens.radiusM),
   borderSide: BorderSide(color: color, width: width),
 );

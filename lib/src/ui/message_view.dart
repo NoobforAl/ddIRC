@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter/rendering.dart' show SelectedContent;
 
 import '../model/people.dart';
@@ -20,6 +23,7 @@ class MessageView extends StatefulWidget {
     required this.conversation,
     this.profileId,
     this.onPersonTap,
+    this.onReply,
   });
 
   final Conversation conversation;
@@ -30,6 +34,10 @@ class MessageView extends StatefulWidget {
 
   /// A name in the scrollback was tapped.
   final ValueChanged<String>? onPersonTap;
+
+  /// The user asked to reply to a line — by swiping it, or with the button
+  /// beside it. Null offers neither.
+  final ValueChanged<ChatLine>? onReply;
 
   @override
   State<MessageView> createState() => _MessageViewState();
@@ -101,6 +109,13 @@ class _MessageViewState extends State<MessageView> {
   bool _showedSystem = true;
   int _freshFrom = 0;
 
+  /// What the last build drew, kept for a tap on a quote to search.
+  List<ChatLine> _lines = const [];
+  List<_Group> _groups = const [];
+
+  /// The line a tapped quote pointed at, lit up for a moment on arrival.
+  final _flash = ValueNotifier<ChatLine?>(null);
+
   @override
   void initState() {
     super.initState();
@@ -113,6 +128,7 @@ class _MessageViewState extends State<MessageView> {
     _controller.dispose();
     _away.dispose();
     _arrived.dispose();
+    _flash.dispose();
     super.dispose();
   }
 
@@ -286,9 +302,16 @@ class _MessageViewState extends State<MessageView> {
 
     if (lines.isEmpty) {
       return Center(
-        child: Text(
-          'Nothing here yet.',
-          style: TextStyle(color: t.faint, fontSize: 13),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.forum_outlined, size: 36, color: t.faint),
+            const SizedBox(height: 10),
+            Text(
+              'No messages yet — say hello.',
+              style: TextStyle(color: t.muted, fontSize: 13.5),
+            ),
+          ],
         ),
       );
     }
@@ -299,8 +322,18 @@ class _MessageViewState extends State<MessageView> {
     final now = DateTime.now();
     final arrivedAfter = now.subtract(_arrival);
 
-    Widget row(int i) => _row(
-      i,
+    final groups = _group(lines, markerIndex);
+    _lines = lines;
+    _groups = groups;
+    // Where the unread rule lands, as a group. A rule always starts a group,
+    // so the marker's line is always the first of one.
+    final markerGroup = markerIndex <= 0
+        ? -1
+        : groups.indexWhere((g) => g.start == markerIndex);
+
+    Widget row(int g) => _row(
+      g,
+      groups: groups,
       lines: lines,
       markerIndex: markerIndex,
       arrivedAfter: arrivedAfter,
@@ -308,7 +341,7 @@ class _MessageViewState extends State<MessageView> {
       settings: settings,
     );
 
-    final split = _split && markerIndex > 0;
+    final split = _split && markerGroup > 0;
     final slivers = split
         ? [
             // Older rows grow upward from the anchor, so their indices run
@@ -317,16 +350,16 @@ class _MessageViewState extends State<MessageView> {
             SliverPadding(
               padding: const EdgeInsets.only(top: 10),
               sliver: SliverList.builder(
-                itemCount: markerIndex,
-                itemBuilder: (context, i) => row(markerIndex - 1 - i),
+                itemCount: markerGroup,
+                itemBuilder: (context, i) => row(markerGroup - 1 - i),
               ),
             ),
             SliverPadding(
               key: _centerKey,
               padding: const EdgeInsets.only(bottom: 10),
               sliver: SliverList.builder(
-                itemCount: lines.length - markerIndex,
-                itemBuilder: (context, i) => row(markerIndex + i),
+                itemCount: groups.length - markerGroup,
+                itemBuilder: (context, i) => row(markerGroup + i),
               ),
             ),
           ]
@@ -334,7 +367,7 @@ class _MessageViewState extends State<MessageView> {
             SliverPadding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               sliver: SliverList.builder(
-                itemCount: lines.length,
+                itemCount: groups.length,
                 itemBuilder: (context, i) => row(i),
               ),
             ),
@@ -384,69 +417,224 @@ class _MessageViewState extends State<MessageView> {
     );
   }
 
+  /// Split the scrollback into what is drawn as one piece: a system line on
+  /// its own, or a *bubble* — one person's lines from within the same minute.
+  ///
+  /// The minute is the unit because it is the unit the time is shown in: a
+  /// bubble carries one time, in its corner, and everything inside it was
+  /// said then. A new minute is a new bubble with its own time, even from the
+  /// same person mid-thought, so no line is ever further than one bubble from
+  /// when it was said.
+  ///
+  /// A reply always starts a bubble of its own, because its quote goes on
+  /// top, and so does anything a rule (a new day, the first unread line) falls
+  /// in front of.
+  static List<_Group> _group(List<ChatLine> lines, int markerIndex) {
+    final groups = <_Group>[];
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final previous = i > 0 ? lines[i - 1] : null;
+      final joins =
+          previous != null &&
+          !line.isSystem &&
+          i != markerIndex &&
+          line.message!.replyTo == null &&
+          _sameSpeaker(previous, line) &&
+          _sameMinute(previous.at, line.at);
+      if (joins) {
+        groups.last.end = i + 1;
+      } else {
+        groups.add(_Group(i, i + 1));
+      }
+    }
+    return groups;
+  }
+
+  static bool _sameSpeaker(ChatLine a, ChatLine b) =>
+      !a.isSystem &&
+      !b.isSystem &&
+      a.message!.sender == b.message!.sender &&
+      a.message!.isSelf == b.message!.isSelf;
+
+  static bool _sameMinute(DateTime a, DateTime b) =>
+      a.year == b.year &&
+      a.month == b.month &&
+      a.day == b.day &&
+      a.hour == b.hour &&
+      a.minute == b.minute;
+
+  /// Whether two bubbles belong to one *run*: the same person, a few minutes
+  /// apart, nothing in between. A run shows its name once, on top, and its
+  /// bubbles sit close together with their inner corners tucked in — the way
+  /// a stretch of someone talking reads as one turn.
+  static bool _sameRun(ChatLine a, ChatLine b) =>
+      _sameSpeaker(a, b) &&
+      AppSettings.sameDay(a.at, b.at) &&
+      b.at.difference(a.at).inMinutes < 5;
+
   Widget _row(
-    int i, {
+    int g, {
+    required List<_Group> groups,
     required List<ChatLine> lines,
     required int markerIndex,
     required DateTime arrivedAfter,
     required DateTime now,
     required AppSettings settings,
   }) {
-    final line = lines[i];
-    final fresh = i >= _freshFrom && line.at.isAfter(arrivedAfter);
-    final previous = i > 0 ? lines[i - 1] : null;
+    final group = groups[g];
+    final first = lines[group.start];
+    final previous = group.start > 0 ? lines[group.start - 1] : null;
     final newDay =
-        previous == null || !AppSettings.sameDay(previous.at, line.at);
-    final unreadStart = i == markerIndex;
+        previous == null || !AppSettings.sameDay(previous.at, first.at);
+    final unreadStart = group.start == markerIndex;
+    final ruled = newDay || unreadStart;
 
     Widget body;
-    if (line.isSystem) {
-      body = _SystemLine(text: line.system!);
+    if (first.isSystem) {
+      body = _SelectableLine(
+        index: group.start,
+        scrollback: _selection,
+        child: Arrive(
+          play: group.start >= _freshFrom && first.at.isAfter(arrivedAfter),
+          child: _SystemLine(text: first.system!),
+        ),
+      );
     } else {
-      // Suppress the repeated sender label when the same person speaks again
-      // within a couple of minutes — the run reads as one utterance and the
-      // screen stays quieter. Never across a rule, though: the first unread
-      // line is where reading starts, and it should say who is talking.
-      final grouped =
-          !unreadStart &&
-          // A new day implies a previous line, which is why the analyzer
-          // lets `previous` through unchecked below.
-          !newDay &&
-          !previous.isSystem &&
-          previous.message!.sender == line.message!.sender &&
-          previous.message!.isSelf == line.message!.isSelf &&
-          line.at.difference(previous.at).inMinutes < 2;
-      body = _MessageLine(
-        line: line,
-        showSender: !grouped,
+      final last = lines[group.end - 1];
+      final next = group.end < lines.length ? lines[group.end] : null;
+      final nextRuled =
+          next != null &&
+          (group.end == markerIndex || !AppSettings.sameDay(last.at, next.at));
+      final startsRun = ruled || !_sameRun(previous, first);
+      final endsRun = next == null || nextRuled || !_sameRun(last, next);
+      final message = first.message!;
+      final reply = message.replyTo;
+      body = _Bubble(
+        key: GlobalObjectKey(first),
+        lines: lines.sublist(group.start, group.end),
+        firstIndex: group.start,
+        scrollback: _selection,
+        freshFrom: _freshFrom,
+        arrivedAfter: arrivedAfter,
+        startsRun: startsRun,
+        endsRun: endsRun,
         settings: settings,
         card: widget.profileId == null
             ? null
-            : People.instance.of(widget.profileId!, line.message!.sender),
+            : People.instance.of(widget.profileId!, message.sender),
+        quoted: reply == null ? null : _original(reply, before: group.start),
+        flash: _flash,
         onPersonTap: widget.onPersonTap,
+        onReply: widget.onReply,
+        onQuoteTap: reply == null ? null : () => _showOriginal(reply, g),
       );
     }
 
     // Rules ride inside the row they precede rather than being rows of their
-    // own, so every index here is still an index into [lines].
-    if (newDay || unreadStart) {
+    // own, so every row here is still exactly one group.
+    if (ruled) {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (newDay) _Rule(label: AppSettings.describeDay(line.at, now: now)),
+          if (newDay)
+            _DayChip(label: AppSettings.describeDay(first.at, now: now)),
           if (unreadStart) const _Rule(label: 'New messages', loud: true),
           body,
         ],
       );
     }
-
-    return _SelectableLine(
-      index: i,
-      scrollback: _selection,
-      child: Arrive(play: fresh, child: body),
-    );
+    return body;
   }
+
+  /// The line [reply] answers, if it is still in the scrollback: by id when
+  /// the server tags messages, otherwise by who said it and how it began.
+  /// Searched backwards from the reply, since what is answered is nearly
+  /// always just above it.
+  ChatLine? _original(rust.ReplyRef reply, {required int before}) {
+    final lines = _lines;
+    final msgid = reply.msgid;
+    final nick = reply.nick.toLowerCase();
+    final start = reply.excerpt.endsWith('…')
+        ? reply.excerpt.substring(0, reply.excerpt.length - 1)
+        : reply.excerpt;
+    for (var i = before - 1; i >= 0; i--) {
+      final message = lines[i].message;
+      if (message == null) continue;
+      if (msgid != null && message.msgid == msgid) return lines[i];
+      if (msgid == null &&
+          nick.isNotEmpty &&
+          message.sender.toLowerCase() == nick &&
+          _plain(message).startsWith(start)) {
+        return lines[i];
+      }
+    }
+    return null;
+  }
+
+  static String _plain(rust.ChatMessage message) =>
+      message.spans.map((s) => s.text).join().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// Scroll to what the reply in group [from] answers, and make it blink.
+  ///
+  /// The list is lazy, so the original may not be built yet and there is
+  /// nothing to scroll *to*. So it scrolls *towards* it a screen at a time,
+  /// each frame checking whether the row has been built, and settles on it
+  /// the moment it has.
+  Future<void> _showOriginal(rust.ReplyRef reply, int from) async {
+    final groups = _groups;
+    final target = _original(reply, before: groups[from].start);
+    if (target == null) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('The original is no longer in the scrollback.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    final lineIndex = _lines.indexOf(target);
+    final g = groups.lastIndexWhere((group) => group.start <= lineIndex);
+    final anchor = _lines[groups[g].start];
+    final slow = context.motion.slow;
+
+    for (var attempt = 0; attempt < 60 && mounted; attempt++) {
+      final built = GlobalObjectKey(anchor).currentContext;
+      if (built != null && built.mounted) {
+        await Scrollable.ensureVisible(
+          built,
+          alignment: 0.3,
+          duration: slow,
+          curve: Motion.curve,
+        );
+        _flash.value = target;
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        if (mounted && identical(_flash.value, target)) _flash.value = null;
+        return;
+      }
+      final range = _selection.builtRange();
+      if (range == null || !_controller.hasClients) return;
+      final position = _controller.position;
+      final step = position.viewportDimension * 0.9;
+      final up = lineIndex < range.$1;
+      final to = (position.pixels + (up ? -step : step)).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if (to == position.pixels) return;
+      _controller.jumpTo(to);
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+}
+
+/// A run of lines drawn as one piece. See [_MessageViewState._group].
+class _Group {
+  _Group(this.start, this.end);
+
+  /// Indices into the visible lines: [start] inclusive, [end] exclusive.
+  final int start;
+  int end;
 }
 
 /// Where a copied selection gets its line breaks.
@@ -477,6 +665,20 @@ class _ScrollbackSelection {
   /// direction the list was scrolled.
   bool continues(_LineSelection row) =>
       _rows.any((other) => other.index < row.index && other.value.hasSelection);
+
+  /// The first and last line currently built, or null if none are. Every
+  /// built line registers here, which makes this the cheapest way to know
+  /// where the lazy list is without asking it.
+  (int, int)? builtRange() {
+    if (_rows.isEmpty) return null;
+    var low = _rows.first.index;
+    var high = low;
+    for (final row in _rows) {
+      if (row.index < low) low = row.index;
+      if (row.index > high) high = row.index;
+    }
+    return (low, high);
+  }
 }
 
 /// One row's share of the selection, and the line break in front of it.
@@ -623,12 +825,12 @@ class _JumpToLatest extends StatelessWidget {
         children: [
           Touchable(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(21),
             builder: (context, touch) => AnimatedContainer(
               duration: context.motion.fast,
               curve: Motion.curve,
-              width: 36,
-              height: 36,
+              width: 42,
+              height: 42,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Color.alphaBlend(
@@ -682,125 +884,505 @@ class _SystemLine extends StatelessWidget {
   }
 }
 
-class _MessageLine extends StatelessWidget {
-  const _MessageLine({
-    required this.line,
-    required this.showSender,
-    required this.settings,
-    this.card,
-    this.onPersonTap,
-  });
+/// The date, as a small pill floating over the scrollback where the day
+/// changes — "Today", "Yesterday", "3 March". A chip rather than a rule
+/// across the whole width: it names the day without drawing a line through
+/// the conversation.
+///
+/// Out of the selection, like the other annotations: "Yesterday" is not
+/// something anyone said.
+class _DayChip extends StatelessWidget {
+  const _DayChip({required this.label});
 
-  final ChatLine line;
-  final bool showSender;
-  final AppSettings settings;
-
-  /// What the user has written about the sender, if anything.
-  final PersonCard? card;
-  final ValueChanged<String>? onPersonTap;
-
-  /// How much of the row an own-message block may take before it wraps. Wide
-  /// enough for a sentence, narrow enough that the block reads as a block.
-  static const _ownWidth = 0.78;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final message = line.message!;
-    final mine = message.isSelf;
-    final gutter = context.layout.gutter;
-
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (showSender)
-          // Kept out of the selection rather than stripped back out of it
-          // afterwards. Nick and clock time are the app's annotation on what
-          // someone said, not part of it, and a quote that drags them along
-          // is a quote that has to be tidied up by hand every time.
-          SelectionContainer.disabled(
-            child: _SenderLabel(
-              message: message,
-              at: line.at,
-              mine: mine,
-              settings: settings,
-              card: card,
-              onTap: onPersonTap == null
-                  ? null
-                  : () => onPersonTap!(message.sender),
+    return SelectionContainer.disabled(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: t.surface,
+              borderRadius: BorderRadius.circular(Tokens.radiusXL),
+              border: Border.all(color: t.rule, width: Tokens.hairline),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: t.muted,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        _MessageBody(message: message, renderColors: settings.renderColors),
-      ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One bubble: one person's lines from within one minute.
+///
+/// Everyone gets one — the user's own on the right in the accent tint, other
+/// people's on the left on [Tokens.bubble] — so a busy channel reads as a
+/// stack of shapes the eye can step through rather than a wall of text. The
+/// time sits in the bubble's bottom corner, tucked in beside the last line
+/// the way a messenger does it, so it is always there and never costs a line
+/// of its own.
+///
+/// Bubbles in the same run (see [_MessageViewState._sameRun]) sit close
+/// together and round their inner corners less, which is what makes a run
+/// read as one turn of the conversation; the last one keeps a small corner on
+/// the sender's side, where a messenger would draw a tail.
+class _Bubble extends StatefulWidget {
+  const _Bubble({
+    super.key,
+    required this.lines,
+    required this.firstIndex,
+    required this.scrollback,
+    required this.freshFrom,
+    required this.arrivedAfter,
+    required this.startsRun,
+    required this.endsRun,
+    required this.settings,
+    required this.flash,
+    this.card,
+    this.quoted,
+    this.onPersonTap,
+    this.onReply,
+    this.onQuoteTap,
+  });
+
+  final List<ChatLine> lines;
+
+  /// Where [lines] begin in the scrollback, for the selection.
+  final int firstIndex;
+  final _ScrollbackSelection scrollback;
+  final int freshFrom;
+  final DateTime arrivedAfter;
+  final bool startsRun;
+  final bool endsRun;
+  final AppSettings settings;
+
+  /// The line being pointed out after a tap on a quote, if it is one of ours.
+  final ValueListenable<ChatLine?> flash;
+
+  /// What the user has written about the sender, if anything.
+  final PersonCard? card;
+
+  /// The line the first one here replies to, when it is still loaded.
+  final ChatLine? quoted;
+
+  final ValueChanged<String>? onPersonTap;
+  final ValueChanged<ChatLine>? onReply;
+  final VoidCallback? onQuoteTap;
+
+  /// How much of the row a bubble may take before it wraps. Wide enough for a
+  /// sentence, narrow enough that it reads as a bubble and the other side of
+  /// the conversation stays visible.
+  static const _maxWidth = 0.78;
+  static const _maxWidthCompact = 0.86;
+
+  /// How far a swipe has to travel before letting go of it is a reply.
+  static const _swipeToReply = 56.0;
+  static const _swipeMax = 76.0;
+
+  @override
+  State<_Bubble> createState() => _BubbleState();
+}
+
+class _BubbleState extends State<_Bubble> {
+  /// How far the bubble has been dragged towards a reply.
+  double _drag = 0;
+
+  /// Which line a swipe or the hover button is about.
+  int _target = 0;
+  bool _hovered = false;
+
+  late List<GlobalKey> _lineKeys = _keys();
+
+  List<GlobalKey> _keys() =>
+      List.generate(widget.lines.length, (_) => GlobalKey());
+
+  @override
+  void didUpdateWidget(_Bubble old) {
+    super.didUpdateWidget(old);
+    if (old.lines.length != widget.lines.length) {
+      final keys = _keys();
+      for (var i = 0; i < keys.length && i < _lineKeys.length; i++) {
+        keys[i] = _lineKeys[i];
+      }
+      _lineKeys = keys;
+      _target = _target.clamp(0, widget.lines.length - 1);
+    }
+  }
+
+  /// The line under [global], so a swipe replies to what the finger was on.
+  int _lineAt(Offset global) {
+    for (var i = 0; i < _lineKeys.length; i++) {
+      final box = _lineKeys[i].currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) continue;
+      final top = box.localToGlobal(Offset.zero).dy;
+      if (global.dy < top + box.size.height) return i;
+    }
+    return widget.lines.length - 1;
+  }
+
+  void _reply(int i) => widget.onReply?.call(widget.lines[i]);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final settings = widget.settings;
+    final first = widget.lines.first.message!;
+    final mine = first.isSelf;
+    final compact = context.layout.isCompact;
+    final gutter = context.layout.gutter;
+    final mention = widget.lines.any((l) => l.isMention);
+
+    // A colour on the leading edge of someone's bubbles — every one of them,
+    // not only the one that carries the name. A chosen colour stands almost
+    // at full strength, because choosing it was the point; a colour a nick
+    // merely hashes to is a faint hint. A mention outranks both.
+    final hasCardColor = widget.card?.color != null;
+    final personColor = mine
+        ? null
+        : widget.card?.color ??
+              (settings.colorNicks ? NickPalette.of(first.sender, t) : null);
+    final Color? edge = mention
+        ? t.mentionRule
+        : personColor?.withValues(alpha: hasCardColor ? 0.9 : 0.4);
+    final edgeWidth = mention ? 2.5 : (edge != null ? 3.0 : 0.0);
+
+    final fill = mine
+        ? t.own
+        : mention
+        ? Color.alphaBlend(t.mention, t.bubble)
+        : t.bubble;
+
+    // Big corners outside, tucked-in corners where one bubble of a run meets
+    // the next, and a small one at the foot of the run on the sender's side.
+    const big = Radius.circular(Tokens.radiusL);
+    const tucked = Radius.circular(6);
+    const tail = Radius.circular(4);
+    final near = (
+      top: widget.startsRun ? big : tucked,
+      bottom: widget.endsRun ? tail : tucked,
+    );
+    final radius = mine
+        ? BorderRadius.only(
+            topLeft: big,
+            bottomLeft: big,
+            topRight: near.top,
+            bottomRight: near.bottom,
+          )
+        : BorderRadius.only(
+            topLeft: near.top,
+            bottomLeft: near.bottom,
+            topRight: big,
+            bottomRight: big,
+          );
+
+    final timeStyle = TextStyle(
+      color: t.muted,
+      fontSize: 10.5,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final time = settings.showTimestamps
+        ? settings.formatTime(widget.lines.last.at)
+        : null;
+
+    final children = <Widget>[
+      if (!mine && widget.startsRun)
+        // Kept out of the selection rather than stripped back out of it
+        // afterwards. The name is the app's annotation on what someone said,
+        // not part of it.
+        SelectionContainer.disabled(
+          child: _SenderLabel(
+            message: first,
+            settings: settings,
+            card: widget.card,
+            onTap: widget.onPersonTap == null
+                ? null
+                : () => widget.onPersonTap!(first.sender),
+          ),
+        ),
+      if (first.replyTo case final reply?)
+        _Quote(reply: reply, original: widget.quoted, onTap: widget.onQuoteTap),
+      for (var i = 0; i < widget.lines.length; i++)
+        _line(
+          context,
+          i,
+          time: i == widget.lines.length - 1 ? time : null,
+          timeStyle: timeStyle,
+        ),
+    ];
+
+    Widget bubble = Container(
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(color: fill, borderRadius: radius),
+      child: Container(
+        decoration: BoxDecoration(
+          border: edgeWidth > 0
+              ? Border(
+                  left: BorderSide(color: edge!, width: edgeWidth),
+                )
+              : null,
+        ),
+        padding: EdgeInsets.fromLTRB(
+          12 - edgeWidth.clamp(0, 3),
+          settings.density == Density.compact ? 5 : 7,
+          10,
+          settings.density == Density.compact ? 4 : 6,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: children,
+        ),
+      ),
     );
 
-    // Own messages sit on the right in a flat, tinted block; everyone else's
-    // are plain on the left. Alignment alone was tried first and was not
-    // enough — in a busy channel the eye needs a shape to find, not an edge.
-    // No tails, no shadow: the block is the only ornament.
-    final Widget body = mine
-        ? LayoutBuilder(
-            builder: (context, constraints) => Align(
-              alignment: Alignment.centerRight,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: constraints.maxWidth * _ownWidth,
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: t.own,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(9, 3, 9, 5),
-                  child: content,
+    // Replying, by the input to hand: a swipe towards the middle on a touch
+    // screen, the way messengers do it, and a button beside the bubble for a
+    // mouse. Touch only for the swipe — a horizontal drag with a mouse is how
+    // text is selected, and taking that away would be a worse trade.
+    if (widget.onReply != null) {
+      bubble = GestureDetector(
+        supportedDevices: const {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.stylus,
+        },
+        onHorizontalDragStart: (d) => _target = _lineAt(d.globalPosition),
+        onHorizontalDragUpdate: (d) {
+          final delta = mine ? -d.delta.dx : d.delta.dx;
+          final before = _drag;
+          setState(() => _drag = (_drag + delta).clamp(0, _Bubble._swipeMax));
+          if (before < _Bubble._swipeToReply &&
+              _drag >= _Bubble._swipeToReply) {
+            HapticFeedback.selectionClick();
+          }
+        },
+        onHorizontalDragEnd: (_) {
+          if (_drag >= _Bubble._swipeToReply) _reply(_target);
+          setState(() => _drag = 0);
+        },
+        onHorizontalDragCancel: () => setState(() => _drag = 0),
+        child: Transform.translate(
+          offset: Offset(mine ? -_drag : _drag, 0),
+          child: bubble,
+        ),
+      );
+    }
+
+    final hoverButton = widget.onReply == null || compact
+        ? null
+        : AnimatedOpacity(
+            opacity: _hovered ? 1 : 0,
+            duration: context.motion.fast,
+            child: IgnorePointer(
+              ignoring: !_hovered,
+              child: IconButton(
+                onPressed: () => _reply(_target),
+                icon: const Icon(Icons.reply_rounded, size: 18),
+                color: t.muted,
+                tooltip: 'Reply',
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          );
+
+    // Shown behind a swipe in progress, filling in as it passes the point
+    // where letting go would reply.
+    final swipeHint = _drag <= 0
+        ? null
+        : Positioned(
+            left: mine ? null : 0,
+            right: mine ? 0 : null,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: Opacity(
+                opacity: (_drag / _Bubble._swipeToReply).clamp(0, 1),
+                child: Icon(
+                  Icons.reply_rounded,
+                  size: 20,
+                  color: _drag >= _Bubble._swipeToReply ? t.accent : t.muted,
                 ),
               ),
             ),
-          )
-        : content;
+          );
 
-    // A colour on the leading edge, running the full height of every one of
-    // someone's rows — the grouped continuation lines that show no name
-    // included. The sender label alone carried the colour before, which meant
-    // a person the user had deliberately coloured barely changed on screen:
-    // most of what they say is a continuation line with no label to tint.
-    //
-    // A chosen colour stands almost at full strength, because choosing it was
-    // the point; a colour a nick merely hashes to is a faint hint, so a busy
-    // channel gains a set of quiet spines rather than a row of bright bars.
-    // A mention outranks both: it takes the edge in its own rule, as before.
-    final hasCardColor = card?.color != null;
-    final personColor = mine
-        ? null
-        : card?.color ??
-              (settings.colorNicks ? NickPalette.of(message.sender, t) : null);
-    final Color? edge = line.isMention
-        ? t.mentionRule
-        : personColor?.withValues(alpha: hasCardColor ? 0.9 : 0.4);
-    final edgeWidth = line.isMention ? 2.0 : (edge != null ? 3.0 : 0.0);
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          gutter,
+          widget.startsRun
+              ? (settings.density == Density.compact ? 6 : 10)
+              : settings.density.verticalPadding,
+          gutter,
+          settings.density.verticalPadding,
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Stack(
+            children: [
+              ?swipeHint,
+              Row(
+                mainAxisAlignment: mine
+                    ? MainAxisAlignment.end
+                    : MainAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (mine && hoverButton != null) hoverButton,
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth:
+                          constraints.maxWidth *
+                          (compact
+                              ? _Bubble._maxWidthCompact
+                              : _Bubble._maxWidth),
+                    ),
+                    child: bubble,
+                  ),
+                  if (!mine && hoverButton != null) hoverButton,
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-    return Container(
-      width: double.infinity,
-      // A wash, not a shout. The rule on the leading edge is what actually
-      // catches the eye when scanning a long channel.
-      decoration: BoxDecoration(
-        color: line.isMention ? t.mention : null,
-        border: edgeWidth > 0
-            ? Border(
-                left: BorderSide(color: edge!, width: edgeWidth),
-              )
-            : null,
+  /// One line of the bubble: its own selection container, so a copy across
+  /// several comes out as several lines, and its own flash when a quote
+  /// elsewhere points at it.
+  Widget _line(
+    BuildContext context,
+    int i, {
+    required String? time,
+    required TextStyle timeStyle,
+  }) {
+    final t = context.tokens;
+    final line = widget.lines[i];
+    final index = widget.firstIndex + i;
+    final fresh =
+        index >= widget.freshFrom && line.at.isAfter(widget.arrivedAfter);
+
+    final body = _MessageBody(
+      message: line.message!,
+      renderColors: widget.settings.renderColors,
+      time: time,
+      timeStyle: timeStyle,
+    );
+
+    return MouseRegion(
+      key: _lineKeys[i],
+      onEnter: (_) => _target = i,
+      child: ValueListenableBuilder<ChatLine?>(
+        valueListenable: widget.flash,
+        builder: (context, flashing, child) => AnimatedContainer(
+          duration: context.motion.slow,
+          curve: Motion.curve,
+          margin: EdgeInsets.only(top: i == 0 ? 0 : 3),
+          decoration: BoxDecoration(
+            color: identical(flashing, line)
+                ? t.accent.withValues(alpha: 0.18)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: child,
+        ),
+        child: _SelectableLine(
+          index: index,
+          scrollback: widget.scrollback,
+          child: Arrive(play: fresh, child: body),
+        ),
       ),
-      // The leading rule eats into the gutter rather than adding to it, so the
-      // text starts on the same vertical line whether or not a row has one.
-      padding: EdgeInsets.fromLTRB(
-        gutter - edgeWidth,
-        settings.density.verticalPadding,
-        gutter,
-        settings.density.verticalPadding,
+    );
+  }
+}
+
+/// What a reply answers, drawn on top of it: a bar in the accent, who said
+/// it, and how it began. Tapping it goes there.
+class _Quote extends StatelessWidget {
+  const _Quote({required this.reply, this.original, this.onTap});
+
+  final rust.ReplyRef reply;
+
+  /// The line itself, when it is still in the scrollback. It fills in what a
+  /// reply sent by tag alone does not say.
+  final ChatLine? original;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final message = original?.message;
+    final nick = reply.nick.isNotEmpty ? reply.nick : message?.sender ?? '';
+    final excerpt = reply.excerpt.isNotEmpty
+        ? reply.excerpt
+        : message?.spans.map((s) => s.text).join() ?? 'a message';
+
+    return SelectionContainer.disabled(
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4, top: 2),
+        child: Touchable(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(Tokens.radiusS),
+          builder: (context, touch) => Container(
+            decoration: BoxDecoration(
+              color: Color.alphaBlend(
+                t.surfaceHover.withValues(alpha: touch.wash),
+                t.accent.withValues(alpha: 0.10),
+              ),
+              borderRadius: BorderRadius.circular(Tokens.radiusS),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(width: 3, color: t.accent),
+                  Flexible(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 4, 10, 5),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (nick.isNotEmpty)
+                            Text(
+                              nick,
+                              style: TextStyle(
+                                color: t.accent,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          Text(
+                            excerpt,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: t.muted, fontSize: 12.5),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
-      child: body,
     );
   }
 }
@@ -808,16 +1390,12 @@ class _MessageLine extends StatelessWidget {
 class _SenderLabel extends StatelessWidget {
   const _SenderLabel({
     required this.message,
-    required this.at,
-    required this.mine,
     required this.settings,
     this.card,
     this.onTap,
   });
 
   final rust.ChatMessage message;
-  final DateTime at;
-  final bool mine;
   final AppSettings settings;
   final PersonCard? card;
   final VoidCallback? onTap;
@@ -829,26 +1407,17 @@ class _SenderLabel extends StatelessWidget {
     // badge, and never a hardcoded @/+ that would break on networks with
     // halfop or owner prefixes.
     final prefix = message.senderPrefix ?? '';
-    // Your own nick keeps the accent whatever the palette says: it is the one
-    // name that should look like the app's, not like a stranger's.
     // A colour the user chose for this person comes before the one their
     // nick hashes to.
-    final color = mine
-        ? t.accent
-        : card?.color ??
-              (settings.colorNicks
-                  ? NickPalette.of(message.sender, t)
-                  : t.muted);
+    final color =
+        card?.color ??
+        (settings.colorNicks ? NickPalette.of(message.sender, t) : t.muted);
 
     // The name the user gave them, if any; the nick is one hover away.
     final shown = card?.alias ?? message.sender;
     Widget nick = Text(
       '$prefix$shown',
-      style: TextStyle(
-        color: color,
-        fontSize: 11.5,
-        fontWeight: FontWeight.w600,
-      ),
+      style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
     );
     if (card?.alias != null) {
       nick = Tooltip(message: message.sender, child: nick);
@@ -863,25 +1432,9 @@ class _SenderLabel extends StatelessWidget {
         ),
       );
     }
-    // Once per run of messages, beside the name. A time on every line was
-    // tried and was noise: the label says who and when, the lines under it
-    // say what.
-    final time = settings.showTimestamps
-        ? Text(
-            settings.formatTime(at),
-            style: TextStyle(
-              color: t.muted,
-              fontSize: 11,
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
-          )
-        : null;
 
     return Padding(
-      padding: EdgeInsets.only(
-        top: settings.density == Density.compact ? 3 : 5,
-        bottom: 1,
-      ),
+      padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -889,8 +1442,7 @@ class _SenderLabel extends StatelessWidget {
             Avatar(card: card, size: 16),
             const SizedBox(width: 6),
           ],
-          nick,
-          if (time != null) ...[const SizedBox(width: 7), time],
+          Flexible(child: nick),
         ],
       ),
     );
@@ -898,9 +1450,23 @@ class _SenderLabel extends StatelessWidget {
 }
 
 class _MessageBody extends StatelessWidget {
-  const _MessageBody({required this.message, required this.renderColors});
+  const _MessageBody({
+    required this.message,
+    required this.renderColors,
+    this.time,
+    this.timeStyle,
+  });
 
   final rust.ChatMessage message;
+
+  /// The bubble's time, when this is its last line. Tucked in beside the end
+  /// of the text when there is room on its last line, and on a line of its
+  /// own at the right when there is not — the way a messenger does it.
+  final String? time;
+  final TextStyle? timeStyle;
+
+  /// Between the end of the text and the time.
+  static const _timeGap = 10.0;
 
   /// When false, bold and italics still apply but sender-chosen colours are
   /// dropped — the styling that carries meaning is kept, the decoration is not.
@@ -909,7 +1475,7 @@ class _MessageBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final base = TextStyle(color: t.text, fontSize: 14, height: 1.4);
+    final base = TextStyle(color: t.text, fontSize: 14.5, height: 1.45);
 
     // Actions read in the third person; notices are services rather than
     // people, and the classic -nick- form is worth keeping so they are
@@ -930,18 +1496,83 @@ class _MessageBody extends StatelessWidget {
     // registers itself with whatever selection is in scope, and a hand-built
     // `RichText` does not — it would draw identically and be the one thing on
     // the screen that could not be selected.
-    return Text.rich(
-      TextSpan(
-        style: style,
-        children: [
-          if (leading.isNotEmpty)
-            TextSpan(
-              text: leading,
-              style: style.copyWith(color: t.faint),
-            ),
-          ...message.spans.map((span) => _span(span, style, renderColors, t)),
-        ],
-      ),
+    final span = TextSpan(
+      style: style,
+      children: [
+        if (leading.isNotEmpty)
+          TextSpan(
+            text: leading,
+            style: style.copyWith(color: t.faint),
+          ),
+        ...message.spans.map((span) => _span(span, style, renderColors, t)),
+      ],
+    );
+    final text = Text.rich(span);
+    final time = this.time;
+    if (time == null) return text;
+
+    // Out of the selection: the time is the app's, not what anyone said.
+    final stamp = SelectionContainer.disabled(
+      child: Text(time, style: timeStyle),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Measured exactly as `Text` will draw it: under the inherited
+        // default style (the theme's letter spacing and font fallbacks
+        // included), or the guess about where the last line ends is wrong
+        // and the time lands on top of it.
+        final inherited = DefaultTextStyle.of(context).style;
+        final scaler = MediaQuery.textScalerOf(context);
+        final direction = Directionality.of(context);
+        final paragraph = TextPainter(
+          text: TextSpan(style: inherited, children: [span]),
+          textDirection: direction,
+          textScaler: scaler,
+        )..layout(maxWidth: constraints.maxWidth);
+        final clock = TextPainter(
+          text: TextSpan(style: inherited.merge(timeStyle), text: time),
+          textDirection: direction,
+          textScaler: scaler,
+        )..layout();
+        final lines = paragraph.computeLineMetrics();
+        final lastLine = lines.isEmpty ? 0.0 : lines.last.width;
+        final needed = lastLine + _timeGap + clock.width;
+        final single = lines.length <= 1;
+        final width = paragraph.width;
+        paragraph.dispose();
+        clock.dispose();
+
+        // One short line: the time follows it.
+        if (single && needed <= constraints.maxWidth) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(child: text),
+              const SizedBox(width: _timeGap),
+              Padding(padding: const EdgeInsets.only(bottom: 1), child: stamp),
+            ],
+          );
+        }
+        // Several lines, the last with room to spare: the time sits in it.
+        if (!single && needed <= width) {
+          return Stack(
+            children: [
+              text,
+              Positioned(right: 0, bottom: 1, child: stamp),
+            ],
+          );
+        }
+        // No room: a line of its own, at the right.
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Align(alignment: AlignmentDirectional.centerStart, child: text),
+            stamp,
+          ],
+        );
+      },
     );
   }
 

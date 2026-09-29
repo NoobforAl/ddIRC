@@ -87,7 +87,7 @@ class _QrScanDialogState extends State<QrScanDialog> {
           child: AspectRatio(
             aspectRatio: 1,
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(Tokens.radiusM),
               child: Container(
                 decoration: BoxDecoration(
                   border: Border.all(color: t.rule, width: Tokens.hairline),

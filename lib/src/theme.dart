@@ -88,10 +88,17 @@ abstract final class Fonts {
   ];
 }
 
-/// The palette is deliberately narrow — two surfaces, one rule, two text
-/// weights, one accent, three status colours. Typography and spacing carry the
-/// layout, so there are no gradients, shadows or elevation anywhere in the app,
-/// and separation is a hairline.
+/// The palette is deliberately narrow — a ground, two surfaces, one rule, two
+/// text weights, one accent, three status colours. Typography and spacing carry
+/// the layout, so there are no gradients, shadows or elevation anywhere in the
+/// app, and separation is a hairline.
+///
+/// Soft rather than stark. The ground is a lifted blue-grey instead of near
+/// black (or a warm paper instead of pure white), the accent is a little
+/// desaturated, and corners come from one small scale — [radiusS] to
+/// [radiusXL] — so every rounded thing in the app agrees with every other.
+/// Text keeps WCAG AA contrast against the ground in both palettes;
+/// `test/theme_contrast_test.dart` holds it to that.
 ///
 /// There are two instances, [dark] and [light]. They ride on [ThemeData] as a
 /// [ThemeExtension] so that `themeMode` picks between them and Flutter animates
@@ -111,6 +118,7 @@ class Tokens extends ThemeExtension<Tokens> {
     required this.mention,
     required this.mentionRule,
     required this.own,
+    required this.bubble,
     required this.ok,
     required this.warn,
     required this.bad,
@@ -122,6 +130,14 @@ class Tokens extends ThemeExtension<Tokens> {
   /// A metric rather than a colour, so it stays a compile-time constant and
   /// keeps working inside `const` widget expressions.
   static const hairline = 0.5;
+
+  /// The corner scale. Small things (chips, badges), controls (fields,
+  /// buttons), message bubbles, and pills — in that order, and nothing in
+  /// between, so shapes read as one family.
+  static const radiusS = 8.0;
+  static const radiusM = 12.0;
+  static const radiusL = 16.0;
+  static const radiusXL = 22.0;
 
   final Brightness brightness;
 
@@ -153,6 +169,10 @@ class Tokens extends ThemeExtension<Tokens> {
   /// line, so the colours can afford to be cousins.
   final Color own;
 
+  /// Everyone else's message bubble: a step up from [bg], so a bubble is a
+  /// shape on the ground without needing a border to be one.
+  final Color bubble;
+
   final Color ok;
   final Color warn;
   final Color bad;
@@ -161,22 +181,23 @@ class Tokens extends ThemeExtension<Tokens> {
 
   static const dark = Tokens._(
     brightness: Brightness.dark,
-    bg: Color(0xFF101012),
-    surface: Color(0xFF161619),
-    surfaceHover: Color(0xFF1D1D22),
-    rule: Color(0xFF2A2A30),
-    text: Color(0xFFE6E6EA),
-    muted: Color(0xFF83838F),
-    faint: Color(0xFF5A5A64),
-    accent: Color(0xFF7FB3FF),
-    onAccent: Color(0xFF101012),
-    mention: Color(0x1A7FB3FF),
-    mentionRule: Color(0xFF7FB3FF),
-    own: Color(0x1F7FB3FF),
-    ok: Color(0xFF6FCF8B),
-    warn: Color(0xFFE0B341),
-    bad: Color(0xFFE06C6C),
-    badge: Color(0xFF3A6EA5),
+    bg: Color(0xFF15171C),
+    surface: Color(0xFF1B1E24),
+    surfaceHover: Color(0xFF242832),
+    rule: Color(0xFF2E323C),
+    text: Color(0xFFE8E9EE),
+    muted: Color(0xFF9DA1AD),
+    faint: Color(0xFF626773),
+    accent: Color(0xFF8AB4F8),
+    onAccent: Color(0xFF15171C),
+    mention: Color(0x1A8AB4F8),
+    mentionRule: Color(0xFF8AB4F8),
+    own: Color(0x2E8AB4F8),
+    bubble: Color(0xFF20242C),
+    ok: Color(0xFF7BCF95),
+    warn: Color(0xFFE2BA55),
+    bad: Color(0xFFE57A7A),
+    badge: Color(0xFF3F6FA8),
   );
 
   /// Not an inversion of [dark]: an accent that reads well *on* near-black is
@@ -184,18 +205,19 @@ class Tokens extends ThemeExtension<Tokens> {
   /// colours are darkened rather than flipped.
   static const light = Tokens._(
     brightness: Brightness.light,
-    bg: Color(0xFFFCFCFD),
-    surface: Color(0xFFF3F3F6),
-    surfaceHover: Color(0xFFE9E9EE),
-    rule: Color(0xFFDCDCE2),
-    text: Color(0xFF17171B),
-    muted: Color(0xFF63636E),
-    faint: Color(0xFF8E8E99),
-    accent: Color(0xFF2A62C4),
+    bg: Color(0xFFF6F5F2),
+    surface: Color(0xFFEFEEEA),
+    surfaceHover: Color(0xFFE6E4DF),
+    rule: Color(0xFFDAD8D2),
+    text: Color(0xFF1E1F24),
+    muted: Color(0xFF5F616B),
+    faint: Color(0xFF85878F),
+    accent: Color(0xFF3563C0),
     onAccent: Color(0xFFFFFFFF),
-    mention: Color(0x142A62C4),
-    mentionRule: Color(0xFF2A62C4),
-    own: Color(0x162A62C4),
+    mention: Color(0x143563C0),
+    mentionRule: Color(0xFF3563C0),
+    own: Color(0x1F3563C0),
+    bubble: Color(0xFFFFFFFF),
     ok: Color(0xFF1E7F45),
     warn: Color(0xFF8A6100),
     bad: Color(0xFFC0392F),
@@ -268,6 +290,7 @@ class Tokens extends ThemeExtension<Tokens> {
     Color? mention,
     Color? mentionRule,
     Color? own,
+    Color? bubble,
     Color? ok,
     Color? warn,
     Color? bad,
@@ -287,6 +310,7 @@ class Tokens extends ThemeExtension<Tokens> {
       mention: mention ?? this.mention,
       mentionRule: mentionRule ?? this.mentionRule,
       own: own ?? this.own,
+      bubble: bubble ?? this.bubble,
       ok: ok ?? this.ok,
       warn: warn ?? this.warn,
       bad: bad ?? this.bad,
@@ -313,6 +337,7 @@ class Tokens extends ThemeExtension<Tokens> {
       mention: Color.lerp(mention, other.mention, t)!,
       mentionRule: Color.lerp(mentionRule, other.mentionRule, t)!,
       own: Color.lerp(own, other.own, t)!,
+      bubble: Color.lerp(bubble, other.bubble, t)!,
       ok: Color.lerp(ok, other.ok, t)!,
       warn: Color.lerp(warn, other.warn, t)!,
       bad: Color.lerp(bad, other.bad, t)!,

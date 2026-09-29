@@ -12,7 +12,7 @@ import '../theme.dart';
 /// The border a menu is cut out with: a hairline on the panel colour, no
 /// shadow. The same hairline language as every other surface.
 ShapeBorder menuShape(Tokens t) => RoundedRectangleBorder(
-  borderRadius: BorderRadius.circular(8),
+  borderRadius: BorderRadius.circular(Tokens.radiusM),
   side: BorderSide(color: t.rule, width: Tokens.hairline),
 );
 

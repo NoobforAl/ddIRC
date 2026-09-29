@@ -245,14 +245,14 @@ class _ColourPicker extends StatelessWidget {
     Widget swatch(Color color, {required bool selected, String? label}) {
       return Touchable(
         onTap: () => onChanged(label == null ? color : null),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(Tokens.radiusS),
         builder: (context, touch) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
           decoration: BoxDecoration(
             color: selected
                 ? t.surfaceHover
                 : t.surfaceHover.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Tokens.radiusS),
             border: Border.all(
               color: selected ? t.accent : t.rule,
               width: selected ? 1 : Tokens.hairline,

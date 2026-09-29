@@ -4,5 +4,5 @@
      the two are the same colour and change together, so the app does
      not step from one background to another as it comes up. -->
 <resources>
-    <color name="window_background">#101012</color>
+    <color name="window_background">#15171C</color>
 </resources>

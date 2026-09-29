@@ -22,7 +22,7 @@ import '../theme.dart';
 class NickPalette {
   NickPalette._();
 
-  /// Read against `0xFF101012`: light enough to carry text, desaturated enough
+  /// Read against the dark ground, `0xFF15171C`: light enough to carry text, desaturated enough
   /// not to shout beside the accent.
   static const dark = <Color>[
     Color(0xFFE57373),
@@ -39,7 +39,7 @@ class NickPalette {
     Color(0xFFB0BEC5),
   ];
 
-  /// Read against `0xFFFCFCFD`: the same twelve families, darkened rather than
+  /// Read against the light ground, `0xFFF6F5F2`: the same twelve families, darkened rather than
   /// inverted, for the same reason [Tokens.light] darkens the accent.
   static const light = <Color>[
     Color(0xFFB3261E),

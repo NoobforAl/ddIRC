@@ -213,12 +213,12 @@ class _IconAction extends StatelessWidget {
       message: tooltip,
       child: Touchable(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(Tokens.radiusS),
         builder: (context, touch) => Container(
           padding: const EdgeInsets.all(7),
           decoration: BoxDecoration(
             color: t.surfaceHover.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Tokens.radiusS),
           ),
           child: Icon(icon, size: 16, color: danger ? t.bad : t.muted),
         ),

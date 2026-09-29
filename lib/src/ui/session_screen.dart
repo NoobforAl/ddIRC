@@ -74,6 +74,11 @@ class _SessionScreenState extends State<SessionScreen> {
   /// the composer, so nothing else needs telling.
   final _suggestionRevision = ValueNotifier<int>(0);
 
+  /// The line the next message answers, and the conversation it is in. The
+  /// conversation is kept alongside so that switching away quietly drops a
+  /// reply meant for somewhere else instead of sending it here.
+  ({String conversation, ChatLine line})? _replying;
+
   SessionModel get session => widget.session;
 
   @override
@@ -124,6 +129,15 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   KeyEventResult _onComposerKey(FocusNode node, KeyEvent event) {
+    // Escape backs out of a reply before it does anything else: it is the
+    // most recent thing the user chose, so it is the first thing to undo.
+    if (event is KeyDownEvent &&
+        event.logicalKey == LogicalKeyboardKey.escape &&
+        _suggestions.isEmpty &&
+        _replying != null) {
+      setState(() => _replying = null);
+      return KeyEventResult.handled;
+    }
     final matches = _suggestions;
     if (matches.isEmpty || event is! KeyDownEvent) {
       return KeyEventResult.ignored;
@@ -174,11 +188,41 @@ class _SessionScreenState extends State<SessionScreen> {
     PersonDialog.show(context, profileId: session.profileId, nick: nick);
   }
 
+  /// Reply to [line]: remember it, show it above the composer, and put the
+  /// caret where the answer goes.
+  void _replyTo(ChatLine line) {
+    final active = session.active;
+    if (active == null || line.message == null) return;
+    setState(() => _replying = (conversation: active.name, line: line));
+    _composerFocus.requestFocus();
+  }
+
+  /// The reply the composer is holding, if it is for the conversation on
+  /// screen.
+  ChatLine? get _replyLine {
+    final replying = _replying;
+    if (replying == null || replying.conversation != session.active?.name) {
+      return null;
+    }
+    return replying.line;
+  }
+
   Future<void> _submit() async {
     final text = _composer.text;
     if (text.trim().isEmpty) return;
     _composer.clear();
-    final error = await session.submit(text);
+    final message = _replyLine?.message;
+    if (_replying != null) setState(() => _replying = null);
+    final error = await session.submit(
+      text,
+      replyTo: message == null
+          ? null
+          : ReplyRef(
+              msgid: message.msgid,
+              nick: message.sender,
+              excerpt: message.spans.map((s) => s.text).join(),
+            ),
+    );
     if (!mounted) return;
     // A rejected command is the user's own typing coming back at them, so it
     // is an error rather than a warning — but it still goes through the
@@ -485,6 +529,7 @@ class _SessionScreenState extends State<SessionScreen> {
                     conversation: active,
                     profileId: session.profileId,
                     onPersonTap: _editPerson,
+                    onReply: active.pending ? null : _replyTo,
                   ),
           ),
         ),
@@ -511,6 +556,14 @@ class _SessionScreenState extends State<SessionScreen> {
             onPick: _complete,
           ),
         ),
+        Reveal(
+          child: _replyLine == null
+              ? null
+              : _ReplyStrip(
+                  line: _replyLine!,
+                  onCancel: () => setState(() => _replying = null),
+                ),
+        ),
         _composerBar(t, active),
       ],
     );
@@ -530,7 +583,7 @@ class _SessionScreenState extends State<SessionScreen> {
       );
     }
     return Container(
-      padding: EdgeInsets.fromLTRB(g, 8, 8, 10),
+      padding: EdgeInsets.fromLTRB(g - 4, 8, g - 8, 10),
       decoration: BoxDecoration(
         color: t.surface,
         border: Border(
@@ -558,12 +611,14 @@ class _SessionScreenState extends State<SessionScreen> {
                     : 'Message ${active.name}',
                 hintStyle: TextStyle(color: t.faint, fontSize: 14),
                 isDense: true,
+                filled: true,
+                fillColor: t.bubble,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 11,
+                  horizontal: 16,
+                  vertical: 12,
                 ),
                 enabledBorder: _border(t.rule, Tokens.hairline),
-                focusedBorder: _border(t.accent, 1),
+                focusedBorder: _border(t.accent.withValues(alpha: 0.7), 1),
               ),
             ),
           ),
@@ -577,11 +632,19 @@ class _SessionScreenState extends State<SessionScreen> {
               color: t.muted,
               tooltip: 'Send a file',
             ),
-          IconButton(
-            onPressed: _submit,
-            icon: const Icon(Icons.arrow_upward, size: 19),
-            color: t.accent,
-            tooltip: 'Send',
+          const SizedBox(width: 6),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 1),
+            child: IconButton.filled(
+              onPressed: _submit,
+              icon: const Icon(Icons.arrow_upward_rounded, size: 20),
+              style: IconButton.styleFrom(
+                backgroundColor: t.accent,
+                foregroundColor: t.onAccent,
+                fixedSize: const Size(42, 42),
+              ),
+              tooltip: 'Send',
+            ),
           ),
         ],
       ),
@@ -590,9 +653,76 @@ class _SessionScreenState extends State<SessionScreen> {
 
   static OutlineInputBorder _border(Color color, double width) =>
       OutlineInputBorder(
-        borderRadius: BorderRadius.circular(7),
+        borderRadius: BorderRadius.circular(Tokens.radiusXL),
         borderSide: BorderSide(color: color, width: width),
       );
+}
+
+/// What the next message will answer, above the composer, with a way out.
+class _ReplyStrip extends StatelessWidget {
+  const _ReplyStrip({required this.line, required this.onCancel});
+
+  final ChatLine line;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final message = line.message!;
+    final g = context.layout.gutter;
+    return Container(
+      padding: EdgeInsets.fromLTRB(g, 8, g - 12, 6),
+      decoration: BoxDecoration(
+        color: t.surface,
+        border: Border(
+          top: BorderSide(color: t.rule, width: Tokens.hairline),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.reply_rounded, size: 18, color: t.accent),
+          const SizedBox(width: 10),
+          Container(
+            width: 3,
+            height: 32,
+            decoration: BoxDecoration(
+              color: t.accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Replying to ${message.isSelf ? 'yourself' : message.sender}',
+                  style: TextStyle(
+                    color: t.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  message.spans.map((s) => s.text).join(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.muted, fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: onCancel,
+            icon: const Icon(Icons.close_rounded, size: 18),
+            color: t.muted,
+            tooltip: 'Cancel reply',
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _Header extends StatelessWidget {
@@ -1188,14 +1318,14 @@ class _ViewLog extends StatelessWidget {
       message: 'What this connection has been doing',
       child: Touchable(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(Tokens.radiusS),
         builder: (context, touch) => AnimatedContainer(
           duration: context.motion.fast,
           curve: Motion.curve,
           padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
           decoration: BoxDecoration(
             color: t.surfaceHover.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Tokens.radiusS),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -1255,14 +1385,14 @@ class _RetryNowState extends State<_RetryNow>
     final t = context.tokens;
     return Touchable(
       onTap: _tap,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(Tokens.radiusS),
       builder: (context, touch) => AnimatedContainer(
         duration: context.motion.fast,
         curve: Motion.curve,
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
         decoration: BoxDecoration(
           color: t.surfaceHover.withValues(alpha: touch.wash),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(Tokens.radiusS),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

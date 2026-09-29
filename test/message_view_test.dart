@@ -1,9 +1,10 @@
 // Tests for how a message row is drawn.
 //
-// Three things a busy channel needs to be readable, each of which was
-// missing: your own messages set apart by shape, a time beside every line
-// rather than one at the top of a run, and a name for the day when the
-// scrollback crosses one.
+// What a busy channel needs to be readable: every message in a bubble —
+// yours on the right in the accent tint, everyone else's on the left — one
+// bubble per person per minute with its time in the corner, a name for the
+// day when the scrollback crosses one, and replies that show what they
+// answer.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,8 @@ ChatLine _said(
   String text, {
   bool isSelf = false,
   DateTime? at,
+  String? msgid,
+  rust.ReplyRef? replyTo,
 }) => ChatLine.message(
   rust.ChatMessage(
     target: const rust.Target.channel(name: '#test'),
@@ -40,6 +43,8 @@ ChatLine _said(
     isMention: false,
     isAction: false,
     isNotice: false,
+    msgid: msgid,
+    replyTo: replyTo,
   ),
   at ?? DateTime(2026, 1, 1, 9),
 );
@@ -110,7 +115,7 @@ Color? _colorOf(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
 
 void main() {
-  testWidgets('own messages sit in a block on the right; others do not', (
+  testWidgets('own messages sit in the tinted bubble on the right', (
     tester,
   ) async {
     await _pump(
@@ -126,7 +131,11 @@ void main() {
       ]),
     );
 
-    expect(_blockAround(tester, 'the build is green'), isNull);
+    expect(
+      _blockAround(tester, 'the build is green'),
+      isNull,
+      reason: 'theirs is a bubble too, but not in your tint',
+    );
     expect(_blockAround(tester, 'shipping it'), isNotNull);
 
     final theirs = tester.getRect(find.text('the build is green'));
@@ -135,12 +144,29 @@ void main() {
     expect(mine.left, greaterThan(theirs.left));
   });
 
-  testWidgets('a run of messages carries one time, beside the name', (
+  testWidgets('one minute is one bubble, with one time in its corner', (
     tester,
   ) async {
-    // Two lines from one person a minute apart: grouped, so the second has
-    // no sender label and no time of its own — a time on every line was
-    // tried and was noise.
+    // Two lines inside the same minute share a bubble and its time.
+    await _pump(
+      tester,
+      _conversation([
+        _said('alice', 'first', at: DateTime(2026, 1, 1, 9, 0, 10)),
+        _said('alice', 'second', at: DateTime(2026, 1, 1, 9, 0, 40)),
+      ]),
+    );
+
+    expect(find.text('alice'), findsOneWidget);
+    expect(find.text('09:00'), findsOneWidget, reason: 'one bubble, one time');
+    // The time sits at the bubble's foot, beside the last line.
+    final time = tester.getRect(find.text('09:00'));
+    final last = tester.getRect(find.text('second'));
+    expect(time.top, greaterThanOrEqualTo(last.top - 1));
+  });
+
+  testWidgets('a new minute is a new bubble with its own time, one name', (
+    tester,
+  ) async {
     await _pump(
       tester,
       _conversation([
@@ -149,9 +175,28 @@ void main() {
       ]),
     );
 
-    expect(find.text('alice'), findsOneWidget, reason: 'grouped: one label');
+    expect(find.text('alice'), findsOneWidget, reason: 'one run: one name');
     expect(find.text('09:00'), findsOneWidget);
-    expect(find.text('09:01'), findsNothing, reason: 'and one time');
+    expect(find.text('09:01'), findsOneWidget);
+  });
+
+  testWidgets('a reply shows what it answers, and who said it', (tester) async {
+    await _pump(
+      tester,
+      _conversation([
+        _said('alice', 'the build is green', msgid: 'm1'),
+        _said(
+          'bob',
+          'nice',
+          at: DateTime(2026, 1, 1, 9, 1),
+          // By tag alone: the quote fills itself in from the original.
+          replyTo: const rust.ReplyRef(msgid: 'm1', nick: '', excerpt: ''),
+        ),
+      ]),
+    );
+
+    expect(find.text('the build is green'), findsNWidgets(2));
+    expect(find.text('alice'), findsNWidgets(2), reason: 'label and quote');
   });
 
   testWidgets('times can still be turned off', (tester) async {
@@ -186,7 +231,48 @@ void main() {
     );
   });
 
-  testWidgets('nicks wear their colour; yours wears the accent', (
+  testWidgets('a swipe on a bubble replies to the line under the finger', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = await AppSettings.load();
+    final replies = <ChatLine>[];
+    final conversation = _conversation([
+      _said('alice', 'first', at: DateTime(2026, 1, 1, 9, 0, 1)),
+      _said('alice', 'second', at: DateTime(2026, 1, 1, 9, 0, 2)),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: Tokens.themeFor(Tokens.dark),
+        home: SettingsScope(
+          settings: settings,
+          child: Scaffold(
+            body: MessageView(conversation: conversation, onReply: replies.add),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Short of the threshold: nothing.
+    await tester.timedDrag(
+      find.text('second'),
+      const Offset(30, 0),
+      const Duration(milliseconds: 200),
+    );
+    await tester.pumpAndSettle();
+    expect(replies, isEmpty);
+
+    await tester.timedDrag(
+      find.text('second'),
+      const Offset(90, 0),
+      const Duration(milliseconds: 300),
+    );
+    await tester.pumpAndSettle();
+    expect(replies.single, same(conversation.lines[1]));
+  });
+
+  testWidgets('nicks wear their colour; yours needs no label at all', (
     tester,
   ) async {
     await _pump(
@@ -197,7 +283,8 @@ void main() {
       ]),
     );
     expect(_colorOf(tester, 'alice'), NickPalette.of('alice', Tokens.dark));
-    expect(_colorOf(tester, 'me'), Tokens.dark.accent);
+    // The side and the tint already say it is yours.
+    expect(find.text('me'), findsNothing);
   });
 
   testWidgets('with the switch off, nicks go back to grey', (tester) async {

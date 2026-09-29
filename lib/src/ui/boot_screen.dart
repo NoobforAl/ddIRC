@@ -330,7 +330,7 @@ class _Failed extends StatelessWidget {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: t.surface,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(Tokens.radiusM),
                     border: Border.all(color: t.rule, width: Tokens.hairline),
                   ),
                   // The real message, verbatim. It names the library and the

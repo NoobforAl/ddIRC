@@ -1091,7 +1091,7 @@ class _ChannelChip extends StatelessWidget {
       waitDuration: const Duration(milliseconds: 400),
       child: Touchable(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(Tokens.radiusS),
         builder: (context, touch) => AnimatedContainer(
           duration: m.fast,
           curve: Motion.curve,
@@ -1103,7 +1103,7 @@ class _ChannelChip extends StatelessWidget {
             color: selected
                 ? t.accent.withValues(alpha: 0.16)
                 : t.surfaceHover.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(Tokens.radiusS),
             border: Border.all(
               color: selected ? t.accent : t.rule,
               width: selected ? 1 : Tokens.hairline,

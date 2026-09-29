@@ -203,7 +203,7 @@ class _Count extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
         color: highlighted ? t.accent : t.badge,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(Tokens.radiusM),
       ),
       child: Text(
         count > 99 ? '99+' : '$count',

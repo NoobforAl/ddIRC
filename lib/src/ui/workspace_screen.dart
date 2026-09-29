@@ -467,14 +467,14 @@ class _RetryButtonState extends State<_RetryButton>
     final t = context.tokens;
     return Touchable(
       onTap: _retry,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(Tokens.radiusS),
       builder: (context, touch) => AnimatedContainer(
         duration: context.motion.fast,
         curve: Motion.curve,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: t.surfaceHover.withValues(alpha: touch.wash),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(Tokens.radiusS),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -528,14 +528,14 @@ class _ProfileRow extends StatelessWidget {
         // change, and the row refusing a left click must not take the menu
         // with it.
         onContextMenu: onMenu,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(Tokens.radiusM),
         builder: (context, touch) => AnimatedContainer(
           duration: context.motion.fast,
           curve: Motion.curve,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
             color: t.surfaceHover.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(Tokens.radiusM),
             border: Border.all(
               color: failure != null ? t.bad.withValues(alpha: 0.4) : t.rule,
               width: Tokens.hairline,

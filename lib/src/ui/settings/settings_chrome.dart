@@ -81,7 +81,7 @@ class SettingsDialog extends StatelessWidget {
       shape: full
           ? const RoundedRectangleBorder()
           : RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(Tokens.radiusM),
               side: BorderSide(color: t.rule, width: Tokens.hairline),
             ),
       child: ConstrainedBox(
@@ -761,7 +761,7 @@ class _SettingsChoiceState<T> extends State<SettingsChoice<T>> {
           const SizedBox(height: 9),
           Container(
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(7),
+              borderRadius: BorderRadius.circular(Tokens.radiusM),
               border: Border.all(color: t.rule, width: Tokens.hairline),
             ),
             clipBehavior: Clip.antiAlias,
@@ -1231,7 +1231,9 @@ class SettingsPrimaryButton extends StatelessWidget {
         disabledForegroundColor: t.faint,
         elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+        ),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
       child: Text(label),
@@ -1263,7 +1265,9 @@ class SettingsDangerButton extends StatelessWidget {
           width: Tokens.hairline,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+        ),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
       child: Text(label),
@@ -1309,7 +1313,9 @@ class SettingsSecondaryButton extends StatelessWidget {
           width: Tokens.hairline,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+        ),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
       child: Text(label),
@@ -1347,7 +1353,9 @@ class SettingsTertiaryButton extends StatelessWidget {
       style: TextButton.styleFrom(
         foregroundColor: t.muted,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+        ),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
       child: Text(label),

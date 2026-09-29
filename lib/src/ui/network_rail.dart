@@ -390,7 +390,7 @@ class _Count extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       decoration: BoxDecoration(
         color: highlighted ? t.accent : t.badge,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(Tokens.radiusM),
         border: Border.all(color: t.surface, width: 1.5),
       ),
       child: Text(
