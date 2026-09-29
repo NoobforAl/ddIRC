@@ -9,6 +9,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'src/model/first_run.dart';
+import 'src/model/mcp.dart';
 import 'src/model/app_lock.dart';
 import 'src/model/history.dart';
 import 'src/model/people.dart';
@@ -28,6 +30,7 @@ import 'src/ui/boot_screen.dart';
 import 'src/ui/notification_router.dart';
 import 'src/ui/window_chrome.dart';
 import 'src/ui/workspace_screen.dart';
+import 'src/ui/agent_approval_sheet.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,6 +53,10 @@ Future<void> main() async {
   // never flashes before ours replaces it.
   await prepareWindow(Tokens.forMode(settings.themeMode));
   final profiles = await ProfileStore.load();
+  // A fresh install starts private: the built-in Tor on, and every
+  // connection through it. Before either preference is read, so they read
+  // the defaults this writes. See [FirstRun].
+  await FirstRun.apply(hasProfiles: !profiles.isEmpty);
   // Tor before the proxy settings, because the built-in route reads its port
   // from it. Neither starts anything here — this is a preference being read.
   final tor = await TorSettings.load();
@@ -60,6 +67,9 @@ Future<void> main() async {
   // Just a preference too: whether to ask for biometrics is decided here,
   // but the asking itself only happens once the workspace is on screen.
   final appLock = await AppLockSettings.load();
+  // Also only a preference. The server itself waits for the workspace it
+  // reads from, which is built with the app.
+  final mcp = await McpService.load();
   runApp(
     DdIrcApp(
       settings: settings,
@@ -68,6 +78,7 @@ Future<void> main() async {
       tor: tor,
       localServer: localServer,
       appLock: appLock,
+      mcp: mcp,
     ),
   );
 }
@@ -134,6 +145,7 @@ class DdIrcApp extends StatefulWidget {
     required this.tor,
     required this.localServer,
     required this.appLock,
+    required this.mcp,
   });
 
   final AppSettings settings;
@@ -142,6 +154,7 @@ class DdIrcApp extends StatefulWidget {
   final TorSettings tor;
   final LocalServerSettings localServer;
   final AppLockSettings appLock;
+  final McpService mcp;
 
   @override
   State<DdIrcApp> createState() => _DdIrcAppState();
@@ -212,9 +225,38 @@ class _DdIrcAppState extends State<DdIrcApp> {
     workspace: _workspace,
   );
 
+  /// For the agent server's approval sheet, which is raised from outside any
+  /// route and so needs a navigator it can reach without a context of its own.
+  final _navigator = GlobalKey<NavigatorState>();
+
+  /// The send request whose sheet is on screen, so a second request queues
+  /// behind it rather than stacking a second sheet on top.
+  McpSendRequest? _asking;
+
+  void _onAgentRequest() {
+    final queue = widget.mcp.pending.value;
+    if (_asking != null && queue.contains(_asking)) return;
+    _asking = null;
+    if (queue.isEmpty) return;
+    final request = queue.first;
+    final context = _navigator.currentContext;
+    if (context == null) return;
+    _asking = request;
+    unawaited(
+      AgentApprovalSheet.show(context, request).then((decision) {
+        request.decide(decision ?? McpDecision.deny);
+        _asking = null;
+        // The queue changes once this one is answered; the listener picks up
+        // whatever is next.
+      }),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    widget.mcp.attach(_workspace, locked: widget.appLock.locked);
+    widget.mcp.pending.addListener(_onAgentRequest);
     // Not awaited, and nothing waits on it: this arranges what a later close
     // will do, and nothing can be closed before the first frame.
     unawaited(_background.start());
@@ -249,12 +291,16 @@ class _DdIrcAppState extends State<DdIrcApp> {
     // dial until it has bound. An auto-connect that ran first would use last
     // session's port and fail against whatever holds it now.
     await widget.localServer.startIfEnabled();
+    // Nothing waits on it: an agent that connects a moment later finds it.
+    unawaited(widget.mcp.startIfEnabled());
     unawaited(_workspace.connectAutomatic());
   }
 
   @override
   void dispose() {
     _themeMode.dispose();
+    widget.mcp.pending.removeListener(_onAgentRequest);
+    widget.mcp.dispose();
     // The store writes in batches on a timer, so the last couple of seconds of
     // a conversation are still in memory when the app is asked to quit. Not
     // awaited — dispose cannot be — but the write is queued before teardown
@@ -283,34 +329,39 @@ class _DdIrcAppState extends State<DdIrcApp> {
               tor: widget.tor,
               child: LocalServerScope(
                 server: widget.localServer,
-                child: WorkspaceScope(
-                  workspace: _workspace,
-                  // The theme is a setting, so the app itself has to listen:
-                  // nothing below rebuilds MaterialApp, and `themeMode` is read
-                  // here. Only that one setting, though — see [_themeMode].
-                  child: ValueListenableBuilder<ThemeMode>(
-                    valueListenable: _themeMode,
-                    builder: (context, mode, _) => MaterialApp(
-                      title: 'ddIRC',
-                      debugShowCheckedModeBanner: false,
-                      theme: _light,
-                      darkTheme: _dark,
-                      themeMode: mode,
-                      // Wrapping here rather than per screen means every route —
-                      // and every dialog on the root navigator — sits under one
-                      // frame.
-                      builder: (context, child) =>
-                          WindowFrame(child: child ?? const SizedBox.shrink()),
-                      // Inside MaterialApp rather than around it, so the splash
-                      // is themed and cross-fades into the app. The scopes stay
-                      // above it, because dialogs are routes and must reach
-                      // them. The lock gate sits inside what the splash
-                      // reveals rather than around it, so a failed core load
-                      // still shows the existing retry screen unlocked.
-                      home: BootScreen(
-                        load: _start,
-                        builder: (context) =>
-                            AppLockGate(child: const WorkspaceScreen()),
+                child: McpScope(
+                  mcp: widget.mcp,
+                  child: WorkspaceScope(
+                    workspace: _workspace,
+                    // The theme is a setting, so the app itself has to listen:
+                    // nothing below rebuilds MaterialApp, and `themeMode` is read
+                    // here. Only that one setting, though — see [_themeMode].
+                    child: ValueListenableBuilder<ThemeMode>(
+                      valueListenable: _themeMode,
+                      builder: (context, mode, _) => MaterialApp(
+                        navigatorKey: _navigator,
+                        title: 'ddIRC',
+                        debugShowCheckedModeBanner: false,
+                        theme: _light,
+                        darkTheme: _dark,
+                        themeMode: mode,
+                        // Wrapping here rather than per screen means every route —
+                        // and every dialog on the root navigator — sits under one
+                        // frame.
+                        builder: (context, child) => WindowFrame(
+                          child: child ?? const SizedBox.shrink(),
+                        ),
+                        // Inside MaterialApp rather than around it, so the splash
+                        // is themed and cross-fades into the app. The scopes stay
+                        // above it, because dialogs are routes and must reach
+                        // them. The lock gate sits inside what the splash
+                        // reveals rather than around it, so a failed core load
+                        // still shows the existing retry screen unlocked.
+                        home: BootScreen(
+                          load: _start,
+                          builder: (context) =>
+                              AppLockGate(child: const WorkspaceScreen()),
+                        ),
                       ),
                     ),
                   ),

@@ -38,7 +38,10 @@ class TorProgress {
   final String? blocked;
 }
 
-/// The bundled Tor — beta.
+/// The bundled Tor.
+///
+/// Out of beta as of 0.7: it bootstraps from cold in about fifteen seconds
+/// and warm in under ten, and it is what a fresh install connects through.
 ///
 /// Owns one question: is Tor running, and where. Everything about *using* it
 /// is the proxy model's business, and deliberately so — this ends at a port

@@ -25,6 +25,12 @@ class AppLockSettings extends ChangeNotifier {
   final SharedPreferences? _prefs;
   bool _enabled = false;
 
+  /// Whether the lock screen is up right now. Set by the gate that draws it,
+  /// and read by what serves the app's contents to anything outside it — the
+  /// agent server refuses while this is true, because a locked app that still
+  /// answered questions about its scrollback would not be locked.
+  final locked = ValueNotifier<bool>(false);
+
   /// What the user asked for, folded against platform support.
   ///
   /// A stored `true` carried in from another platform — a synced settings

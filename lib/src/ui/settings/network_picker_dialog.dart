@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../model/directory.dart';
+import '../../model/proxy.dart';
 import '../../theme.dart';
 import '../motion.dart';
 import '../touchable.dart';
@@ -158,6 +159,23 @@ class _NetworkPickerDialogState extends State<NetworkPickerDialog> {
         Padding(
           padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
           child: _Note(text: network.note!),
+        ),
+      // Tor is the default on a fresh install, and it is the thing most
+      // likely to make a network hang up without saying why: many refuse
+      // Tor exits unless the connection signs in to an account.
+      if (ProxyScope.maybeOf(context)?.route == ProxyRoute.builtIn)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+          child: _Note(
+            text: network.sasl
+                ? 'You connect through Tor. Many networks only let Tor in '
+                      'with an account signed in over SASL — this one '
+                      'supports that, so fill in the SASL fields if it hangs '
+                      'up on you.'
+                : 'You connect through Tor, and this network has no SASL '
+                      'on record, so it may refuse the connection. If it '
+                      'does, Tor can be switched off for now in App settings.',
+          ),
         ),
       if (network.sasl)
         const SettingsProse(

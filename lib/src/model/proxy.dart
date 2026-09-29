@@ -60,7 +60,8 @@ enum ProxyRoute {
   /// Connections go direct.
   off('Off'),
 
-  /// The Tor that ships inside the app, on a loopback port it chose. Beta.
+  /// The Tor that ships inside the app, on a loopback port it chose. What a
+  /// fresh install uses; see `FirstRun`.
   builtIn('Built-in Tor'),
 
   /// A SOCKS5 proxy the user runs — their own Tor on 9050, an SSH tunnel, a
@@ -454,4 +455,9 @@ class ProxyScope extends InheritedNotifier<ProxySettings> {
     assert(scope?.notifier != null, 'No ProxyScope above this widget');
     return scope!.notifier!;
   }
+
+  /// The settings if there are any above [context], for widgets that are
+  /// also shown on their own (in a dialog, in a test) and can do without.
+  static ProxySettings? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ProxyScope>()?.notifier;
 }

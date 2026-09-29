@@ -12,6 +12,7 @@ import '../background_android.dart';
 import '../motion.dart';
 import '../notifier.dart' show notificationHelpFor, notificationsSupportedOn;
 import 'app_lock_section.dart';
+import 'agents_section.dart';
 import 'file_transfer_section.dart';
 import 'local_server_section.dart';
 import 'message_history_section.dart';
@@ -210,7 +211,7 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
       SettingsNavRow(
         label: _Page.connection.label,
         summary: _connectionSummary(proxies, server, settings),
-        // Two of the four sections behind this row are beta, and the badge is
+        // Three of the five sections behind this row are beta, and the badge is
         // on the row because the point of it is to be seen before the feature
         // is reached rather than after.
         beta: true,
@@ -401,9 +402,12 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
       LocalServerSection(),
       TorSection(),
       GlobalProxySection(),
-      // Last, because it is the one that does not go through any of the three
+      // After the routes, because it does not go through any of the three
       // above — which is the thing about it worth noticing.
       FileTransferSection(),
+      // Last: not a way out of this machine at all, but a way in to the app,
+      // for an agent running beside it.
+      AgentsSection(),
     ];
   }
 

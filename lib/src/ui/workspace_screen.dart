@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../model/ircconfig.dart';
 import '../model/profile.dart';
+import '../model/proxy.dart';
+import '../model/tor.dart';
 import '../model/workspace.dart';
 import '../theme.dart';
 import '../version.dart';
@@ -337,6 +339,7 @@ class _Empty extends StatelessWidget {
                   ),
                 ],
               ),
+              const _TorLine(),
               const SizedBox(height: 26),
               if (profiles.isEmpty)
                 Padding(
@@ -616,6 +619,55 @@ class _ProfileRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Whether connections will go through Tor, said on the welcome screen where
+/// a fresh install first looks — because on a fresh install they will, and
+/// someone ought to be told before the first network is chosen rather than
+/// discover it from a bootstrap bar. Nothing is shown when the route is off.
+class _TorLine extends StatelessWidget {
+  const _TorLine();
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final proxies = ProxyScope.maybeOf(context);
+    if (proxies?.route != ProxyRoute.builtIn) return const SizedBox.shrink();
+    final tor = TorScope.of(context);
+    final progress = tor.progress;
+    final String status;
+    if (tor.failure != null) {
+      status = 'Tor could not start — see App settings';
+    } else if (progress.ready) {
+      status = 'Connections go through Tor';
+    } else {
+      status = 'Connecting to Tor… ${(progress.progress * 100).round()}%';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.shield_outlined,
+            size: 12,
+            color: tor.failure != null
+                ? t.bad
+                : progress.ready
+                ? t.ok
+                : t.muted,
+          ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              status,
+              style: TextStyle(fontSize: 12.5, color: t.muted),
+            ),
+          ),
+        ],
       ),
     );
   }

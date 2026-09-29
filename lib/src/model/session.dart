@@ -1359,6 +1359,32 @@ class SessionModel extends ChangeNotifier {
     return null;
   }
 
+  /// Send [text] to the open conversation [target], exactly as written: no
+  /// slash commands, and whatever conversation is on screen does not matter.
+  ///
+  /// For senders that are not the composer — the agent server — which name
+  /// their conversation and must never be able to reach a command by starting
+  /// a line with `/`.
+  Future<String?> say(String target, String text, {ReplyRef? replyTo}) {
+    final conversation = _conversations[_key(target)];
+    if (conversation == null) return Future.value('no conversation $target');
+    if (conversation.pending) return Future.value('accept the request first');
+    return _run(
+      () => replyTo == null
+          ? core.sendMessage(
+              id: connectionId,
+              target: conversation.name,
+              text: text,
+            )
+          : core.sendReply(
+              id: connectionId,
+              target: conversation.name,
+              text: text,
+              reply: replyTo,
+            ),
+    );
+  }
+
   /// Interpret composer input, handling the slash commands users expect.
   ///
   /// Returns an error string to show inline, or null on success.

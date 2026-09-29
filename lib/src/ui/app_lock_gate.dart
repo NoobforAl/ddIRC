@@ -78,6 +78,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   void _lockIfEnabled() {
     if (_lock?.enabled != true) return;
     setState(() => _locked = true);
+    _lock?.locked.value = true;
     unawaited(_unlock());
   }
 
@@ -90,6 +91,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
       _authenticating = false;
       if (ok) _locked = false;
     });
+    if (ok) _lock?.locked.value = false;
   }
 
   @override

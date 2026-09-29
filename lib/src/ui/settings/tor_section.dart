@@ -5,7 +5,7 @@ import '../../model/tor.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
 
-/// The bundled Tor, as shown in App settings — beta.
+/// The bundled Tor, as shown in App settings.
 ///
 /// One switch, not two. Starting Tor and routing through it are separate
 /// operations underneath, but there is no reason to want one without the
@@ -52,7 +52,6 @@ class _TorSectionState extends State<TorSection> {
 
     return SettingsSection(
       label: 'Tor',
-      beta: true,
       children: [
         SettingsSwitch(
           label: 'Route everything through the built-in Tor',
