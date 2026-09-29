@@ -81,9 +81,10 @@ class SettingsDialog extends StatelessWidget {
       shape: full
           ? const RoundedRectangleBorder()
           : RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(Tokens.radiusM),
+              borderRadius: BorderRadius.circular(Tokens.radiusXL),
               side: BorderSide(color: t.rule, width: Tokens.hairline),
             ),
+      clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: full ? double.infinity : width,
@@ -244,7 +245,7 @@ class _SettingsSectionState extends State<SettingsSection> {
           // Tighter above when a dot is present: the dot is taller than the
           // heading it sits beside and would otherwise push every section
           // apart by the difference.
-          padding: EdgeInsets.fromLTRB(18, help == null ? 14 : 8, 18, 6),
+          padding: EdgeInsets.fromLTRB(24, help == null ? 16 : 10, 18, 7),
           child: Row(
             children: [
               Text(
@@ -273,8 +274,39 @@ class _SettingsSectionState extends State<SettingsSection> {
           open: _help,
           padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
         ),
-        ...widget.children,
+        if (widget.children.isNotEmpty) SettingsCard(children: widget.children),
       ],
+    );
+  }
+}
+
+/// A soft, rounded card that a group of settings sits on.
+///
+/// The rows of a section used to run edge to edge under their heading, and a
+/// long page read as one undivided column. On a card each group is a shape
+/// of its own — a step up from the dialog's surface, no border, no shadow —
+/// the way the chat's bubbles sit on its ground.
+class SettingsCard extends StatelessWidget {
+  const SettingsCard({super.key, required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: t.bubble,
+        borderRadius: BorderRadius.circular(Tokens.radiusL),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: children,
+      ),
     );
   }
 }

@@ -199,39 +199,42 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
     final server = LocalServerScope.of(context);
 
     return [
-      const SizedBox(height: 4),
-      SettingsNavRow(
-        label: _Page.appearance.label,
-        summary:
-            '${settings.themeMode.label} · ${settings.density.label} · '
-            '${settings.showTimestamps ? 'timestamps on' : 'no timestamps'}',
-        onTap: () => _open(_Page.appearance),
+      const SizedBox(height: 10),
+      SettingsCard(
+        children: [
+          SettingsNavRow(
+            label: _Page.appearance.label,
+            summary:
+                '${settings.themeMode.label} · ${settings.density.label} · '
+                '${settings.showTimestamps ? 'timestamps on' : 'no timestamps'}',
+            onTap: () => _open(_Page.appearance),
+          ),
+          const SettingsRule(),
+          SettingsNavRow(
+            label: _Page.connection.label,
+            summary: _connectionSummary(proxies, server, settings),
+            // Three of the five sections behind this row are beta, and the badge is
+            // on the row because the point of it is to be seen before the feature
+            // is reached rather than after.
+            beta: true,
+            onTap: () => _open(_Page.connection),
+          ),
+          if (_hasNotificationSettings) ...[
+            const SettingsRule(),
+            SettingsNavRow(
+              label: _Page.notifications.label,
+              summary: _notificationSummary(settings),
+              onTap: () => _open(_Page.notifications),
+            ),
+          ],
+          const SettingsRule(),
+          SettingsNavRow(
+            label: _Page.privacy.label,
+            summary: _privacySummary(settings, AppLockScope.of(context)),
+            onTap: () => _open(_Page.privacy),
+          ),
+        ],
       ),
-      const SettingsRule(),
-      SettingsNavRow(
-        label: _Page.connection.label,
-        summary: _connectionSummary(proxies, server, settings),
-        // Three of the five sections behind this row are beta, and the badge is
-        // on the row because the point of it is to be seen before the feature
-        // is reached rather than after.
-        beta: true,
-        onTap: () => _open(_Page.connection),
-      ),
-      if (_hasNotificationSettings) ...[
-        const SettingsRule(),
-        SettingsNavRow(
-          label: _Page.notifications.label,
-          summary: _notificationSummary(settings),
-          onTap: () => _open(_Page.notifications),
-        ),
-      ],
-      const SettingsRule(),
-      SettingsNavRow(
-        label: _Page.privacy.label,
-        summary: _privacySummary(settings, AppLockScope.of(context)),
-        onTap: () => _open(_Page.privacy),
-      ),
-      const SettingsRule(),
       const SizedBox(height: 10),
       // The empty screen says this too, but it is only reachable with nothing
       // connected — which is not where anybody spends their time. Settings is
