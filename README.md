@@ -315,8 +315,13 @@ A hash on a rounded square. `#` is the channel sigil — it is what an IRC
 address looks like, it predates every other use of the character, and unlike a
 wordmark it is still legible at sixteen pixels.
 
-It is described once, as numbers, in `lib/src/ui/mark_spec.dart`: four strokes
-and a corner radius, every value a fraction of the side. Two things read it.
+Drawn by hand rather than set in type: four gentle curves, each with its own
+weight and lean, small inside a round periwinkle field — soft at launcher
+sizes, and comfortably inside Android's adaptive-icon safe zone.
+
+It is described once, as numbers, in `lib/src/ui/mark_spec.dart`: four curves
+(start, control point, end, width) and a corner radius, every value a fraction
+of the side. Two things read it.
 `AppMark` paints it on the splash and the empty screen, and
 `tool/make_icons.dart` rasterises it into every launcher icon — the Windows
 `.ico` at seven sizes, Android's legacy and adaptive icons at five densities,
@@ -377,7 +382,16 @@ on the screen, and the layout never reflows.
 
 ## Proxy
 
-Off. SOCKS5, and nothing else.
+SOCKS5, and nothing else. **A fresh install routes everything through the
+built-in Tor**; an install that already had networks keeps whatever it had.
+
+The built-in Tor is the most private default the app has, and it was the one
+default still pointing the other way: everything else — logs, history,
+notification previews — already starts off. So on first launch the welcome
+screen says "Connecting to Tor…", and the first network added never sees your
+address. Many networks refuse Tor unless you sign in with SASL; the network
+browser says so for each one. Switch it off under App settings → Connection →
+Tor.
 
 There are two settings and they meet in one place. The app has a proxy; each
 network chooses what to do about it:
@@ -676,6 +690,44 @@ of why the tests are quick.
 
 **The MOTD says it is beta.** A MOTD is the one thing every client shows on
 arrival, and whoever connected may not be whoever switched it on.
+
+## Agents (MCP)
+
+**Beta, and off.** App settings → Connection → *Agents (MCP)* runs a
+[Model Context Protocol](https://modelcontextprotocol.io) server inside the
+app, so an AI agent — Claude Code, Claude Desktop, any MCP client — can catch
+up on your conversations and draft replies.
+
+What an agent can do:
+
+| Tool | What it does |
+|---|---|
+| `list_networks` | The networks connected right now, with your nick on each. |
+| `list_conversations` | The channels and DMs open on one network, with unread counts and topics. |
+| `read_messages` | Recent messages in one conversation, oldest first, each with an id; `before` pages back. |
+| `search_messages` | Text search over what the app holds in memory, newest first. |
+| `send_message` | Send to a conversation that is already open, optionally as a reply. |
+
+**Nothing is sent without you.** Every `send_message` raises a sheet in the
+app with the network, the conversation and the exact text, and waits — up to
+two minutes — for *Send*, *Always allow in #channel*, or *Don't send*. There is
+no tool to join, leave, change nick or run a command, because a message is the
+only action whose whole effect can be read off a sheet before it happens. Text
+from an agent is always sent as text: a line that starts with `/` is a line
+that starts with `/`.
+
+How it is reached: the Streamable HTTP transport, answered with plain JSON, at
+`http://127.0.0.1:<port>/mcp` behind a random bearer token. The settings
+section shows the address and the token, and copies a ready-made command:
+
+```bash
+claude mcp add --transport http ddirc http://127.0.0.1:PORT/mcp \
+  --header "Authorization: Bearer TOKEN"
+```
+
+The port is kept between runs so a configured agent keeps working. *New token*
+cuts off every agent holding the old one. While the app is locked the server
+answers nothing. See [SECURITY.md](SECURITY.md#agent-server-mcp).
 
 ## Why Rust, not C
 
@@ -1070,8 +1122,19 @@ rejected for splitting persistence across two languages rather than for anything
 about the packages; `sqlx` wants an async runtime the store does not need, and
 `diesel` is an ORM over a schema with one table.
 
+The agent server added **nothing**: `dart:io` already has an HTTP server, and
+the part of MCP it speaks — JSON-RPC over one POST — is smaller than any SDK's
+changelog.
+
 `Cargo.lock` is committed and `cargo audit` runs over the whole tree. See
 [SECURITY.md](SECURITY.md).
+
+Dependencies are checked on a schedule rather than when someone remembers:
+Dependabot opens grouped pull requests for Dart, Rust and the CI actions on the
+first of every second month (`.github/dependabot.yml`), and `make outdated`
+asks the same question locally. The rusqlite pin travels with arti's, and the
+flutter_rust_bridge crate and Dart package move together or not at all — both
+are called out in the config, where a bot would otherwise split them.
 
 ## Testing
 

@@ -42,7 +42,9 @@ needs is confined to generated code.
 
 ### Proxy
 
-Off by default. SOCKS5 only, and every property below is a deliberate one.
+On a fresh install, the built-in Tor, with every connection through it; an
+existing install keeps what it had (`lib/src/model/first_run.dart`). SOCKS5
+only, and every property below is a deliberate one.
 
 - **The proxy carries the connection; it does not terminate it.** The SOCKS5
   tunnel is opened first and TLS is negotiated end to end with the IRC server
@@ -360,6 +362,33 @@ every cycle and produce a hot loop.
 - Falls back to the device's own PIN, pattern or password when biometrics are
   unavailable or unenrolled — the platform's own default behaviour, not a
   weaker path added on top of it.
+
+### Agent server (MCP)
+
+Off by default, and beta. When on, an MCP client can read what the app holds
+in memory about open conversations and ask to send messages.
+
+- **Loopback only.** Bound to `127.0.0.1`; nothing off this machine can reach
+  it.
+- **A bearer token on every request**, 256 random bits, compared in constant
+  time, kept in the platform keychain. *New token* revokes every client at
+  once.
+- **Not reachable from a web page.** A loopback bind alone does not stop a
+  page in a browser on this machine: DNS rebinding points a hostile name at
+  `127.0.0.1`. Requests whose `Host` is not a loopback name, or whose `Origin`
+  is anything but loopback, are refused before the token is even checked.
+- **Every send is approved by the user**, with the exact text on screen, unless
+  they chose to always allow that one conversation (revocable in settings).
+  Unanswered after two minutes is a refusal. A message request that has not
+  been accepted cannot be answered at all.
+- **One write, no commands.** The only action is a message to a conversation
+  that is already open. An agent's text is sent as text — it never reaches the
+  slash-command parser — and the core's own outgoing sanitiser still strips
+  line breaks and control characters, so it cannot inject IRC commands.
+- **Nothing while locked.** With the app lock on and the lock screen up,
+  every call is refused.
+- **What it can read is what the screen can.** In-memory scrollback only; it
+  opens no database and no files.
 
 ### Least privilege
 
