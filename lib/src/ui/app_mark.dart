@@ -4,7 +4,7 @@ import 'mark_spec.dart';
 
 /// The app's mark, drawn at any size.
 ///
-/// Painted rather than shipped as an asset. It is four strokes on a rounded
+/// Painted rather than shipped as an asset. It is four curves on a rounded
 /// square, so a rasterised copy would only be a second version of
 /// [MarkSpec] to keep in step — and one that goes soft at whatever size the
 /// asset was not exported for.
@@ -41,12 +41,20 @@ class _MarkPainter extends CustomPainter {
 
     final ink = Paint()
       ..color = const Color(MarkSpec.glyphColor)
-      ..strokeWidth = MarkSpec.stroke * side
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
 
-    for (final (x1, y1, x2, y2) in MarkSpec.strokes) {
-      canvas.drawLine(at(x1, y1), at(x2, y2), ink);
+    for (final stroke in MarkSpec.strokes) {
+      final (x1, y1, cx, cy, x2, y2, w) = stroke;
+      final start = at(x1, y1);
+      final control = at(cx, cy);
+      final end = at(x2, y2);
+      canvas.drawPath(
+        Path()
+          ..moveTo(start.dx, start.dy)
+          ..quadraticBezierTo(control.dx, control.dy, end.dx, end.dy),
+        ink..strokeWidth = w * side,
+      );
     }
   }
 

@@ -311,7 +311,17 @@ Uint8List render(
   final radius = MarkSpec.corner * side;
   final half = side / 2;
   final centre = origin + half;
-  final ink = MarkSpec.stroke * side / 2;
+  // Each curve as a chain of short capsules: the union of their distances
+  // is the distance to the thick curve, to well under a pixel at any size.
+  final pieces = [
+    for (final stroke in MarkSpec.strokes)
+      for (var i = 0; i < MarkSpec.curveSteps; i++)
+        (
+          MarkSpec.pointOn(stroke, i / MarkSpec.curveSteps),
+          MarkSpec.pointOn(stroke, (i + 1) / MarkSpec.curveSteps),
+          stroke.$7 * side / 2,
+        ),
+  ];
 
   for (var y = 0; y < size; y++) {
     for (var x = 0; x < size; x++) {
@@ -334,7 +344,7 @@ Uint8List render(
       // One distance for the whole glyph, so the four strokes do not blend
       // over one another where they cross.
       var d = double.infinity;
-      for (final (x1, y1, x2, y2) in MarkSpec.strokes) {
+      for (final ((x1, y1), (x2, y2), ink) in pieces) {
         final ds = _segment(cx, cy, px(x1), px(y1), px(x2), px(y2), ink);
         if (ds < d) d = ds;
       }
@@ -412,11 +422,11 @@ double _segment(
 
 /// The same four strokes, as a vector file.
 String svg() {
-  final w = MarkSpec.stroke * 1000;
+  String n(double v) => (v * 1000).toStringAsFixed(1);
   final lines = [
-    for (final (x1, y1, x2, y2) in MarkSpec.strokes)
-      '  <line x1="${x1 * 1000}" y1="${y1 * 1000}" '
-          'x2="${x2 * 1000}" y2="${y2 * 1000}" />',
+    for (final (x1, y1, cx, cy, x2, y2, w) in MarkSpec.strokes)
+      '  <path d="M ${n(x1)} ${n(y1)} Q ${n(cx)} ${n(cy)} ${n(x2)} ${n(y2)}" '
+          'stroke-width="${n(w)}" />',
   ].join('\n');
 
   return '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -425,7 +435,7 @@ String svg() {
       'width="1000" height="1000">\n'
       '  <rect width="1000" height="1000" rx="${MarkSpec.corner * 1000}" '
       'fill="#${_hex(MarkSpec.fieldColor)}" />\n'
-      '  <g stroke="#${_hex(MarkSpec.glyphColor)}" stroke-width="$w" '
+      '  <g stroke="#${_hex(MarkSpec.glyphColor)}" fill="none" '
       'stroke-linecap="round">\n'
       '$lines\n'
       '  </g>\n'
