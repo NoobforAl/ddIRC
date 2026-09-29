@@ -1,6 +1,6 @@
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // coverage:ignore-file
-// ignore_for_file: type=lint
+// ignore_for_file: type=lint, type=warning, deprecated_member_use, deprecated_member_use_from_same_package
 // ignore_for_file: unused_element, deprecated_member_use, deprecated_member_use_from_same_package, use_function_type_syntax_for_parameters, unnecessary_const, avoid_init_to_null, invalid_override_different_default_values_named, prefer_expression_function_bodies, annotate_overrides, invalid_annotation_target, unnecessary_question_mark
 
 part of 'types.dart';
@@ -9,6 +9,7 @@ part of 'types.dart';
 // FreezedGenerator
 // **************************************************************************
 
+// GENERATED CODE - DO NOT MODIFY BY HAND
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
@@ -20,7 +21,7 @@ mixin _$AuthOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome);
 }
 
 
@@ -29,7 +30,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'AuthOutcome()';
+    return 'AuthOutcome()';
 }
 
 
@@ -191,7 +192,7 @@ class AuthOutcome_Sasl extends AuthOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome_Sasl);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome_Sasl);
 }
 
 
@@ -200,7 +201,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'AuthOutcome.sasl()';
+    return 'AuthOutcome.sasl()';
 }
 
 
@@ -228,16 +229,18 @@ $AuthOutcome_NickServFallbackCopyWith<AuthOutcome_NickServFallback> get copyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome_NickServFallback&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome_NickServFallback&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,reason);
+int get hashCode {
+    return Object.hash(runtimeType,reason);
+}
 
 @override
 String toString() {
-  return 'AuthOutcome.nickServFallback(reason: $reason)';
+    return 'AuthOutcome.nickServFallback(reason: $reason)';
 }
 
 
@@ -289,7 +292,7 @@ class AuthOutcome_Anonymous extends AuthOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome_Anonymous);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is AuthOutcome_Anonymous);
 }
 
 
@@ -298,7 +301,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'AuthOutcome.anonymous()';
+    return 'AuthOutcome.anonymous()';
 }
 
 
@@ -316,7 +319,7 @@ mixin _$CleanOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome);
 }
 
 
@@ -325,7 +328,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'CleanOutcome()';
+    return 'CleanOutcome()';
 }
 
 
@@ -483,7 +486,7 @@ return malformed(_that.detail);case _:
 
 
 class CleanOutcome_Cleaned extends CleanOutcome {
-  const CleanOutcome_Cleaned({required this.bytes, required this.kind, required final  List<RemovedItem> removed}): _removed = removed,super._();
+  const CleanOutcome_Cleaned({required this.bytes, required this.kind, required  List<RemovedItem> removed}): _removed = removed,super._();
   
 
  final  Uint8List bytes;
@@ -507,16 +510,18 @@ $CleanOutcome_CleanedCopyWith<CleanOutcome_Cleaned> get copyWith => _$CleanOutco
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_Cleaned&&const DeepCollectionEquality().equals(other.bytes, bytes)&&(identical(other.kind, kind) || other.kind == kind)&&const DeepCollectionEquality().equals(other._removed, _removed));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_Cleaned&&const DeepCollectionEquality().equals(other.bytes, bytes)&&(identical(other.kind, kind) || other.kind == kind)&&const DeepCollectionEquality().equals(other.removed, _removed));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(bytes),kind,const DeepCollectionEquality().hash(_removed));
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(bytes),kind,const DeepCollectionEquality().hash(_removed));
+}
 
 @override
 String toString() {
-  return 'CleanOutcome.cleaned(bytes: $bytes, kind: $kind, removed: $removed)';
+    return 'CleanOutcome.cleaned(bytes: $bytes, kind: $kind, removed: $removed)';
 }
 
 
@@ -575,16 +580,18 @@ $CleanOutcome_AlreadyCleanCopyWith<CleanOutcome_AlreadyClean> get copyWith => _$
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_AlreadyClean&&(identical(other.kind, kind) || other.kind == kind));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_AlreadyClean&&(identical(other.kind, kind) || other.kind == kind));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,kind);
+int get hashCode {
+    return Object.hash(runtimeType,kind);
+}
 
 @override
 String toString() {
-  return 'CleanOutcome.alreadyClean(kind: $kind)';
+    return 'CleanOutcome.alreadyClean(kind: $kind)';
 }
 
 
@@ -636,7 +643,7 @@ class CleanOutcome_NotAnImage extends CleanOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_NotAnImage);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_NotAnImage);
 }
 
 
@@ -645,7 +652,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'CleanOutcome.notAnImage()';
+    return 'CleanOutcome.notAnImage()';
 }
 
 
@@ -673,16 +680,18 @@ $CleanOutcome_MalformedCopyWith<CleanOutcome_Malformed> get copyWith => _$CleanO
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_Malformed&&(identical(other.detail, detail) || other.detail == detail));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is CleanOutcome_Malformed&&(identical(other.detail, detail) || other.detail == detail));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,detail);
+int get hashCode {
+    return Object.hash(runtimeType,detail);
+}
 
 @override
 String toString() {
-  return 'CleanOutcome.malformed(detail: $detail)';
+    return 'CleanOutcome.malformed(detail: $detail)';
 }
 
 
@@ -729,7 +738,7 @@ mixin _$ConnectionStatus {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus);
 }
 
 
@@ -738,7 +747,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ConnectionStatus()';
+    return 'ConnectionStatus()';
 }
 
 
@@ -912,7 +921,7 @@ class ConnectionStatus_Disconnected extends ConnectionStatus {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Disconnected);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Disconnected);
 }
 
 
@@ -921,7 +930,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ConnectionStatus.disconnected()';
+    return 'ConnectionStatus.disconnected()';
 }
 
 
@@ -944,7 +953,7 @@ class ConnectionStatus_Connecting extends ConnectionStatus {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Connecting);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Connecting);
 }
 
 
@@ -953,7 +962,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ConnectionStatus.connecting()';
+    return 'ConnectionStatus.connecting()';
 }
 
 
@@ -976,7 +985,7 @@ class ConnectionStatus_Registering extends ConnectionStatus {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Registering);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Registering);
 }
 
 
@@ -985,7 +994,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ConnectionStatus.registering()';
+    return 'ConnectionStatus.registering()';
 }
 
 
@@ -1008,7 +1017,7 @@ class ConnectionStatus_Connected extends ConnectionStatus {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Connected);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Connected);
 }
 
 
@@ -1017,7 +1026,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ConnectionStatus.connected()';
+    return 'ConnectionStatus.connected()';
 }
 
 
@@ -1046,16 +1055,18 @@ $ConnectionStatus_ReconnectingCopyWith<ConnectionStatus_Reconnecting> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Reconnecting&&(identical(other.retryInSecs, retryInSecs) || other.retryInSecs == retryInSecs)&&(identical(other.attempt, attempt) || other.attempt == attempt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ConnectionStatus_Reconnecting&&(identical(other.retryInSecs, retryInSecs) || other.retryInSecs == retryInSecs)&&(identical(other.attempt, attempt) || other.attempt == attempt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,retryInSecs,attempt);
+int get hashCode {
+    return Object.hash(runtimeType,retryInSecs,attempt);
+}
 
 @override
 String toString() {
-  return 'ConnectionStatus.reconnecting(retryInSecs: $retryInSecs, attempt: $attempt)';
+    return 'ConnectionStatus.reconnecting(retryInSecs: $retryInSecs, attempt: $attempt)';
 }
 
 
@@ -1103,7 +1114,7 @@ mixin _$IrcEvent {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent);
 }
 
 
@@ -1112,7 +1123,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'IrcEvent()';
+    return 'IrcEvent()';
 }
 
 
@@ -1376,16 +1387,18 @@ $IrcEvent_StatusCopyWith<IrcEvent_Status> get copyWith => _$IrcEvent_StatusCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Status&&(identical(other.status, status) || other.status == status)&&(identical(other.detail, detail) || other.detail == detail));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Status&&(identical(other.status, status) || other.status == status)&&(identical(other.detail, detail) || other.detail == detail));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,status,detail);
+int get hashCode {
+    return Object.hash(runtimeType,status,detail);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.status(status: $status, detail: $detail)';
+    return 'IrcEvent.status(status: $status, detail: $detail)';
 }
 
 
@@ -1454,16 +1467,18 @@ $IrcEvent_RegisteredCopyWith<IrcEvent_Registered> get copyWith => _$IrcEvent_Reg
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Registered&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.network, network) || other.network == network)&&(identical(other.auth, auth) || other.auth == auth));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Registered&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.network, network) || other.network == network)&&(identical(other.auth, auth) || other.auth == auth));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,nick,network,auth);
+int get hashCode {
+    return Object.hash(runtimeType,nick,network,auth);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.registered(nick: $nick, network: $network, auth: $auth)';
+    return 'IrcEvent.registered(nick: $nick, network: $network, auth: $auth)';
 }
 
 
@@ -1531,16 +1546,18 @@ $IrcEvent_NetworkNamedCopyWith<IrcEvent_NetworkNamed> get copyWith => _$IrcEvent
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_NetworkNamed&&(identical(other.network, network) || other.network == network));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_NetworkNamed&&(identical(other.network, network) || other.network == network));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,network);
+int get hashCode {
+    return Object.hash(runtimeType,network);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.networkNamed(network: $network)';
+    return 'IrcEvent.networkNamed(network: $network)';
 }
 
 
@@ -1597,16 +1614,18 @@ $IrcEvent_MessageCopyWith<IrcEvent_Message> get copyWith => _$IrcEvent_MessageCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Message&&(identical(other.message, message) || other.message == message));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Message&&(identical(other.message, message) || other.message == message));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message);
+int get hashCode {
+    return Object.hash(runtimeType,message);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.message(message: $message)';
+    return 'IrcEvent.message(message: $message)';
 }
 
 
@@ -1665,16 +1684,18 @@ $IrcEvent_JoinedCopyWith<IrcEvent_Joined> get copyWith => _$IrcEvent_JoinedCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Joined&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.isSelf, isSelf) || other.isSelf == isSelf));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Joined&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.isSelf, isSelf) || other.isSelf == isSelf));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,nick,isSelf);
+int get hashCode {
+    return Object.hash(runtimeType,channel,nick,isSelf);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.joined(channel: $channel, nick: $nick, isSelf: $isSelf)';
+    return 'IrcEvent.joined(channel: $channel, nick: $nick, isSelf: $isSelf)';
 }
 
 
@@ -1736,16 +1757,18 @@ $IrcEvent_PartedCopyWith<IrcEvent_Parted> get copyWith => _$IrcEvent_PartedCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Parted&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.isSelf, isSelf) || other.isSelf == isSelf)&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Parted&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.isSelf, isSelf) || other.isSelf == isSelf)&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,nick,isSelf,reason);
+int get hashCode {
+    return Object.hash(runtimeType,channel,nick,isSelf,reason);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.parted(channel: $channel, nick: $nick, isSelf: $isSelf, reason: $reason)';
+    return 'IrcEvent.parted(channel: $channel, nick: $nick, isSelf: $isSelf, reason: $reason)';
 }
 
 
@@ -1807,16 +1830,18 @@ $IrcEvent_QuitCopyWith<IrcEvent_Quit> get copyWith => _$IrcEvent_QuitCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Quit&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Quit&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,nick,reason);
+int get hashCode {
+    return Object.hash(runtimeType,channel,nick,reason);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.quit(channel: $channel, nick: $nick, reason: $reason)';
+    return 'IrcEvent.quit(channel: $channel, nick: $nick, reason: $reason)';
 }
 
 
@@ -1878,16 +1903,18 @@ $IrcEvent_NickChangedCopyWith<IrcEvent_NickChanged> get copyWith => _$IrcEvent_N
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_NickChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.old, old) || other.old == old)&&(identical(other.new_, new_) || other.new_ == new_)&&(identical(other.isSelf, isSelf) || other.isSelf == isSelf));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_NickChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.old, old) || other.old == old)&&(identical(other.new_, new_) || other.new_ == new_)&&(identical(other.isSelf, isSelf) || other.isSelf == isSelf));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,old,new_,isSelf);
+int get hashCode {
+    return Object.hash(runtimeType,channel,old,new_,isSelf);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.nickChanged(channel: $channel, old: $old, new_: $new_, isSelf: $isSelf)';
+    return 'IrcEvent.nickChanged(channel: $channel, old: $old, new_: $new_, isSelf: $isSelf)';
 }
 
 
@@ -1949,16 +1976,18 @@ $IrcEvent_TopicChangedCopyWith<IrcEvent_TopicChanged> get copyWith => _$IrcEvent
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_TopicChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.topic, topic) || other.topic == topic)&&(identical(other.setBy, setBy) || other.setBy == setBy));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_TopicChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.topic, topic) || other.topic == topic)&&(identical(other.setBy, setBy) || other.setBy == setBy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,topic,setBy);
+int get hashCode {
+    return Object.hash(runtimeType,channel,topic,setBy);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.topicChanged(channel: $channel, topic: $topic, setBy: $setBy)';
+    return 'IrcEvent.topicChanged(channel: $channel, topic: $topic, setBy: $setBy)';
 }
 
 
@@ -2002,7 +2031,7 @@ as String?,
 
 
 class IrcEvent_MemberList extends IrcEvent {
-  const IrcEvent_MemberList({required this.channel, required final  List<MemberView> members}): _members = members,super._();
+  const IrcEvent_MemberList({required this.channel, required  List<MemberView> members}): _members = members,super._();
   
 
  final  String channel;
@@ -2024,16 +2053,18 @@ $IrcEvent_MemberListCopyWith<IrcEvent_MemberList> get copyWith => _$IrcEvent_Mem
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MemberList&&(identical(other.channel, channel) || other.channel == channel)&&const DeepCollectionEquality().equals(other._members, _members));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MemberList&&(identical(other.channel, channel) || other.channel == channel)&&const DeepCollectionEquality().equals(other.members, _members));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,const DeepCollectionEquality().hash(_members));
+int get hashCode {
+    return Object.hash(runtimeType,channel,const DeepCollectionEquality().hash(_members));
+}
 
 @override
 String toString() {
-  return 'IrcEvent.memberList(channel: $channel, members: $members)';
+    return 'IrcEvent.memberList(channel: $channel, members: $members)';
 }
 
 
@@ -2093,16 +2124,18 @@ $IrcEvent_MemberChangedCopyWith<IrcEvent_MemberChanged> get copyWith => _$IrcEve
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MemberChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.previous, previous) || other.previous == previous)&&(identical(other.member, member) || other.member == member));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MemberChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.previous, previous) || other.previous == previous)&&(identical(other.member, member) || other.member == member));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,previous,member);
+int get hashCode {
+    return Object.hash(runtimeType,channel,previous,member);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.memberChanged(channel: $channel, previous: $previous, member: $member)';
+    return 'IrcEvent.memberChanged(channel: $channel, previous: $previous, member: $member)';
 }
 
 
@@ -2146,7 +2179,7 @@ as MemberView?,
 
 
 class IrcEvent_ModeChanged extends IrcEvent {
-  const IrcEvent_ModeChanged({required this.channel, this.by, required final  List<String> affected}): _affected = affected,super._();
+  const IrcEvent_ModeChanged({required this.channel, this.by, required  List<String> affected}): _affected = affected,super._();
   
 
  final  String channel;
@@ -2169,16 +2202,18 @@ $IrcEvent_ModeChangedCopyWith<IrcEvent_ModeChanged> get copyWith => _$IrcEvent_M
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_ModeChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.by, by) || other.by == by)&&const DeepCollectionEquality().equals(other._affected, _affected));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_ModeChanged&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.by, by) || other.by == by)&&const DeepCollectionEquality().equals(other.affected, _affected));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,by,const DeepCollectionEquality().hash(_affected));
+int get hashCode {
+    return Object.hash(runtimeType,channel,by,const DeepCollectionEquality().hash(_affected));
+}
 
 @override
 String toString() {
-  return 'IrcEvent.modeChanged(channel: $channel, by: $by, affected: $affected)';
+    return 'IrcEvent.modeChanged(channel: $channel, by: $by, affected: $affected)';
 }
 
 
@@ -2238,16 +2273,18 @@ $IrcEvent_MessagesDroppedCopyWith<IrcEvent_MessagesDropped> get copyWith => _$Ir
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MessagesDropped&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.count, count) || other.count == count));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MessagesDropped&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.count, count) || other.count == count));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,channel,count);
+int get hashCode {
+    return Object.hash(runtimeType,channel,count);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.messagesDropped(channel: $channel, count: $count)';
+    return 'IrcEvent.messagesDropped(channel: $channel, count: $count)';
 }
 
 
@@ -2313,16 +2350,18 @@ $IrcEvent_FileOfferedCopyWith<IrcEvent_FileOffered> get copyWith => _$IrcEvent_F
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileOffered&&(identical(other.id, id) || other.id == id)&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.from, from) || other.from == from)&&(identical(other.offer, offer) || other.offer == offer));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileOffered&&(identical(other.id, id) || other.id == id)&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.from, from) || other.from == from)&&(identical(other.offer, offer) || other.offer == offer));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,channel,from,offer);
+int get hashCode {
+    return Object.hash(runtimeType,id,channel,from,offer);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.fileOffered(id: $id, channel: $channel, from: $from, offer: $offer)';
+    return 'IrcEvent.fileOffered(id: $id, channel: $channel, from: $from, offer: $offer)';
 }
 
 
@@ -2387,16 +2426,18 @@ $IrcEvent_FileTransferStartedCopyWith<IrcEvent_FileTransferStarted> get copyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileTransferStarted&&(identical(other.id, id) || other.id == id)&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.filename, filename) || other.filename == filename)&&(identical(other.incoming, incoming) || other.incoming == incoming)&&(identical(other.total, total) || other.total == total));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileTransferStarted&&(identical(other.id, id) || other.id == id)&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.filename, filename) || other.filename == filename)&&(identical(other.incoming, incoming) || other.incoming == incoming)&&(identical(other.total, total) || other.total == total));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,channel,filename,incoming,total);
+int get hashCode {
+    return Object.hash(runtimeType,id,channel,filename,incoming,total);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.fileTransferStarted(id: $id, channel: $channel, filename: $filename, incoming: $incoming, total: $total)';
+    return 'IrcEvent.fileTransferStarted(id: $id, channel: $channel, filename: $filename, incoming: $incoming, total: $total)';
 }
 
 
@@ -2458,16 +2499,18 @@ $IrcEvent_FileTransferProgressCopyWith<IrcEvent_FileTransferProgress> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileTransferProgress&&(identical(other.id, id) || other.id == id)&&(identical(other.transferred, transferred) || other.transferred == transferred));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileTransferProgress&&(identical(other.id, id) || other.id == id)&&(identical(other.transferred, transferred) || other.transferred == transferred));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,transferred);
+int get hashCode {
+    return Object.hash(runtimeType,id,transferred);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.fileTransferProgress(id: $id, transferred: $transferred)';
+    return 'IrcEvent.fileTransferProgress(id: $id, transferred: $transferred)';
 }
 
 
@@ -2529,16 +2572,18 @@ $IrcEvent_FileTransferEndedCopyWith<IrcEvent_FileTransferEnded> get copyWith => 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileTransferEnded&&(identical(other.id, id) || other.id == id)&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.filename, filename) || other.filename == filename)&&(identical(other.path, path) || other.path == path)&&(identical(other.error, error) || other.error == error));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_FileTransferEnded&&(identical(other.id, id) || other.id == id)&&(identical(other.channel, channel) || other.channel == channel)&&(identical(other.filename, filename) || other.filename == filename)&&(identical(other.path, path) || other.path == path)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,channel,filename,path,error);
+int get hashCode {
+    return Object.hash(runtimeType,id,channel,filename,path,error);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.fileTransferEnded(id: $id, channel: $channel, filename: $filename, path: $path, error: $error)';
+    return 'IrcEvent.fileTransferEnded(id: $id, channel: $channel, filename: $filename, path: $path, error: $error)';
 }
 
 
@@ -2584,7 +2629,7 @@ as String?,
 
 
 class IrcEvent_ChannelList extends IrcEvent {
-  const IrcEvent_ChannelList({required final  List<ChannelListing> channels, required this.done, required this.truncated}): _channels = channels,super._();
+  const IrcEvent_ChannelList({required  List<ChannelListing> channels, required this.done, required this.truncated}): _channels = channels,super._();
   
 
  final  List<ChannelListing> _channels;
@@ -2609,16 +2654,18 @@ $IrcEvent_ChannelListCopyWith<IrcEvent_ChannelList> get copyWith => _$IrcEvent_C
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_ChannelList&&const DeepCollectionEquality().equals(other._channels, _channels)&&(identical(other.done, done) || other.done == done)&&(identical(other.truncated, truncated) || other.truncated == truncated));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_ChannelList&&const DeepCollectionEquality().equals(other.channels, _channels)&&(identical(other.done, done) || other.done == done)&&(identical(other.truncated, truncated) || other.truncated == truncated));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_channels),done,truncated);
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_channels),done,truncated);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.channelList(channels: $channels, done: $done, truncated: $truncated)';
+    return 'IrcEvent.channelList(channels: $channels, done: $done, truncated: $truncated)';
 }
 
 
@@ -2678,16 +2725,18 @@ $IrcEvent_ErrorCopyWith<IrcEvent_Error> get copyWith => _$IrcEvent_ErrorCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Error&&(identical(other.message, message) || other.message == message)&&(identical(other.fatal, fatal) || other.fatal == fatal));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Error&&(identical(other.message, message) || other.message == message)&&(identical(other.fatal, fatal) || other.fatal == fatal));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message,fatal);
+int get hashCode {
+    return Object.hash(runtimeType,message,fatal);
+}
 
 @override
 String toString() {
-  return 'IrcEvent.error(message: $message, fatal: $fatal)';
+    return 'IrcEvent.error(message: $message, fatal: $fatal)';
 }
 
 
@@ -2735,7 +2784,7 @@ mixin _$Target {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Target);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is Target);
 }
 
 
@@ -2744,7 +2793,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'Target()';
+    return 'Target()';
 }
 
 
@@ -2905,16 +2954,18 @@ $Target_ChannelCopyWith<Target_Channel> get copyWith => _$Target_ChannelCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Target_Channel&&(identical(other.name, name) || other.name == name));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is Target_Channel&&(identical(other.name, name) || other.name == name));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,name);
+int get hashCode {
+    return Object.hash(runtimeType,name);
+}
 
 @override
 String toString() {
-  return 'Target.channel(name: $name)';
+    return 'Target.channel(name: $name)';
 }
 
 
@@ -2971,16 +3022,18 @@ $Target_DirectCopyWith<Target_Direct> get copyWith => _$Target_DirectCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Target_Direct&&(identical(other.nick, nick) || other.nick == nick));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is Target_Direct&&(identical(other.nick, nick) || other.nick == nick));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,nick);
+int get hashCode {
+    return Object.hash(runtimeType,nick);
+}
 
 @override
 String toString() {
-  return 'Target.direct(nick: $nick)';
+    return 'Target.direct(nick: $nick)';
 }
 
 

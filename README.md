@@ -860,7 +860,7 @@ staying connected in the background rests on, does not exist before it, and TLS
 1.3 is on by default from Android 10. Raising it again wants a reason in the
 same place.
 
-Flutter is not on `PATH` here; use `C:\Users\noobf\flutter` (3.44.2 stable).
+Flutter is not on `PATH` here; use `C:\Users\noobf\flutter` (3.47.5 stable).
 `C:\src\flutter` exists but has never been initialised — ignore it.
 
 One-time setup:

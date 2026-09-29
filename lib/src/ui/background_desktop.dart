@@ -1,7 +1,12 @@
+// The 0.5-shaped tray API, which tray_manager 0.7 keeps as a deprecated
+// bridge onto its new native core. It behaves as before; porting to the
+// native API (TrayIcon, Menu, MenuItem) is its own change, with a desktop
+// check of the tray on each platform.
+// ignore_for_file: deprecated_member_use
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:tray_manager/tray_manager.dart';
+import 'package:tray_manager/legacy.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../model/settings.dart';

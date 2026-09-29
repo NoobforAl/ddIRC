@@ -63,11 +63,13 @@ void main() {
       joined(s, channel);
     }
 
-    expect(
-      names(s.conversations),
-      ['#one', '#two', '#three', '#four', '#five'],
-      reason: 'you are in all of them, and the list on the left says so',
-    );
+    expect(names(s.conversations), [
+      '#one',
+      '#two',
+      '#three',
+      '#four',
+      '#five',
+    ], reason: 'you are in all of them, and the list on the left says so');
     expect(
       names(s.tabs),
       ['#one'],

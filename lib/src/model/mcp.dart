@@ -284,37 +284,45 @@ class McpService extends ChangeNotifier {
     final response = request.response;
     try {
       if (!_hostIsLoopback(request) || !_originIsLoopback(request)) {
-        return _plain(response, HttpStatus.forbidden, 'forbidden');
+        return await _plain(response, HttpStatus.forbidden, 'forbidden');
       }
       if (request.uri.path != '/mcp') {
-        return _plain(response, HttpStatus.notFound, 'not found');
+        return await _plain(response, HttpStatus.notFound, 'not found');
       }
       if (!_authorised(request)) {
         response.headers.set(HttpHeaders.wwwAuthenticateHeader, 'Bearer');
-        return _plain(response, HttpStatus.unauthorized, 'unauthorized');
+        return await _plain(response, HttpStatus.unauthorized, 'unauthorized');
       }
       switch (request.method) {
         case 'POST':
           break;
         case 'DELETE':
           // No sessions are kept, so ending one is always already done.
-          return _plain(response, HttpStatus.ok, '');
+          return await _plain(response, HttpStatus.ok, '');
         default:
           // No server-to-client stream: every answer comes back in the body
           // of the request that asked for it.
           response.headers.set(HttpHeaders.allowHeader, 'POST, DELETE');
-          return _plain(response, HttpStatus.methodNotAllowed, 'use POST');
+          return await _plain(
+            response,
+            HttpStatus.methodNotAllowed,
+            'use POST',
+          );
       }
 
       final body = await _readBody(request);
       if (body == null) {
-        return _plain(response, HttpStatus.requestEntityTooLarge, 'too large');
+        return await _plain(
+          response,
+          HttpStatus.requestEntityTooLarge,
+          'too large',
+        );
       }
       Object? parsed;
       try {
         parsed = jsonDecode(body);
       } on FormatException {
-        return _json(response, _error(null, -32700, 'parse error'));
+        return await _json(response, _error(null, -32700, 'parse error'));
       }
 
       if (parsed is List) {
@@ -324,13 +332,15 @@ class McpService extends ChangeNotifier {
           if (answer != null) answers.add(answer);
         }
         if (answers.isEmpty) {
-          return _plain(response, HttpStatus.accepted, '');
+          return await _plain(response, HttpStatus.accepted, '');
         }
-        return _json(response, answers);
+        return await _json(response, answers);
       }
       final answer = await _rpc(parsed);
-      if (answer == null) return _plain(response, HttpStatus.accepted, '');
-      return _json(response, answer);
+      if (answer == null) {
+        return await _plain(response, HttpStatus.accepted, '');
+      }
+      return await _json(response, answer);
     } catch (e) {
       debugPrint('mcp request failed: $e');
       try {

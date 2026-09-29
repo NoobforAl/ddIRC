@@ -31,11 +31,10 @@ void main() {
     test('orders identities by label', () async {
       await Personas.instance.create('Zephyr');
       await Personas.instance.create('anchor');
-      expect(
-        Personas.instance.all.map((p) => p.label),
-        ['anchor', 'Zephyr'],
-        reason: 'case-insensitive, so the list reads alphabetically',
-      );
+      expect(Personas.instance.all.map((p) => p.label), [
+        'anchor',
+        'Zephyr',
+      ], reason: 'case-insensitive, so the list reads alphabetically');
     });
 
     test('a nick is minted once per network and then held', () async {
@@ -154,11 +153,10 @@ void main() {
       () {
         final config = base().toConfig(nicknameOverride: 'q7f3kx');
         expect(config.nickname, 'q7f3kx');
-        expect(
-          config.altNicks,
-          ['q7f3kx_', 'q7f3kx1'],
-          reason: 'fallbacks derive from the random nick, not the real one',
-        );
+        expect(config.altNicks, [
+          'q7f3kx_',
+          'q7f3kx1',
+        ], reason: 'fallbacks derive from the random nick, not the real one');
 
         final plain = base().toConfig();
         expect(plain.nickname, 'realname');
