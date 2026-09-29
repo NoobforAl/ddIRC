@@ -80,7 +80,7 @@ COMPOSE ?= docker compose -f dev/compose.yaml
 PROFILES ?= --profile proxy --profile tor
 
 .DEFAULT_GOAL := help
-.PHONY: help fix fmt lint test test-integration dev build build-release installer check-iscc \
+.PHONY: help outdated fix fmt lint test test-integration dev build build-release installer check-iscc \
         build-android build-android-release keystore keystore-secrets \
         build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
@@ -105,6 +105,7 @@ help:
 	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
+	@echo "  make outdated which Dart and Rust dependencies have newer versions"
 	@echo "  make clean    drop build output for both halves"
 	@echo ""
 	@echo "  make dev-server        local IRC server on 127.0.0.1:6697 (TLS)"
@@ -307,6 +308,13 @@ codegen:
 #
 # The output is committed, so this only needs running after MarkSpec
 # changes - and `flutter test` fails if it was needed and not run.
+# What Dependabot asks every second month (.github/dependabot.yml), on demand.
+# Reports only: nothing is changed. `flutter pub upgrade` and `cargo update`
+# are the next step, followed by `make test`.
+outdated:
+	$(FLUTTER) pub outdated
+	$(CARGO) update $(MANIFEST) --dry-run --verbose
+
 icons:
 	$(DART) run tool/make_icons.dart
 

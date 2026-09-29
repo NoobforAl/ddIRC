@@ -18,8 +18,8 @@ futures-util.workspace = true
 thiserror.workspace = true
 tokio-socks.workspace = true
 tracing.workspace = true
-base64 = "0.22"
-rand = "0.8"
+base64 = "0.23"
+rand = "0.10"
 rusqlite.workspace = true
 zeroize.workspace = true
 
