@@ -67,7 +67,9 @@ class _TorSectionState extends State<TorSection> {
         if (on) ...[
           SettingsReadout(
             label: 'Status',
-            value: tor.running
+            value: tor.offline
+                ? 'Waiting for the network'
+                : tor.running
                 ? (progress.ready
                       ? 'Ready — ${progress.summary}'
                       : '${(progress.progress * 100).round()}% — '
@@ -76,7 +78,7 @@ class _TorSectionState extends State<TorSection> {
           ),
           // A bar as well as the words, because this is the one wait in the
           // app long enough that "is it doing anything" is a real question.
-          if (tor.running && !progress.ready)
+          if (tor.running && !progress.ready && !tor.offline)
             _BootstrapBar(value: progress.progress),
           SettingsReadout(
             label: 'Address',

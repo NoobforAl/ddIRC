@@ -641,6 +641,8 @@ class _TorLine extends StatelessWidget {
     final String status;
     if (tor.failure != null) {
       status = 'Tor could not start — see App settings';
+    } else if (tor.offline) {
+      status = 'Tor is waiting for the network';
     } else if (progress.ready) {
       status = 'Connections go through Tor';
     } else {

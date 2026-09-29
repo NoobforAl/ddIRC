@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:path_provider/path_provider.dart';
@@ -65,6 +66,40 @@ class TorSettings extends ChangeNotifier {
   String? _failure;
   StreamSubscription<core.TorStatus>? _following;
 
+  /// Whether this device has lost its network while Tor is running.
+  ///
+  /// Tor cannot say so itself. Its bootstrap status describes the directory
+  /// and circuits it last had, and it only finds out they are unreachable
+  /// when something tries to use them — so with the phone in airplane mode it
+  /// went on reporting "Ready" for as long as nobody asked. The device knows,
+  /// though: without a network there is no interface with an address. So
+  /// while Tor runs, that is checked every few seconds, and [progress] says
+  /// "waiting for the network" until one comes back. Nothing is restarted;
+  /// Tor carries on by itself once there is somewhere to go.
+  bool _offline = false;
+  Timer? _watching;
+
+  /// How the network is checked. Replaceable so a test can decide.
+  @visibleForTesting
+  static Future<bool> Function() hasNetwork = _anyInterface;
+
+  /// How often it is checked while Tor runs.
+  @visibleForTesting
+  static Duration networkCheckEvery = const Duration(seconds: 4);
+
+  static Future<bool> _anyInterface() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        includeLinkLocal: false,
+      );
+      return interfaces.any((i) => i.addresses.isNotEmpty);
+    } catch (_) {
+      // Not knowing is not the same as being offline. Say nothing.
+      return true;
+    }
+  }
+
   /// What the user asked for. Off by default, like everything else here — a
   /// few hundred megabytes of directory consensus is not something to fetch
   /// on behalf of someone who never asked.
@@ -76,7 +111,19 @@ class TorSettings extends ChangeNotifier {
   /// Running, whatever state the bootstrap is in.
   bool get running => _port != null;
 
-  TorProgress get progress => _progress;
+  TorProgress get progress => _offline && running
+      ? TorProgress(
+          ready: false,
+          progress: _progress.progress,
+          summary: 'waiting for the network',
+          blocked:
+              'This device has no network connection. Tor carries on by '
+              'itself as soon as it is back.',
+        )
+      : _progress;
+
+  /// This device has no network while Tor is running. See [_offline].
+  bool get offline => _offline && running;
 
   /// Why the last attempt to start failed, if it did. Cleared by a successful
   /// start, so a stale message cannot outlive the problem.
@@ -149,6 +196,7 @@ class TorSettings extends ChangeNotifier {
       return;
     }
 
+    _watchNetwork();
     await _following?.cancel();
     _following = core.torStatusStream().listen((status) {
       _progress = TorProgress(
@@ -162,7 +210,29 @@ class TorSettings extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _watchNetwork() {
+    _watching?.cancel();
+    _watching = Timer.periodic(networkCheckEvery, (_) => checkNetwork());
+    unawaited(checkNetwork());
+  }
+
+  /// As though Tor had bound [port], without the native core behind it.
+  @visibleForTesting
+  void runningForTesting(int port) => _port = port;
+
+  /// Look once, now. The timer calls this; so can a test.
+  @visibleForTesting
+  Future<void> checkNetwork() async {
+    final offline = !await hasNetwork();
+    if (offline == _offline) return;
+    _offline = offline;
+    notifyListeners();
+  }
+
   Future<void> _stop() async {
+    _watching?.cancel();
+    _watching = null;
+    _offline = false;
     await _following?.cancel();
     _following = null;
     _port = null;
@@ -177,6 +247,7 @@ class TorSettings extends ChangeNotifier {
 
   @override
   void dispose() {
+    _watching?.cancel();
     unawaited(_following?.cancel());
     super.dispose();
   }
