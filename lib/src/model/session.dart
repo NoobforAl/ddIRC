@@ -55,10 +55,9 @@ class ChatLine {
   final String? system;
   final SystemKind? kind;
 
-  /// Stamped on receipt.
-  ///
-  /// IRC carries no timestamp unless the server offers the IRCv3 `server-time`
-  /// capability, so local receipt time is what every client without it shows.
+  /// When it was said: the server's own time when it offers IRCv3
+  /// `server-time`, and the time it arrived otherwise — which is what every
+  /// client on a network without it shows.
   final DateTime at;
 
   bool get isSystem => system != null;
@@ -945,7 +944,7 @@ class SessionModel extends ChangeNotifier {
         }
         _addLine(
           name,
-          ChatLine.message(message, now),
+          ChatLine.message(message, _sentAt(message, now)),
           isChannel: isChannel,
           // Only a stranger's opening line: someone with a conversation
           // already, someone previously accepted, and our own echo are all
@@ -1234,6 +1233,16 @@ class SessionModel extends ChangeNotifier {
   /// because the core already knows. `#` is not the whole answer: `&`, `+` and
   /// `!` are channel prefixes too, and a `&channel` offer filed as a private
   /// message would open a second conversation for a room already on screen.
+  /// When [message] was said: the server's `server-time` when it gave one,
+  /// but never later than [now]. A server clock running ahead would otherwise
+  /// sort a line into a future no other line can reach.
+  static DateTime _sentAt(ChatMessage message, DateTime now) {
+    final ms = message.serverTimeMs;
+    if (ms == null) return now;
+    final said = DateTime.fromMillisecondsSinceEpoch(ms.toInt());
+    return said.isAfter(now) ? now : said;
+  }
+
   static bool _looksLikeChannel(String target) =>
       target.isNotEmpty && '#&+!'.contains(target[0]);
 
@@ -1353,9 +1362,25 @@ class SessionModel extends ChangeNotifier {
   /// Interpret composer input, handling the slash commands users expect.
   ///
   /// Returns an error string to show inline, or null on success.
-  Future<String?> submit(String input) async {
+  ///
+  /// With [replyTo], plain text is sent as a reply to that message. A slash
+  /// command ignores it: `/me` and the rest have no room for a quote.
+  Future<String?> submit(String input, {ReplyRef? replyTo}) async {
     final text = input.trim();
     if (text.isEmpty) return null;
+
+    if (!text.startsWith('/') && replyTo != null) {
+      final target = active;
+      if (target == null) return 'not in a channel';
+      if (target.pending) return 'accept the request first';
+      await core.sendReply(
+        id: connectionId,
+        target: target.name,
+        text: text,
+        reply: replyTo,
+      );
+      return null;
+    }
 
     if (!text.startsWith('/')) {
       final target = active;

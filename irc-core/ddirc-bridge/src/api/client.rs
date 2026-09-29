@@ -18,7 +18,7 @@ use flutter_rust_bridge::frb;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-use crate::api::types::{CleanOutcome, IrcEvent, ProbeReport, ServerConfig};
+use crate::api::types::{CleanOutcome, IrcEvent, ProbeReport, ReplyRef, ServerConfig};
 use crate::frb_generated::StreamSink;
 
 /// The runtime the connection actors live on.
@@ -238,6 +238,19 @@ pub fn part(id: u64, channel: String, reason: Option<String>) -> Result<(), Stri
 
 pub fn send_message(id: u64, target: String, text: String) -> Result<(), String> {
     send(id, ClientCommand::SendMessage { target, text })
+}
+
+/// Send `text` as a reply to `reply`. See `ddirc_core::text::reply` for how
+/// it reads on the wire, with a tag and without.
+pub fn send_reply(id: u64, target: String, text: String, reply: ReplyRef) -> Result<(), String> {
+    send(
+        id,
+        ClientCommand::SendReply {
+            target,
+            text,
+            reply: reply.into(),
+        },
+    )
 }
 
 pub fn send_action(id: u64, target: String, text: String) -> Result<(), String> {

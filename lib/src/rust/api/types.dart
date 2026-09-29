@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -68,6 +68,16 @@ class ChatMessage {
   final bool isAction;
   final bool isNotice;
 
+  /// The server's id for this message, when it tags them.
+  final String? msgid;
+
+  /// When the server says it was sent, in ms since the epoch. Prefer it over
+  /// receipt time when present.
+  final PlatformInt64? serverTimeMs;
+
+  /// What this answers, if it is a reply.
+  final ReplyRef? replyTo;
+
   const ChatMessage({
     required this.target,
     required this.sender,
@@ -77,6 +87,9 @@ class ChatMessage {
     required this.isMention,
     required this.isAction,
     required this.isNotice,
+    this.msgid,
+    this.serverTimeMs,
+    this.replyTo,
   });
 
   @override
@@ -88,7 +101,10 @@ class ChatMessage {
       isSelf.hashCode ^
       isMention.hashCode ^
       isAction.hashCode ^
-      isNotice.hashCode;
+      isNotice.hashCode ^
+      msgid.hashCode ^
+      serverTimeMs.hashCode ^
+      replyTo.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -102,7 +118,10 @@ class ChatMessage {
           isSelf == other.isSelf &&
           isMention == other.isMention &&
           isAction == other.isAction &&
-          isNotice == other.isNotice;
+          isNotice == other.isNotice &&
+          msgid == other.msgid &&
+          serverTimeMs == other.serverTimeMs &&
+          replyTo == other.replyTo;
 }
 
 @freezed
@@ -481,6 +500,30 @@ class RemovedItem {
           runtimeType == other.runtimeType &&
           what == other.what &&
           bytes == other.bytes;
+}
+
+/// What a reply answers. See `ddirc_core::text::reply`.
+///
+/// Any of it can be missing: a reply by tag alone has an id and nothing else,
+/// and one by text alone has everything but the id.
+class ReplyRef {
+  final String? msgid;
+  final String nick;
+  final String excerpt;
+
+  const ReplyRef({this.msgid, required this.nick, required this.excerpt});
+
+  @override
+  int get hashCode => msgid.hashCode ^ nick.hashCode ^ excerpt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReplyRef &&
+          runtimeType == other.runtimeType &&
+          msgid == other.msgid &&
+          nick == other.nick &&
+          excerpt == other.excerpt;
 }
 
 /// How to reach a server.

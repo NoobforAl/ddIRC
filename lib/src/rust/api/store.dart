@@ -252,6 +252,12 @@ class StoredLine {
   /// What kind of system line this is. Meaningless when `sender` is set.
   final PlatformInt64 kind;
 
+  /// The server's id for the line, when it had one.
+  final String? msgid;
+
+  /// What the line replies to, if it is a reply.
+  final ReplyRef? replyTo;
+
   const StoredLine({
     required this.profileId,
     required this.conversation,
@@ -264,6 +270,8 @@ class StoredLine {
     required this.isAction,
     required this.isNotice,
     required this.kind,
+    this.msgid,
+    this.replyTo,
   });
 
   @override
@@ -278,7 +286,9 @@ class StoredLine {
       isMention.hashCode ^
       isAction.hashCode ^
       isNotice.hashCode ^
-      kind.hashCode;
+      kind.hashCode ^
+      msgid.hashCode ^
+      replyTo.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -295,5 +305,7 @@ class StoredLine {
           isMention == other.isMention &&
           isAction == other.isAction &&
           isNotice == other.isNotice &&
-          kind == other.kind;
+          kind == other.kind &&
+          msgid == other.msgid &&
+          replyTo == other.replyTo;
 }

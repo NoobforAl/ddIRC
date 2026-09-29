@@ -263,6 +263,9 @@ mod tests {
             is_mention: false,
             is_action: false,
             is_notice: false,
+            msgid: None,
+            server_time_ms: None,
+            reply_to: None,
         }))
     }
 

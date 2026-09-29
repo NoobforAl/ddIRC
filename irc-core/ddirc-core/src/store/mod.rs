@@ -69,7 +69,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 /// is what SQLite provides the pragma for. A file from a *newer* build is
 /// refused rather than opened: silently reading a schema we do not know would
 /// mean losing whatever the newer columns held the moment we wrote to it.
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// How many lines the store keeps in total, across every network.
 ///
@@ -139,6 +139,16 @@ pub struct StoredLine {
     /// What kind of system line this is, for the app to interpret. Zero, and
     /// meaningless, when [`sender`](Self::sender) is set.
     pub kind: i64,
+
+    /// The server's id for the line, when it had one.
+    pub msgid: Option<String>,
+
+    /// What the line replies to, if it is a reply. The three columns of a
+    /// [`crate::text::reply::ReplyRef`], flattened: a reply by tag alone has no
+    /// nick or excerpt, one by text alone has no id.
+    pub reply_msgid: Option<String>,
+    pub reply_nick: Option<String>,
+    pub reply_excerpt: Option<String>,
 }
 
 fn store() -> &'static Mutex<Option<Connection>> {
@@ -259,6 +269,9 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
     if version < 3 {
         migrate_to_3(connection)?;
     }
+    if version < 4 {
+        migrate_to_4(connection)?;
+    }
     connection.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
     Ok(())
 }
@@ -338,6 +351,25 @@ fn migrate_to_3(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// Version 4: replies, and the ids they point at.
+///
+/// Columns on `lines` rather than a table of their own: every one is a
+/// property of exactly one line, and all of them are usually empty. SQLite has
+/// no `ADD COLUMN IF NOT EXISTS`, so each is checked for first, which keeps
+/// this step as safe to repeat as the ones before it.
+fn migrate_to_4(connection: &Connection) -> Result<(), StoreError> {
+    let existing: Vec<String> = connection
+        .prepare("SELECT name FROM pragma_table_info('lines')")?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    for column in ["msgid", "reply_msgid", "reply_nick", "reply_excerpt"] {
+        if !existing.iter().any(|c| c == column) {
+            connection.execute_batch(&format!("ALTER TABLE lines ADD COLUMN {column} TEXT"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Append a batch of lines.
 ///
 /// A batch rather than one line at a time, and the reason is the FFI boundary
@@ -357,8 +389,10 @@ pub fn append(lines: &[StoredLine]) -> Result<(), StoreError> {
             let mut insert = transaction.prepare_cached(
                 "INSERT INTO lines (
                      profile_id, conversation, at_ms, sender, sender_prefix,
-                     text, is_self, is_mention, is_action, is_notice, kind
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                     text, is_self, is_mention, is_action, is_notice, kind,
+                     msgid, reply_msgid, reply_nick, reply_excerpt
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                           ?12, ?13, ?14, ?15)",
             )?;
             for line in lines {
                 insert.execute(params![
@@ -373,6 +407,10 @@ pub fn append(lines: &[StoredLine]) -> Result<(), StoreError> {
                     line.is_action,
                     line.is_notice,
                     line.kind,
+                    line.msgid,
+                    line.reply_msgid,
+                    line.reply_nick,
+                    line.reply_excerpt,
                 ])?;
             }
         }
@@ -412,7 +450,8 @@ pub fn recent(
     with(|connection| {
         let mut select = connection.prepare_cached(
             "SELECT profile_id, conversation, at_ms, sender, sender_prefix,
-                    text, is_self, is_mention, is_action, is_notice, kind
+                    text, is_self, is_mention, is_action, is_notice, kind,
+                    msgid, reply_msgid, reply_nick, reply_excerpt
              FROM lines
              WHERE profile_id = ?1 AND conversation = ?2
              ORDER BY at_ms DESC, id DESC
@@ -431,6 +470,10 @@ pub fn recent(
                 is_action: row.get(8)?,
                 is_notice: row.get(9)?,
                 kind: row.get(10)?,
+                msgid: row.get(11)?,
+                reply_msgid: row.get(12)?,
+                reply_nick: row.get(13)?,
+                reply_excerpt: row.get(14)?,
             })
         })?;
 
@@ -755,7 +798,23 @@ mod tests {
             is_action: false,
             is_notice: false,
             kind: 0,
+            msgid: None,
+            reply_msgid: None,
+            reply_nick: None,
+            reply_excerpt: None,
         }
+    }
+
+    #[test]
+    fn a_reply_keeps_what_it_answers() {
+        let _store = TempStore::new("replies");
+        let mut line = said("#one", 1, "bob", "agreed");
+        line.msgid = Some("m2".to_owned());
+        line.reply_msgid = Some("m1".to_owned());
+        line.reply_nick = Some("alice".to_owned());
+        line.reply_excerpt = Some("ship it".to_owned());
+        append(&[line.clone()]).unwrap();
+        assert_eq!(recent("p1", "#one", 10).unwrap(), vec![line]);
     }
 
     #[test]
@@ -1006,13 +1065,25 @@ mod tests {
         {
             let connection = Connection::open(&path).unwrap();
             migrate_to_1(&connection).unwrap();
-            connection.execute_batch("PRAGMA user_version = 1").unwrap();
+            connection
+                .execute_batch(
+                    "INSERT INTO lines (profile_id, conversation, at_ms, sender, text,
+                         is_self, is_mention, is_action, is_notice, kind)
+                     VALUES ('p1', '#old', 1, 'alice', 'from before', 0, 0, 0, 0, 0);
+                     PRAGMA user_version = 1",
+                )
+                .unwrap();
         }
 
         open(path.to_str().unwrap()).unwrap();
         // Both tables answer, and the version is now this build's.
         assert!(people().unwrap().is_empty());
         assert!(recent("p1", "#one", 1).unwrap().is_empty());
+        // A line written before replies existed reads back as no reply at all.
+        let old = recent("p1", "#old", 1).unwrap();
+        assert_eq!(old[0].text, "from before");
+        assert_eq!(old[0].reply_msgid, None);
+        assert_eq!(old[0].msgid, None);
         let version: i32 =
             with(|c| Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)).unwrap();
         assert_eq!(version, SCHEMA_VERSION);

@@ -76,6 +76,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProxyConfig dco_decode_box_autoadd_proxy_config(dynamic raw);
 
   @protected
+  ReplyRef dco_decode_box_autoadd_reply_ref(dynamic raw);
+
+  @protected
   ServerConfig dco_decode_box_autoadd_server_config(dynamic raw);
 
   @protected
@@ -166,6 +169,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ProxyConfig? dco_decode_opt_box_autoadd_proxy_config(dynamic raw);
 
   @protected
+  ReplyRef? dco_decode_opt_box_autoadd_reply_ref(dynamic raw);
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_16(dynamic raw);
 
   @protected
@@ -194,6 +200,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RemovedItem dco_decode_removed_item(dynamic raw);
+
+  @protected
+  ReplyRef dco_decode_reply_ref(dynamic raw);
 
   @protected
   ServerConfig dco_decode_server_config(dynamic raw);
@@ -289,6 +298,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ProxyConfig sse_decode_box_autoadd_proxy_config(SseDeserializer deserializer);
+
+  @protected
+  ReplyRef sse_decode_box_autoadd_reply_ref(SseDeserializer deserializer);
 
   @protected
   ServerConfig sse_decode_box_autoadd_server_config(
@@ -391,6 +403,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ReplyRef? sse_decode_opt_box_autoadd_reply_ref(SseDeserializer deserializer);
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
@@ -419,6 +434,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RemovedItem sse_decode_removed_item(SseDeserializer deserializer);
+
+  @protected
+  ReplyRef sse_decode_reply_ref(SseDeserializer deserializer);
 
   @protected
   ServerConfig sse_decode_server_config(SseDeserializer deserializer);
@@ -543,6 +561,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_proxy_config(
     ProxyConfig self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_reply_ref(
+    ReplyRef self,
     SseSerializer serializer,
   );
 
@@ -679,6 +703,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_reply_ref(
+    ReplyRef? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_16(int? self, SseSerializer serializer);
 
   @protected
@@ -710,6 +740,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_removed_item(RemovedItem self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reply_ref(ReplyRef self, SseSerializer serializer);
 
   @protected
   void sse_encode_server_config(ServerConfig self, SseSerializer serializer);

@@ -17,6 +17,7 @@ use futures_util::StreamExt;
 use irc::client::data::ProxyType;
 use irc::client::prelude::Config as IrcConfig;
 use irc::client::Client;
+use irc::proto::message::Tag;
 use irc::proto::{ChannelMode, Command as Irc, Message, Mode, Response};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -24,7 +25,7 @@ use zeroize::Zeroizing;
 
 use crate::api::events::IrcEvent;
 use crate::api::types::{
-    AuthOutcome, ChannelListing, ChatMessage, ConfigError, ConnectionStatus, MemberView,
+    AuthOutcome, ChannelListing, ChatMessage, ConfigError, ConnectionStatus, MemberView, ReplyRef,
     ServerConfig, Target,
 };
 use crate::conn::diagnose;
@@ -34,7 +35,7 @@ use crate::conn::sasl::{Credentials, NotAttempted, SaslNegotiator, SaslOutcome};
 use crate::dcc::transfer::{self, Progress, TransferError, TransferEvent};
 use crate::dcc::DccOffer;
 use crate::state::{limits, truncate, Session};
-use crate::text::format;
+use crate::text::{format, reply};
 
 /// How many channels a `LIST` keeps, and they are the busiest ones.
 ///
@@ -107,6 +108,14 @@ pub enum ClientCommand {
     SendAction {
         target: String,
         text: String,
+    },
+    /// A message that answers another. Sent with the quoted prefix from
+    /// [`crate::text::reply`] always, and with `+draft/reply` as well when the
+    /// server takes client tags and the original had an id.
+    SendReply {
+        target: String,
+        text: String,
+        reply: ReplyRef,
     },
     SetNick(String),
     /// Set a channel topic, or clear it with an empty string.
@@ -273,6 +282,10 @@ struct Actor {
     /// a flood: nothing else on this connection is both enormous and asked
     /// for.
     listing: Option<Listing>,
+    /// Whether this connection's server granted `message-tags`, and so will
+    /// pass a `+draft/reply` tag along rather than reject the line. Per
+    /// connection: decided afresh by every negotiation.
+    client_tags: bool,
 }
 
 /// A `LIST` in progress: the best of what has arrived, and how much has.
@@ -365,6 +378,7 @@ impl Actor {
             ever_registered: false,
             transfers: Transfers::default(),
             listing: None,
+            client_tags: false,
         }
     }
 
@@ -504,6 +518,7 @@ impl Actor {
         self.status(ConnectionStatus::Registering, None);
 
         let mut sasl = SaslNegotiator::new(self.sasl_credentials());
+        self.client_tags = false;
         let mut auth = AuthOutcome::Anonymous;
         let mut registered = false;
         // The server's parting words, when it has any. An `ERROR` line is
@@ -525,7 +540,7 @@ impl Actor {
             self.config.realname().to_owned(),
         ))?;
 
-        let mut outgoing: VecDeque<Irc> = VecDeque::new();
+        let mut outgoing: VecDeque<Message> = VecDeque::new();
         let mut send_limiter = SendLimiter::new(Instant::now());
 
         // Capability negotiation is the one exchange here where the server sets
@@ -558,6 +573,7 @@ impl Actor {
                     if let Some(outcome) = step.outcome {
                         auth = self.auth_outcome(outcome);
                     }
+                    self.client_tags = sasl.granted("message-tags");
                 }
 
                 // Flush one queued command when the rate limiter allows.
@@ -641,6 +657,7 @@ impl Actor {
                         if let Some(outcome) = step.outcome {
                             auth = self.auth_outcome(outcome);
                         }
+                        self.client_tags = sasl.granted("message-tags");
                     }
 
                     // The answer to our own `LIST` is exempt from flood
@@ -702,41 +719,66 @@ impl Actor {
     }
 
     /// Convert a UI command into protocol commands on the outgoing queue.
-    fn queue(&mut self, outgoing: &mut VecDeque<Irc>, command: ClientCommand) {
+    fn queue(&mut self, outgoing: &mut VecDeque<Message>, command: ClientCommand) {
         match command {
             ClientCommand::Join { channel, key } => {
                 let command = match key {
                     Some(key) => Irc::JOIN(channel, Some(key), None),
                     None => Irc::JOIN(channel, None, None),
                 };
-                outgoing.push_back(command);
+                outgoing.push_back(Message::from(command));
             }
             ClientCommand::Part { channel, reason } => {
-                outgoing.push_back(Irc::PART(channel, reason));
+                outgoing.push_back(Message::from(Irc::PART(channel, reason)));
             }
             ClientCommand::SendMessage { target, text } => {
                 for line in sanitize_outgoing(&text) {
-                    self.echo(&target, &line, false);
-                    outgoing.push_back(Irc::PRIVMSG(target.clone(), line));
+                    self.echo(&target, &line, false, None);
+                    outgoing.push_back(Message::from(Irc::PRIVMSG(target.clone(), line)));
+                }
+            }
+            ClientCommand::SendReply {
+                target,
+                text,
+                reply,
+            } => {
+                let quoted =
+                    reply::format_reply(&reply.nick, &reply::excerpt(&reply.excerpt), &text);
+                // Only the first line carries the quote and the tag: the rest
+                // of a long reply is its continuation, not a second reply.
+                let tag = reply
+                    .msgid
+                    .clone()
+                    .filter(|_| self.client_tags)
+                    .map(|msgid| vec![Tag(REPLY_TAG.to_owned(), Some(msgid))]);
+                for (i, line) in sanitize_outgoing(&quoted).into_iter().enumerate() {
+                    let first = i == 0;
+                    let msgid = reply.msgid.as_deref().filter(|_| first);
+                    self.echo(&target, &line, false, msgid);
+                    outgoing.push_back(Message {
+                        tags: if first { tag.clone() } else { None },
+                        prefix: None,
+                        command: Irc::PRIVMSG(target.clone(), line),
+                    });
                 }
             }
             ClientCommand::SendAction { target, text } => {
                 for line in sanitize_outgoing(&text) {
-                    self.echo(&target, &line, true);
-                    outgoing.push_back(Irc::PRIVMSG(
+                    self.echo(&target, &line, true, None);
+                    outgoing.push_back(Message::from(Irc::PRIVMSG(
                         target.clone(),
                         format!("\u{01}ACTION {line}\u{01}"),
-                    ));
+                    )));
                 }
             }
             ClientCommand::ListChannels => {
                 // Ignored while one is already running. See the variant.
                 if self.listing.is_none() {
                     self.listing = Some(Listing::default());
-                    outgoing.push_back(Irc::LIST(None, None));
+                    outgoing.push_back(Message::from(Irc::LIST(None, None)));
                 }
             }
-            ClientCommand::SetNick(nick) => outgoing.push_back(Irc::NICK(nick)),
+            ClientCommand::SetNick(nick) => outgoing.push_back(Message::from(Irc::NICK(nick))),
             ClientCommand::SetTopic { channel, topic } => {
                 // A topic is one protocol line, so newlines are collapsed
                 // rather than split the way a message would be — sending the
@@ -746,7 +788,7 @@ impl Actor {
                     .map(|c| if c.is_control() { ' ' } else { c })
                     .collect();
                 let bounded = truncate(flattened.trim(), limits::MAX_TOPIC);
-                outgoing.push_back(Irc::TOPIC(channel, Some(bounded)));
+                outgoing.push_back(Message::from(Irc::TOPIC(channel, Some(bounded))));
             }
             // Nothing to hurry: the connection this arrived on is up. The
             // button that sends this is only offered while reconnecting, so
@@ -776,7 +818,7 @@ impl Actor {
     /// Echoed at queue time rather than after the rate limiter releases it, so
     /// the message appears immediately rather than up to a couple of seconds
     /// later.
-    fn echo(&mut self, target: &str, line: &str, is_action: bool) {
+    fn echo(&mut self, target: &str, line: &str, is_action: bool, reply_msgid: Option<&str>) {
         let nick = self.session.nick().to_owned();
         let sender_prefix = self
             .session
@@ -793,16 +835,26 @@ impl Actor {
             Target::Direct(target.to_owned())
         };
 
+        let (reply_to, body) = if is_action {
+            (None, line)
+        } else {
+            split_reply(line, reply_msgid)
+        };
         self.emit(IrcEvent::Message(Box::new(ChatMessage {
             target,
             sender: nick,
             sender_prefix,
-            spans: format::parse(line),
+            spans: format::parse(body),
             is_self: true,
             // Quoting your own nick is not a mention of yourself.
             is_mention: false,
             is_action,
             is_notice: false,
+            // Our own lines are not echoed back by the server, so there is no
+            // id for them and the time is now.
+            msgid: None,
+            server_time_ms: None,
+            reply_to,
         })));
     }
 
@@ -827,7 +879,7 @@ impl Actor {
         registered: &mut bool,
         auth: &AuthOutcome,
         backoff: &mut Backoff,
-        outgoing: &mut VecDeque<Irc>,
+        outgoing: &mut VecDeque<Message>,
     ) {
         let source = message.source_nickname().map(str::to_owned);
 
@@ -1006,8 +1058,12 @@ impl Actor {
             }
             Irc::ChannelMODE(channel, modes) => self.on_mode(channel, modes, source),
 
-            Irc::PRIVMSG(target, text) => self.on_chat(target, text, source, false),
-            Irc::NOTICE(target, text) => self.on_chat(target, text, source, true),
+            Irc::PRIVMSG(target, text) => {
+                self.on_chat(target, text, source, false, message.tags.as_deref())
+            }
+            Irc::NOTICE(target, text) => {
+                self.on_chat(target, text, source, true, message.tags.as_deref())
+            }
 
             _ => {}
         }
@@ -1015,20 +1071,20 @@ impl Actor {
 
     /// Finish registration: authenticate via NickServ if SASL did not, then
     /// join the configured channels.
-    fn on_registered(&mut self, auth: &AuthOutcome, outgoing: &mut VecDeque<Irc>) {
+    fn on_registered(&mut self, auth: &AuthOutcome, outgoing: &mut VecDeque<Message>) {
         if matches!(auth, AuthOutcome::NickServFallback { .. }) {
             if let Some(password) = &self.config.nickserv_password {
                 // Sent as a normal message so it is rate limited like any other.
                 let line = Zeroizing::new(format!("IDENTIFY {}", password.as_str()));
-                outgoing.push_back(Irc::PRIVMSG(
+                outgoing.push_back(Message::from(Irc::PRIVMSG(
                     "NickServ".to_owned(),
                     line.as_str().to_owned(),
-                ));
+                )));
             }
         }
 
         for channel in &self.config.channels {
-            outgoing.push_back(Irc::JOIN(channel.clone(), None, None));
+            outgoing.push_back(Message::from(Irc::JOIN(channel.clone(), None, None)));
         }
 
         // From here on, a lost connection is one worth resuming without
@@ -1254,7 +1310,7 @@ impl Actor {
     /// because the offer itself is an IRC message: it has to go out on the
     /// connection's own sender, in order, behind the same rate limiter as
     /// everything else. Only the serving is spawned.
-    async fn send_file(&mut self, outgoing: &mut VecDeque<Irc>, target: String, path: String) {
+    async fn send_file(&mut self, outgoing: &mut VecDeque<Message>, target: String, path: String) {
         let id = self.transfers.next();
         let filename = PathBuf::from(&path)
             .file_name()
@@ -1299,7 +1355,7 @@ impl Actor {
             }
         };
 
-        outgoing.push_back(Irc::PRIVMSG(
+        outgoing.push_back(Message::from(Irc::PRIVMSG(
             target.clone(),
             format!(
                 "\u{01}DCC SEND {} {} {} {}\u{01}",
@@ -1308,7 +1364,7 @@ impl Actor {
                 listening.port,
                 size
             ),
-        ));
+        )));
 
         self.emit(IrcEvent::FileTransferStarted {
             id,
@@ -1351,7 +1407,14 @@ impl Actor {
     }
 
     /// Handle a PRIVMSG or NOTICE.
-    fn on_chat(&mut self, target: &str, text: &str, source: Option<String>, is_notice: bool) {
+    fn on_chat(
+        &mut self,
+        target: &str,
+        text: &str,
+        source: Option<String>,
+        is_notice: bool,
+        tags: Option<&[Tag]>,
+    ) {
         let Some(sender) = source else { return };
 
         // CTCP ACTION is "\x01ACTION <text>\x01"; other CTCP requests are not
@@ -1388,6 +1451,21 @@ impl Actor {
             .and_then(|m| m.display_prefix(&self.session.isupport.prefixes))
             .map(|p| p.to_string());
 
+        let tag = |name: &str| {
+            tags.unwrap_or_default()
+                .iter()
+                .find(|Tag(key, _)| key == name)
+                .and_then(|Tag(_, value)| value.as_deref())
+                .filter(|value| !value.is_empty())
+        };
+        let reply_msgid = tag(REPLY_TAG).or_else(|| tag("+reply"));
+        // An action is never a reply: `/me` has no room for a quote.
+        let (reply_to, body) = if is_action {
+            (None, body)
+        } else {
+            split_reply(body, reply_msgid)
+        };
+
         let message = ChatMessage {
             // Own messages never count as mentions of ourselves.
             is_mention: !is_self && self.session.is_mention(body),
@@ -1398,6 +1476,9 @@ impl Actor {
             is_self,
             is_action,
             is_notice,
+            msgid: tag("msgid").map(|id| truncate(id, MAX_MSGID)),
+            server_time_ms: tag("time").and_then(parse_server_time),
+            reply_to,
         };
         self.emit(IrcEvent::Message(Box::new(message)));
     }
@@ -1533,6 +1614,76 @@ pub(crate) fn irc_config(config: &ServerConfig) -> IrcConfig {
         proxy_password: proxy.and_then(|p| p.password.as_ref().map(|s| s.to_string())),
         ..IrcConfig::default()
     }
+}
+
+/// The IRCv3 client tag that says which message a reply answers.
+const REPLY_TAG: &str = "+draft/reply";
+
+/// A cap on an id a server sends us, which we store and send back. Real ids
+/// are a few dozen bytes; this only stops a hostile one being enormous.
+const MAX_MSGID: usize = 128;
+
+/// Take a reply's quoted prefix off `text`, if it has one, and put what is
+/// known about the original together: the prefix says who and what, the tag
+/// (when there was one) says exactly which.
+fn split_reply<'a>(text: &'a str, tag_msgid: Option<&str>) -> (Option<ReplyRef>, &'a str) {
+    let tag_msgid = tag_msgid.map(|id| truncate(id, MAX_MSGID));
+    match reply::parse_reply(text) {
+        Some((mut found, body)) => {
+            found.msgid = tag_msgid;
+            (Some(found), body)
+        }
+        // A tag with no prefix is still a reply -- some clients send only the
+        // tag -- and the id alone is enough for the app to find the original.
+        None => (
+            tag_msgid.map(|msgid| ReplyRef {
+                msgid: Some(msgid),
+                ..ReplyRef::default()
+            }),
+            text,
+        ),
+    }
+}
+
+/// Read an IRCv3 `server-time` value: `YYYY-MM-DDThh:mm:ss.sssZ`, always UTC.
+///
+/// By hand rather than through a date crate because this is the only date the
+/// protocol has and it has exactly one shape. Anything else is `None`, and the
+/// app falls back to the time it received the line.
+fn parse_server_time(value: &str) -> Option<i64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+    let mut date = date.splitn(3, '-').map(str::parse::<i64>);
+    let (year, month, day) = (date.next()?.ok()?, date.next()?.ok()?, date.next()?.ok()?);
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
+    let mut clock = clock.splitn(3, ':').map(str::parse::<i64>);
+    let (hour, minute, second) = (
+        clock.next()?.ok()?,
+        clock.next()?.ok()?,
+        clock.next()?.ok()?,
+    );
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=60).contains(&second)
+        || fraction.is_empty()
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let millis: i64 = format!("{fraction:0<3}")[..3].parse().ok()?;
+
+    // Days since the epoch, from Howard Hinnant's `days_from_civil`.
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+
+    Some(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis)
 }
 
 /// True for the three numerics that make up the answer to a `LIST`.
@@ -1899,7 +2050,7 @@ mod tests {
     // ---------------------------------------------------------------------
 
     /// Build an actor with no connection, plus the receiving end of its events.
-    fn actor(channels: &[&str]) -> (Actor, mpsc::Receiver<IrcEvent>, VecDeque<Irc>) {
+    fn actor(channels: &[&str]) -> (Actor, mpsc::Receiver<IrcEvent>, VecDeque<Message>) {
         let (tx, rx) = mpsc::channel(256);
         let config = ServerConfig {
             host: "example.test".to_owned(),
@@ -1912,7 +2063,7 @@ mod tests {
     }
 
     /// Feed one raw server line through the dispatcher.
-    fn feed(actor: &mut Actor, outgoing: &mut VecDeque<Irc>, raw: &str) {
+    fn feed(actor: &mut Actor, outgoing: &mut VecDeque<Message>, raw: &str) {
         let message: Message = raw.parse().expect("transcript line should parse");
         let mut registered = true;
         let mut backoff = Backoff::default();
@@ -1934,7 +2085,7 @@ mod tests {
     }
 
     /// Bring the actor to a joined, populated channel.
-    fn joined_channel(actor: &mut Actor, outgoing: &mut VecDeque<Irc>) {
+    fn joined_channel(actor: &mut Actor, outgoing: &mut VecDeque<Message>) {
         feed(
             actor,
             outgoing,
@@ -1973,7 +2124,10 @@ mod tests {
             }
         )));
         assert_eq!(
-            outgoing,
+            outgoing
+                .iter()
+                .map(|m| m.command.clone())
+                .collect::<VecDeque<_>>(),
             VecDeque::from(vec![
                 Irc::JOIN("#rust".to_owned(), None, None),
                 Irc::JOIN("#test".to_owned(), None, None),
@@ -2587,7 +2741,7 @@ mod tests {
         );
 
         assert_eq!(
-            outgoing.pop_front(),
+            outgoing.pop_front().map(|m| m.command),
             Some(Irc::TOPIC(
                 "#test".to_owned(),
                 Some("first line  second line".to_owned())
@@ -2607,7 +2761,7 @@ mod tests {
             },
         );
 
-        let Some(Irc::TOPIC(_, Some(topic))) = outgoing.pop_front() else {
+        let Some(Irc::TOPIC(_, Some(topic))) = outgoing.pop_front().map(|m| m.command) else {
             panic!("expected a TOPIC command");
         };
         assert_eq!(topic.chars().count(), limits::MAX_TOPIC);
@@ -2671,7 +2825,7 @@ mod tests {
 
         // The message must still actually be sent, not merely echoed.
         assert_eq!(
-            outgoing.pop_front(),
+            outgoing.pop_front().map(|m| m.command),
             Some(Irc::PRIVMSG(
                 "#test".to_owned(),
                 "hello everyone".to_owned()
@@ -2706,7 +2860,7 @@ mod tests {
         assert_eq!(text, "waves");
 
         assert_eq!(
-            outgoing.pop_front(),
+            outgoing.pop_front().map(|m| m.command),
             Some(Irc::PRIVMSG(
                 "#test".to_owned(),
                 "\u{01}ACTION waves\u{01}".to_owned()
@@ -2766,7 +2920,7 @@ mod tests {
 
     /// Send the request the way the UI does, so the actor is in the state a
     /// real answer would arrive into.
-    fn start_listing(actor: &mut Actor, outgoing: &mut VecDeque<Irc>) {
+    fn start_listing(actor: &mut Actor, outgoing: &mut VecDeque<Message>) {
         actor.queue(outgoing, ClientCommand::ListChannels);
     }
 
@@ -2795,7 +2949,7 @@ mod tests {
         // is the largest thing the connection ever receives.
         let asks = outgoing
             .iter()
-            .filter(|c| matches!(c, Irc::LIST(..)))
+            .filter(|c| matches!(c.command, Irc::LIST(..)))
             .count();
         assert_eq!(asks, 1, "a second ask while one is running is not sent");
     }
@@ -2917,5 +3071,140 @@ mod tests {
         let (channels, _, _) = last_list(&mut rx);
         let names: Vec<&str> = channels.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, vec!["#fresh"]);
+    }
+
+    fn messages(rx: &mut mpsc::Receiver<IrcEvent>) -> Vec<ChatMessage> {
+        drain(rx)
+            .into_iter()
+            .filter_map(|e| match e {
+                IrcEvent::Message(m) => Some(*m),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tagged_messages_carry_their_id_and_server_time() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+        feed(
+            &mut actor,
+            &mut outgoing,
+            "@msgid=abc123;time=2026-09-30T12:34:56.789Z :alice!u@h PRIVMSG #test :hi",
+        );
+        let got = messages(&mut rx);
+        assert_eq!(got[0].msgid.as_deref(), Some("abc123"));
+        assert_eq!(got[0].server_time_ms, Some(1_790_771_696_789));
+        assert_eq!(got[0].reply_to, None);
+    }
+
+    #[test]
+    fn a_reply_is_read_from_its_tag_and_its_text() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+        feed(
+            &mut actor,
+            &mut outgoing,
+            "@+draft/reply=abc123 :bob!u@h PRIVMSG #test :alice: «hi» hello back",
+        );
+        let got = messages(&mut rx);
+        let reply = got[0].reply_to.as_ref().expect("a reply");
+        assert_eq!(reply.msgid.as_deref(), Some("abc123"));
+        assert_eq!(reply.nick, "alice");
+        assert_eq!(reply.excerpt, "hi");
+        assert_eq!(format::strip(&format::encode(&got[0].spans)), "hello back");
+    }
+
+    #[test]
+    fn a_reply_by_tag_alone_still_points_at_the_original() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+        feed(
+            &mut actor,
+            &mut outgoing,
+            "@+draft/reply=xyz :bob!u@h PRIVMSG #test :sure",
+        );
+        let reply = messages(&mut rx)[0].reply_to.clone().expect("a reply");
+        assert_eq!(reply.msgid.as_deref(), Some("xyz"));
+        assert!(reply.nick.is_empty());
+    }
+
+    #[test]
+    fn a_reply_by_text_alone_works_on_any_network() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":bob!u@h PRIVMSG #test :alice: «the build…» fixed",
+        );
+        let reply = messages(&mut rx)[0].reply_to.clone().expect("a reply");
+        assert_eq!(reply.msgid, None);
+        assert_eq!(reply.excerpt, "the build…");
+    }
+
+    #[test]
+    fn sending_a_reply_quotes_it_and_tags_it_only_when_allowed() {
+        for client_tags in [false, true] {
+            let (mut actor, mut rx, mut outgoing) = actor(&[]);
+            joined_channel(&mut actor, &mut outgoing);
+            drain(&mut rx);
+            outgoing.clear();
+            actor.client_tags = client_tags;
+            actor.queue(
+                &mut outgoing,
+                ClientCommand::SendReply {
+                    target: "#test".to_owned(),
+                    text: "agreed".to_owned(),
+                    reply: ReplyRef {
+                        msgid: Some("abc".to_owned()),
+                        nick: "alice".to_owned(),
+                        excerpt: "ship it".to_owned(),
+                    },
+                },
+            );
+            let sent = outgoing.pop_front().expect("a line was queued");
+            assert_eq!(
+                sent.command,
+                Irc::PRIVMSG("#test".to_owned(), "alice: «ship it» agreed".to_owned())
+            );
+            let expected_tags =
+                client_tags.then(|| vec![Tag(REPLY_TAG.to_owned(), Some("abc".to_owned()))]);
+            assert_eq!(sent.tags, expected_tags);
+
+            // The echo shows the reply the way it will be read back.
+            let echoed = messages(&mut rx);
+            let reply = echoed[0].reply_to.as_ref().expect("echoed as a reply");
+            assert_eq!(reply.msgid.as_deref(), Some("abc"));
+            assert_eq!(format::strip(&format::encode(&echoed[0].spans)), "agreed");
+        }
+    }
+
+    #[test]
+    fn server_time_is_read_strictly() {
+        assert_eq!(parse_server_time("1970-01-01T00:00:00.000Z"), Some(0));
+        assert_eq!(
+            parse_server_time("2000-03-01T00:00:00Z"),
+            Some(951_868_800_000)
+        );
+        assert_eq!(
+            parse_server_time("2026-09-30T12:34:56.7Z"),
+            Some(1_790_771_696_700)
+        );
+        for bad in [
+            "",
+            "2026-09-30T12:34:56",
+            "2026-13-01T00:00:00Z",
+            "2026-09-30 12:34:56Z",
+            "2026-09-30T25:00:00Z",
+            "2026-09-30T12:34:56.Z",
+            "2026-09-30T12:34:56.x1Z",
+        ] {
+            assert_eq!(parse_server_time(bad), None, "{bad:?}");
+        }
     }
 }

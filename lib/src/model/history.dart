@@ -276,6 +276,8 @@ class MessageHistory {
       isAction: message?.isAction ?? false,
       isNotice: message?.isNotice ?? false,
       kind: _kindOf(line),
+      msgid: message?.msgid,
+      replyTo: message?.replyTo,
     );
   }
 
@@ -308,6 +310,8 @@ class MessageHistory {
         isMention: row.isMention,
         isAction: row.isAction,
         isNotice: row.isNotice,
+        msgid: row.msgid,
+        replyTo: row.replyTo,
       ),
       at,
     );

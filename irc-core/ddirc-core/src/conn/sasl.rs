@@ -47,7 +47,12 @@ const AUTHENTICATE_CHUNK: usize = 400;
 ///
 /// Nothing here changes registration. If a server offers none of them the
 /// exchange is exactly what it was.
-const EXTRA_CAPABILITIES: &[&str] = &["away-notify"];
+///
+/// `message-tags` and `server-time` are what replies stand on: a server that
+/// grants them gives every message an id to point a reply at and the time it
+/// was really sent, and lets a reply carry `+draft/reply` to say what it
+/// answers. Without them a reply still works, by its text alone.
+const EXTRA_CAPABILITIES: &[&str] = &["away-notify", "message-tags", "server-time"];
 
 /// Credentials for SASL PLAIN.
 ///
@@ -156,6 +161,8 @@ pub struct SaslNegotiator {
     /// ends, because that is the moment both halves of the answer are known:
     /// whether there were credentials, and whether the server offered `sasl`.
     without_sasl: NotAttempted,
+    /// Every capability the server acknowledged, lower-cased.
+    acked: Vec<String>,
 }
 
 impl SaslNegotiator {
@@ -166,7 +173,15 @@ impl SaslNegotiator {
             offered: String::new(),
             requested_sasl: false,
             without_sasl: NotAttempted::NoCredentials,
+            acked: Vec::new(),
         }
+    }
+
+    /// Whether the server acknowledged `capability` during negotiation.
+    pub fn granted(&self, capability: &str) -> bool {
+        self.acked
+            .iter()
+            .any(|c| c.eq_ignore_ascii_case(capability))
     }
 
     /// True once negotiation has concluded, in either direction.
@@ -263,6 +278,13 @@ impl SaslNegotiator {
                 self.request_sasl_or_finish()
             }
             CapSubCommand::ACK if self.state == State::AwaitingAck => {
+                self.acked.extend(
+                    payload
+                        .split_ascii_whitespace()
+                        // `-cap` in an ACK is a capability being switched off.
+                        .filter(|cap| !cap.starts_with('-'))
+                        .map(str::to_ascii_lowercase),
+                );
                 // An acknowledgement that is not about SASL ends negotiation
                 // rather than starting an exchange. That is the ordinary case
                 // for a server offering `away-notify` to a connection with no
@@ -819,5 +841,24 @@ mod tests {
         let rendered = format!("{:?}", creds());
         assert!(!rendered.contains("hunter2"), "password leaked: {rendered}");
         assert!(rendered.contains("redacted"));
+    }
+
+    #[test]
+    fn message_tags_and_server_time_are_asked_for_and_remembered() {
+        let mut n = SaslNegotiator::new(None);
+        n.start();
+        let step = n.advance(&msg("CAP * LS :message-tags server-time batch
+"));
+        assert_eq!(
+            rendered(&step)[0].trim_end(),
+            "CAP REQ :message-tags server-time"
+        );
+        assert!(!n.granted("message-tags"));
+        let _ = n.advance(&msg("CAP * ACK :message-tags -server-time
+"));
+        assert!(n.granted("message-tags"));
+        assert!(n.granted("MESSAGE-TAGS"));
+        assert!(!n.granted("server-time"), "a -cap is switched off");
+        assert!(!n.granted("batch"), "never asked for");
     }
 }

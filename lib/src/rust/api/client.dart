@@ -67,6 +67,20 @@ Future<void> sendMessage({
   text: text,
 );
 
+/// Send `text` as a reply to `reply`. See `ddirc_core::text::reply` for how
+/// it reads on the wire, with a tag and without.
+Future<void> sendReply({
+  required BigInt id,
+  required String target,
+  required String text,
+  required ReplyRef reply,
+}) => RustLib.instance.api.crateApiClientSendReply(
+  id: id,
+  target: target,
+  text: text,
+  reply: reply,
+);
+
 Future<void> sendAction({
   required BigInt id,
   required String target,

@@ -364,6 +364,8 @@ impl Target {
     }
 }
 
+pub use crate::text::reply::ReplyRef;
+
 /// A chat message, already sanitised into styled spans.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatMessage {
@@ -381,6 +383,15 @@ pub struct ChatMessage {
     pub is_action: bool,
     /// A NOTICE rather than a PRIVMSG.
     pub is_notice: bool,
+    /// The server's id for this message (IRCv3 `msgid`), when it tags them.
+    /// What a reply points at, when there is anything exact to point at.
+    pub msgid: Option<String>,
+    /// When the server says it was sent (IRCv3 `server-time`), in milliseconds
+    /// since the Unix epoch. Absent on most networks, where receipt time is
+    /// the best there is.
+    pub server_time_ms: Option<i64>,
+    /// What this answers, if it is a reply. See [`crate::text::reply`].
+    pub reply_to: Option<ReplyRef>,
 }
 
 #[cfg(test)]

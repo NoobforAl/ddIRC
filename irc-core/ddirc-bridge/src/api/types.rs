@@ -102,6 +102,44 @@ pub struct ChatMessage {
     pub is_mention: bool,
     pub is_action: bool,
     pub is_notice: bool,
+    /// The server's id for this message, when it tags them.
+    pub msgid: Option<String>,
+    /// When the server says it was sent, in ms since the epoch. Prefer it over
+    /// receipt time when present.
+    pub server_time_ms: Option<i64>,
+    /// What this answers, if it is a reply.
+    pub reply_to: Option<ReplyRef>,
+}
+
+/// What a reply answers. See `ddirc_core::text::reply`.
+///
+/// Any of it can be missing: a reply by tag alone has an id and nothing else,
+/// and one by text alone has everything but the id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyRef {
+    pub msgid: Option<String>,
+    pub nick: String,
+    pub excerpt: String,
+}
+
+impl From<types::ReplyRef> for ReplyRef {
+    fn from(reply: types::ReplyRef) -> Self {
+        Self {
+            msgid: reply.msgid,
+            nick: reply.nick,
+            excerpt: reply.excerpt,
+        }
+    }
+}
+
+impl From<ReplyRef> for types::ReplyRef {
+    fn from(reply: ReplyRef) -> Self {
+        Self {
+            msgid: reply.msgid,
+            nick: reply.nick,
+            excerpt: reply.excerpt,
+        }
+    }
 }
 
 /// Something that happened on a connection.
@@ -457,6 +495,9 @@ impl From<types::ChatMessage> for ChatMessage {
             is_mention: message.is_mention,
             is_action: message.is_action,
             is_notice: message.is_notice,
+            msgid: message.msgid,
+            server_time_ms: message.server_time_ms,
+            reply_to: message.reply_to.map(Into::into),
         }
     }
 }

@@ -17,7 +17,7 @@
 use ddirc_core::store;
 use ddirc_core::text::format;
 
-use crate::api::types::TextSpan;
+use crate::api::types::{ReplyRef, TextSpan};
 
 /// One stored line, on its way in or out.
 ///
@@ -47,6 +47,10 @@ pub struct StoredLine {
     pub is_notice: bool,
     /// What kind of system line this is. Meaningless when `sender` is set.
     pub kind: i64,
+    /// The server's id for the line, when it had one.
+    pub msgid: Option<String>,
+    /// What the line replies to, if it is a reply.
+    pub reply_to: Option<ReplyRef>,
 }
 
 /// What the store currently holds, for the settings screen to report.
@@ -76,6 +80,10 @@ impl From<StoredLine> for store::StoredLine {
             is_action: line.is_action,
             is_notice: line.is_notice,
             kind: line.kind,
+            msgid: line.msgid,
+            reply_msgid: line.reply_to.as_ref().and_then(|r| r.msgid.clone()),
+            reply_nick: line.reply_to.as_ref().map(|r| r.nick.clone()),
+            reply_excerpt: line.reply_to.map(|r| r.excerpt),
         }
     }
 }
@@ -100,6 +108,13 @@ impl From<store::StoredLine> for StoredLine {
             is_action: line.is_action,
             is_notice: line.is_notice,
             kind: line.kind,
+            msgid: line.msgid,
+            // A row has a reply when any of its three parts is there.
+            reply_to: (line.reply_msgid.is_some() || line.reply_nick.is_some()).then(|| ReplyRef {
+                msgid: line.reply_msgid,
+                nick: line.reply_nick.unwrap_or_default(),
+                excerpt: line.reply_excerpt.unwrap_or_default(),
+            }),
         }
     }
 }
