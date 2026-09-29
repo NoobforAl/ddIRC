@@ -987,6 +987,17 @@ class _Bubble extends StatefulWidget {
   static const _maxWidth = 0.78;
   static const _maxWidthCompact = 0.86;
 
+  /// Everything but the pointers that drag to select text. Named by what is
+  /// left out rather than what is let in, because not every finger says it is
+  /// one: injected and some OEM touch events arrive as
+  /// [PointerDeviceKind.unknown], and a whitelist of `touch` alone silently
+  /// ignored them.
+  static final _swipeDevices = {
+    for (final kind in PointerDeviceKind.values)
+      if (kind != PointerDeviceKind.mouse && kind != PointerDeviceKind.trackpad)
+        kind,
+  };
+
   /// How far a swipe has to travel before letting go of it is a reply.
   static const _swipeToReply = 56.0;
   static const _swipeMax = 76.0;
@@ -1153,10 +1164,7 @@ class _BubbleState extends State<_Bubble> {
     // text is selected, and taking that away would be a worse trade.
     if (widget.onReply != null) {
       bubble = GestureDetector(
-        supportedDevices: const {
-          PointerDeviceKind.touch,
-          PointerDeviceKind.stylus,
-        },
+        supportedDevices: _Bubble._swipeDevices,
         onHorizontalDragStart: (d) => _target = _lineAt(d.globalPosition),
         onHorizontalDragUpdate: (d) {
           final delta = mine ? -d.delta.dx : d.delta.dx;

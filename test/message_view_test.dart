@@ -6,6 +6,7 @@
 // day when the scrollback crosses one, and replies that show what they
 // answer.
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -270,6 +271,46 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(replies.single, same(conversation.lines[1]));
+  });
+
+  testWidgets('a swipe counts whatever the pointer says it is — but a mouse '
+      'drag selects text instead', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = await AppSettings.load();
+    final replies = <ChatLine>[];
+    final conversation = _conversation([_said('alice', 'hello there')]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: Tokens.themeFor(Tokens.dark),
+        home: SettingsScope(
+          settings: settings,
+          child: Scaffold(
+            body: MessageView(conversation: conversation, onReply: replies.add),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Future<void> drag(PointerDeviceKind kind) async {
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('hello there')),
+        kind: kind,
+      );
+      for (var i = 0; i < 10; i++) {
+        await gesture.moveBy(const Offset(10, 0));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await gesture.up();
+      await tester.pumpAndSettle();
+    }
+
+    // What `adb input swipe` and some OEM touchscreens report.
+    await drag(PointerDeviceKind.unknown);
+    expect(replies, hasLength(1));
+
+    await drag(PointerDeviceKind.mouse);
+    expect(replies, hasLength(1), reason: 'a mouse drag is a text selection');
   });
 
   testWidgets('nicks wear their colour; yours needs no label at all', (
