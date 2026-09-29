@@ -213,25 +213,24 @@ class _ChannelRow extends StatelessWidget {
       builder: (context, touch) => AnimatedContainer(
         duration: m.normal,
         curve: Motion.curve,
-        // The active channel is marked by a leading rule and a lifted
-        // background — no pill, no fill, consistent with the hairline language.
-        // Both slide across as selection moves, so the eye can follow it down
-        // the list rather than re-finding it.
+        // The active channel is a soft pill: inset from the edges, rounded,
+        // and tinted with the accent rather than marked with a rule. It slides
+        // down the list as selection moves, so the eye can follow it. Tall
+        // enough to hit with a thumb without aiming.
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
         decoration: BoxDecoration(
-          // Hover and selection share a colour and differ only in weight, so
-          // the pointer can preview a row without impersonating the one the
-          // user is already in.
+          borderRadius: BorderRadius.circular(Tokens.radiusM),
+          // Hover shares the surface colour and selection takes the accent,
+          // so the pointer can preview a row without impersonating the one
+          // the user is already in.
           color: selected
-              ? t.surfaceHover
+              ? Color.alphaBlend(
+                  t.accent.withValues(alpha: 0.14 + 0.06 * touch.wash),
+                  t.surface,
+                )
               : t.surfaceHover.withValues(alpha: touch.wash),
-          border: Border(
-            left: BorderSide(
-              color: selected ? t.accent : Colors.transparent,
-              width: 2,
-            ),
-          ),
         ),
-        padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+        padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
         child: Row(
           children: [
             Expanded(
@@ -241,8 +240,8 @@ class _ChannelRow extends StatelessWidget {
                 // Merged onto the ambient style rather than replacing it, so
                 // the row keeps whatever font the theme is handing down.
                 style: DefaultTextStyle.of(context).style.copyWith(
-                  color: selected ? t.text : (unread > 0 ? t.text : t.muted),
-                  fontSize: 13,
+                  color: selected ? t.accent : (unread > 0 ? t.text : t.muted),
+                  fontSize: 14,
                   // Weight is what says "someone spoke here", so it is worth
                   // interpolating instead of snapping between two rows.
                   fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.w400,

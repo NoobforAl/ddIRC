@@ -313,6 +313,48 @@ void main() {
     expect(replies, hasLength(1), reason: 'a mouse drag is a text selection');
   });
 
+  testWidgets('holding a message offers Reply, Copy and Mention', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = await AppSettings.load();
+    final replies = <ChatLine>[];
+    final mentions = <String>[];
+    final conversation = _conversation([_said('alice', 'hold me')]);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: Tokens.themeFor(Tokens.dark),
+        home: SettingsScope(
+          settings: settings,
+          child: Scaffold(
+            body: MessageView(
+              conversation: conversation,
+              onReply: replies.add,
+              onMention: mentions.add,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('hold me'));
+    await tester.pumpAndSettle();
+    expect(find.text('Reply'), findsOneWidget);
+    expect(find.text('Copy'), findsOneWidget);
+    expect(find.text('Mention alice'), findsOneWidget);
+
+    await tester.tap(find.text('Reply'));
+    await tester.pumpAndSettle();
+    expect(replies.single, same(conversation.lines.single));
+
+    await tester.longPress(find.text('hold me'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mention alice'));
+    await tester.pumpAndSettle();
+    expect(mentions, ['alice']);
+  });
+
   testWidgets('nicks wear their colour; yours needs no label at all', (
     tester,
   ) async {

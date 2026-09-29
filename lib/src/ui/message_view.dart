@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter/services.dart'
+    show Clipboard, ClipboardData, HapticFeedback;
 import 'package:flutter/rendering.dart' show SelectedContent;
 
 import '../model/people.dart';
@@ -12,6 +13,7 @@ import '../theme.dart';
 import 'avatar.dart';
 import 'count_badge.dart';
 import 'layout.dart';
+import 'menu.dart';
 import 'motion.dart';
 import 'nick_color.dart';
 import 'touchable.dart';
@@ -24,6 +26,7 @@ class MessageView extends StatefulWidget {
     this.profileId,
     this.onPersonTap,
     this.onReply,
+    this.onMention,
   });
 
   final Conversation conversation;
@@ -38,6 +41,9 @@ class MessageView extends StatefulWidget {
   /// The user asked to reply to a line — by swiping it, or with the button
   /// beside it. Null offers neither.
   final ValueChanged<ChatLine>? onReply;
+
+  /// The user asked to address someone — "Mention" in a message's menu.
+  final ValueChanged<String>? onMention;
 
   @override
   State<MessageView> createState() => _MessageViewState();
@@ -526,6 +532,7 @@ class _MessageViewState extends State<MessageView> {
         flash: _flash,
         onPersonTap: widget.onPersonTap,
         onReply: widget.onReply,
+        onMention: widget.onMention,
         onQuoteTap: reply == null ? null : () => _showOriginal(reply, g),
       );
     }
@@ -954,6 +961,7 @@ class _Bubble extends StatefulWidget {
     this.quoted,
     this.onPersonTap,
     this.onReply,
+    this.onMention,
     this.onQuoteTap,
   });
 
@@ -979,6 +987,7 @@ class _Bubble extends StatefulWidget {
 
   final ValueChanged<String>? onPersonTap;
   final ValueChanged<ChatLine>? onReply;
+  final ValueChanged<String>? onMention;
   final VoidCallback? onQuoteTap;
 
   /// How much of the row a bubble may take before it wraps. Wide enough for a
@@ -1044,6 +1053,62 @@ class _BubbleState extends State<_Bubble> {
   }
 
   void _reply(int i) => widget.onReply?.call(widget.lines[i]);
+
+  /// What holding a message offers on a touch screen: reply to it, copy it
+  /// whole, or address its author. The way messengers do it, and the way to
+  /// reach all three without aiming at a small button.
+  ///
+  /// Touch only. A mouse has right-click for the text selection's own menu,
+  /// and a long press with a mouse is nobody's gesture.
+  Future<void> _menu(int i) async {
+    final line = widget.lines[i];
+    final message = line.message!;
+    final box = _lineKeys[i].currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    HapticFeedback.selectionClick();
+    final at = box.localToGlobal(box.size.center(Offset.zero));
+    final choice = await showPointerMenu<String>(
+      context,
+      at: at,
+      items: [
+        if (widget.onReply != null)
+          const PopupMenuItem(
+            value: 'reply',
+            child: MenuRow(icon: Icons.reply_rounded, label: 'Reply'),
+          ),
+        const PopupMenuItem(
+          value: 'copy',
+          child: MenuRow(icon: Icons.copy_rounded, label: 'Copy'),
+        ),
+        if (widget.onMention != null && !message.isSelf)
+          PopupMenuItem(
+            value: 'mention',
+            child: MenuRow(
+              icon: Icons.alternate_email_rounded,
+              label: 'Mention ${message.sender}',
+            ),
+          ),
+      ],
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'reply':
+        _reply(i);
+      case 'copy':
+        await Clipboard.setData(
+          ClipboardData(text: message.spans.map((s) => s.text).join()),
+        );
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text('Message copied'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      case 'mention':
+        widget.onMention?.call(message.sender);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1293,24 +1358,28 @@ class _BubbleState extends State<_Bubble> {
     return MouseRegion(
       key: _lineKeys[i],
       onEnter: (_) => _target = i,
-      child: ValueListenableBuilder<ChatLine?>(
-        valueListenable: widget.flash,
-        builder: (context, flashing, child) => AnimatedContainer(
-          duration: context.motion.slow,
-          curve: Motion.curve,
-          margin: EdgeInsets.only(top: i == 0 ? 0 : 3),
-          decoration: BoxDecoration(
-            color: identical(flashing, line)
-                ? t.accent.withValues(alpha: 0.18)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(6),
+      child: GestureDetector(
+        supportedDevices: _Bubble._swipeDevices,
+        onLongPress: () => _menu(i),
+        child: ValueListenableBuilder<ChatLine?>(
+          valueListenable: widget.flash,
+          builder: (context, flashing, child) => AnimatedContainer(
+            duration: context.motion.slow,
+            curve: Motion.curve,
+            margin: EdgeInsets.only(top: i == 0 ? 0 : 3),
+            decoration: BoxDecoration(
+              color: identical(flashing, line)
+                  ? t.accent.withValues(alpha: 0.18)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: child,
           ),
-          child: child,
-        ),
-        child: _SelectableLine(
-          index: index,
-          scrollback: widget.scrollback,
-          child: Arrive(play: fresh, child: body),
+          child: _SelectableLine(
+            index: index,
+            scrollback: widget.scrollback,
+            child: Arrive(play: fresh, child: body),
+          ),
         ),
       ),
     );

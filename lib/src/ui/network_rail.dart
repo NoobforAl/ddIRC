@@ -8,6 +8,7 @@ import '../rust/api/types.dart';
 import '../theme.dart';
 import 'add_network_menu.dart';
 import 'motion.dart';
+import 'nick_color.dart';
 import 'touchable.dart';
 
 /// Width of the rail. Just wide enough for a 34px mark and its gutters.
@@ -266,6 +267,7 @@ class _Mark extends StatelessWidget {
     final t = context.tokens;
     final m = context.motion;
     final live = connected || connecting;
+    final tint = NickPalette.of(profile.name, t);
 
     return Stack(
       clipBehavior: Clip.none,
@@ -273,21 +275,22 @@ class _Mark extends StatelessWidget {
         AnimatedContainer(
           duration: m.normal,
           curve: Motion.curve,
-          width: 34,
-          height: 34,
+          width: 40,
+          height: 40,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            // Selection and hover share a colour and differ only in weight,
-            // so the pointer can preview a row without impersonating the one
-            // the user is already in. Transparent rather than null, so the
-            // fill fades up from nothing instead of being stamped on.
-            color: selected
-                ? t.surfaceHover
-                : t.surfaceHover.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(9),
+            // Each network in its own soft colour — the same stable palette
+            // nicks use, hashed from the name — so the rail is told apart at
+            // a glance rather than read. A wash, not a fill: the initials
+            // carry the colour at full strength. Dormant networks fade.
+            color: Color.alphaBlend(
+              tint.withValues(alpha: (live ? 0.18 : 0.08) + 0.08 * touch.wash),
+              t.surface,
+            ),
+            borderRadius: BorderRadius.circular(Tokens.radiusM),
             border: Border.all(
-              color: selected ? t.accent : t.rule,
-              width: selected ? 1 : Tokens.hairline,
+              color: selected ? t.accent : Colors.transparent,
+              width: 1.5,
             ),
           ),
           child: AnimatedDefaultTextStyle(
@@ -298,8 +301,8 @@ class _Mark extends StatelessWidget {
             style: DefaultTextStyle.of(context).style.copyWith(
               // A disconnected network is legible but clearly dormant; coming
               // up is the fade between the two.
-              color: live ? t.text : t.faint,
-              fontSize: 12,
+              color: live ? tint : t.faint,
+              fontSize: 13,
               fontWeight: FontWeight.w600,
               letterSpacing: 0.2,
             ),

@@ -197,6 +197,19 @@ class _SessionScreenState extends State<SessionScreen> {
     _composerFocus.requestFocus();
   }
 
+  /// Address [nick]: their name at the start of the composer, the IRC way,
+  /// with the caret after it. Replaces a name already there rather than
+  /// stacking a second one in front of it.
+  void _mention(String nick) {
+    final text = _composer.text.replaceFirst(RegExp(r'^[^\s:]+: '), '');
+    final value = '$nick: $text';
+    _composer.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+    _composerFocus.requestFocus();
+  }
+
   /// The reply the composer is holding, if it is for the conversation on
   /// screen.
   ChatLine? get _replyLine {
@@ -530,6 +543,7 @@ class _SessionScreenState extends State<SessionScreen> {
                     profileId: session.profileId,
                     onPersonTap: _editPerson,
                     onReply: active.pending ? null : _replyTo,
+                    onMention: active.pending ? null : _mention,
                   ),
           ),
         ),
