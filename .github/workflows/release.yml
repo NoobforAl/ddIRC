@@ -29,14 +29,14 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: The tag has to agree with the manifest
         run: .github/tag-matches-manifest.sh
 
       # Gradle needs a JVM of its own; subosito/flutter-action only installs
       # the Flutter SDK. 17 matches what docs/building.md asks for locally.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -130,7 +130,7 @@ jobs:
       # it and the other waiting: this action creates the release if it is not
       # there and adds to it if it is, so the two can run in parallel and
       # whichever finishes second finds the release already made.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: "ddIRC ${{ github.ref_name }} (beta)"
           prerelease: true
@@ -148,7 +148,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: The tag has to agree with the manifest
         shell: bash
@@ -185,7 +185,7 @@ jobs:
         shell: bash
         run: make installer
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: "ddIRC ${{ github.ref_name }} (beta)"
           prerelease: true
