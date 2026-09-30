@@ -4,7 +4,7 @@ This is a small project with a specific temperament, and most of what follows is
 about that rather than about process. There is no CLA, no template to fill in
 and no review board. There is an expectation that a change arrives explained.
 
-Before anything else: [`README.md`](README.md) has how to build both halves, and
+Before anything else: [`docs/building.md`](docs/building.md) has how to build both halves, and
 [`SECURITY.md`](SECURITY.md) has what the project already promises about
 transport, secrets and outgoing data. A change that quietly breaks one of those
 promises is the one kind of change that will simply be reverted.

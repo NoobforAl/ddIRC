@@ -255,7 +255,7 @@ keystore-secrets:
 
 ## The other desktops and iOS. Each has to run on that host - there is no
 ## cross-compiling a Flutter runner - and none of them has been built yet.
-## See the README: they are scaffolded and configured, not proven.
+## See docs/building.md: they are scaffolded and configured, not proven.
 build-linux:
 	$(FLUTTER) build linux --debug
 
