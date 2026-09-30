@@ -20,7 +20,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Both toolchains are pinned rather than floating. `make lint` runs clippy
       # with `-D warnings`, so a lint newly added in a toolchain release would
