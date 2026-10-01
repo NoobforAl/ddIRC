@@ -497,12 +497,23 @@ fn migrate_to_5(connection: &Connection) -> Result<(), StoreError> {
              ON marks (kind, profile_id, conversation, at_ms, sender, text);",
     )?;
 
-    let indexed: bool = transaction.query_row(
-        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'lines_fts')",
-        [],
-        |row| row.get(0),
-    )?;
+    // The index is built once. "Built" means an FTS5 table by that name —
+    // not merely a table: anything else under the name (a damaged file, a
+    // hand-edited one) is dropped and the index made properly, since a search
+    // index is derived data and can always be rebuilt from the lines.
+    let existing: Option<String> = transaction
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'lines_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let indexed = existing.is_some_and(|sql| sql.to_ascii_lowercase().contains("fts5"));
     if !indexed {
+        transaction.execute_batch(
+            "DROP TRIGGER IF EXISTS lines_fts_delete;
+             DROP TABLE IF EXISTS lines_fts;",
+        )?;
         create_search_index(&transaction)?;
         backfill_search_index(&transaction)?;
     }
@@ -689,6 +700,12 @@ pub fn append(lines: &[StoredLine]) -> Result<Vec<Option<i64>>, StoreError> {
 /// Pins and saved messages are not lost with them: a [`Mark`] is a copy of the
 /// message, not a pointer into this table, precisely so that this can run.
 fn prune(connection: &Connection) -> Result<(), StoreError> {
+    prune_to(connection, MAX_ROWS)
+}
+
+/// [prune], to a ceiling of the caller's choosing — so a test can reach it
+/// without writing two million lines first.
+fn prune_to(connection: &Connection, ceiling: i64) -> Result<(), StoreError> {
     let highest: Option<i64> = connection
         .query_row("SELECT MAX(id) FROM lines", [], |row| row.get(0))
         .optional()?
@@ -696,7 +713,7 @@ fn prune(connection: &Connection) -> Result<(), StoreError> {
     let Some(highest) = highest else {
         return Ok(());
     };
-    connection.execute("DELETE FROM lines WHERE id <= ?1", [highest - MAX_ROWS])?;
+    connection.execute("DELETE FROM lines WHERE id <= ?1", [highest - ceiling])?;
     Ok(())
 }
 
@@ -2140,5 +2157,246 @@ mod tests {
 
         close();
         let _ = std::fs::remove_dir_all(&directory);
+    }
+
+    /// A file left at `version` by an older build, holding one message and
+    /// one join in `#old`. Built from the ladder's own steps, so it is exactly
+    /// what that build wrote.
+    fn file_at_version(name: &str, version: i32) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!("ddirc-store-ladder-{name}"));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("history.db");
+        let connection = Connection::open(&path).unwrap();
+        type Step = fn(&Connection) -> Result<(), StoreError>;
+        let steps: [Step; 4] = [migrate_to_1, migrate_to_2, migrate_to_3, migrate_to_4];
+        for step in steps.iter().take(version as usize) {
+            step(&connection).unwrap();
+        }
+        if version >= 1 {
+            connection
+                .execute_batch(
+                    "INSERT INTO lines (profile_id, conversation, at_ms, sender, text,
+                         is_self, is_mention, is_action, is_notice, kind)
+                     VALUES ('p1', '#old', 1, 'alice', 'kept from \x02long\x02 ago',
+                             0, 0, 0, 0, 0),
+                            ('p1', '#old', 2, NULL, 'bob joined', 0, 0, 0, 0, 1);",
+                )
+                .unwrap();
+        }
+        connection
+            .execute_batch(&format!("PRAGMA user_version = {version}"))
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn every_older_file_climbs_to_this_version_with_its_lines_searchable() {
+        let _guard = lock();
+        for version in 0..SCHEMA_VERSION {
+            let path = file_at_version(&format!("v{version}"), version);
+            open(path.to_str().unwrap())
+                .unwrap_or_else(|e| panic!("version {version} would not open: {e}"));
+
+            let version_now: i32 =
+                with(|c| Ok(c.query_row("PRAGMA user_version", [], |r| r.get(0))?)).unwrap();
+            assert_eq!(version_now, SCHEMA_VERSION, "from version {version}");
+
+            if version >= 1 {
+                assert_eq!(count().unwrap(), 2, "nothing lost from version {version}");
+                let found = search(None, None, "long", 10, None).unwrap();
+                assert_eq!(
+                    found.len(),
+                    1,
+                    "old lines are indexed, from version {version}"
+                );
+                assert!(search(None, None, "joined", 10, None).unwrap().is_empty());
+            }
+            // Every table the app now reads answers.
+            assert!(conversation_states().unwrap().is_empty());
+            assert!(marks(None, None, None).unwrap().is_empty());
+            assert!(people().unwrap().is_empty());
+            // And the file takes new lines, indexed, as any other would.
+            append(&[said("#new", 10, "carol", "fresh words")]).unwrap();
+            assert_eq!(
+                search(None, Some("#new"), "fresh", 10, None).unwrap().len(),
+                1
+            );
+
+            close();
+            let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        }
+    }
+
+    #[test]
+    fn a_backfill_larger_than_one_page_indexes_every_line() {
+        let _guard = lock();
+        let path = file_at_version("big", 4);
+        {
+            let connection = Connection::open(&path).unwrap();
+            let transaction = connection.unchecked_transaction().unwrap();
+            {
+                let mut insert = transaction
+                    .prepare(
+                        "INSERT INTO lines (profile_id, conversation, at_ms, sender, text,
+                             is_self, is_mention, is_action, is_notice, kind)
+                         VALUES ('p1', '#big', ?1, 'alice', ?2, 0, 0, 0, 0, 0)",
+                    )
+                    .unwrap();
+                for i in 0..12_345_i64 {
+                    let word = if i % 1000 == 0 { "needle" } else { "hay" };
+                    insert
+                        .execute(params![10 + i, format!("{word} {i}")])
+                        .unwrap();
+                }
+            }
+            transaction.commit().unwrap();
+        }
+
+        open(path.to_str().unwrap()).unwrap();
+        // 0, 1000, …, 12000: thirteen, spread over three pages of backfill.
+        assert_eq!(search(None, None, "needle", 100, None).unwrap().len(), 13);
+        assert_eq!(
+            search(None, None, "hay", 20_000, None).unwrap().len(),
+            12_345 - 13
+        );
+        close();
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn running_the_migration_again_changes_nothing() {
+        let _store = TempStore::new("migrate-twice");
+        append(&[said("#one", 1, "alice", "only once")]).unwrap();
+        // As if the version bump had not landed and the step ran again.
+        with(|c| {
+            migrate_to_5(c)?;
+            migrate(c)
+        })
+        .unwrap();
+        assert_eq!(search(None, None, "once", 10, None).unwrap().len(), 1);
+        assert_eq!(count().unwrap(), 1);
+    }
+
+    #[test]
+    fn something_else_where_the_index_belongs_is_replaced_by_the_index() {
+        // A file whose version is behind but with a table already sitting
+        // where the search index goes. Derived data, so it is rebuilt rather
+        // than trusted — or every append after this would fail.
+        let _guard = lock();
+        let path = file_at_version("conflict", 4);
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch("CREATE TABLE lines_fts (nonsense INTEGER);")
+                .unwrap();
+        }
+        // Not an index, so it is replaced by one — built from the lines.
+        open(path.to_str().unwrap()).unwrap();
+        assert_eq!(search(None, None, "long", 10, None).unwrap().len(), 1);
+        append(&[said("#old", 5, "alice", "after the repair")]).unwrap();
+        assert_eq!(search(None, None, "repair", 10, None).unwrap().len(), 1);
+        close();
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn pruning_takes_the_oldest_lines_out_of_the_index_too() {
+        let _store = TempStore::new("prune");
+        let lines: Vec<_> = (0..10)
+            .map(|i| said("#one", i, "alice", &format!("word{i}")))
+            .collect();
+        append(&lines).unwrap();
+        add_mark(&Mark {
+            text: "word0".to_owned(),
+            at_ms: 0,
+            ..mark(MARK_SAVED, "word0")
+        })
+        .unwrap();
+
+        with(|c| prune_to(c, 3)).unwrap();
+        assert_eq!(count().unwrap(), 3);
+        assert!(search(None, None, "word0", 10, None).unwrap().is_empty());
+        assert_eq!(search(None, None, "word9", 10, None).unwrap().len(), 1);
+        assert_eq!(
+            marks(None, None, None).unwrap().len(),
+            1,
+            "a copy, not a pointer"
+        );
+    }
+
+    #[test]
+    fn the_reader_sees_each_write_as_soon_as_it_is_committed() {
+        let _store = TempStore::new("reader");
+        for i in 0..5 {
+            append(&[said("#one", i, "alice", &format!("n{i}"))]).unwrap();
+            assert_eq!(tail("p1", "#one", 100).unwrap().len() as i64, i + 1);
+        }
+    }
+
+    #[test]
+    fn appended_ids_rise_in_the_order_the_lines_were_given() {
+        let _store = TempStore::new("ids");
+        let ids = append(&[
+            said("#one", 3, "a", "x"),
+            said("#one", 1, "b", "y"),
+            said("#two", 2, "c", "z"),
+        ])
+        .unwrap();
+        let ids: Vec<i64> = ids.into_iter().map(Option::unwrap).collect();
+        assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
+        let back = tail("p1", "#one", 10).unwrap();
+        assert_eq!(
+            back.iter().map(|r| r.id).collect::<Vec<_>>(),
+            [ids[1], ids[0]]
+        );
+    }
+
+    #[test]
+    fn search_scopes_combine_network_and_conversation() {
+        let _store = TempStore::new("search-scope");
+        let mut elsewhere = said("#one", 1, "mallory", "shared word");
+        elsewhere.profile_id = "p2".to_owned();
+        append(&[
+            said("#one", 1, "alice", "shared word"),
+            said("#two", 1, "bob", "shared word"),
+            elsewhere,
+        ])
+        .unwrap();
+        assert_eq!(search(None, None, "shared", 10, None).unwrap().len(), 3);
+        assert_eq!(
+            search(Some("p1"), None, "shared", 10, None).unwrap().len(),
+            2
+        );
+        assert_eq!(
+            search(Some("p1"), Some("#one"), "shared", 10, None)
+                .unwrap()
+                .len(),
+            1
+        );
+        // A sender's name is searchable too.
+        assert_eq!(search(None, None, "mallory", 10, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn forgetting_one_network_leaves_the_others_state_and_marks() {
+        let _store = TempStore::new("forget-profile-scope");
+        for profile in ["p1", "p2"] {
+            add_mark(&Mark {
+                profile_id: profile.to_owned(),
+                ..mark(MARK_PINNED, "x")
+            })
+            .unwrap();
+            set_conversation_state(&ConversationState {
+                profile_id: profile.to_owned(),
+                conversation: "#one".to_owned(),
+                archived: true,
+                ..ConversationState::default()
+            })
+            .unwrap();
+        }
+        forget_profile("p1").unwrap();
+        assert_eq!(marks(None, Some("p2"), None).unwrap().len(), 1);
+        assert_eq!(conversation_states().unwrap().len(), 1);
     }
 }

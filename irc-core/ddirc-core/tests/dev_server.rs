@@ -268,3 +268,99 @@ async fn sets_a_topic_and_hears_it_back() {
 
     disconnect(handle).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the dev server: make dev-server"]
+async fn whois_answers_about_someone_online_and_someone_not() {
+    const CHANNEL: &str = "#ddirc-whois";
+
+    let (subject, mut subject_rx) = connect("ddirc_seen").await;
+    join(&subject, &mut subject_rx, CHANNEL).await;
+    let (asker, mut asker_rx) = connect("ddirc_asks").await;
+
+    asker
+        .send(ClientCommand::Whois {
+            nick: "DDIRC_SEEN".to_owned(),
+        })
+        .await
+        .expect("actor stopped");
+    let whois = wait_for(&mut asker_rx, |event| match event {
+        IrcEvent::Whois(info) => Some(info.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(whois.found);
+    assert!(whois.host.is_some(), "an address of some kind");
+    assert!(
+        whois.channels.iter().any(|c| c.ends_with(CHANNEL)),
+        "in the channel it joined: {:?}",
+        whois.channels
+    );
+
+    asker
+        .send(ClientCommand::Whois {
+            nick: "ddirc_nobody_here".to_owned(),
+        })
+        .await
+        .expect("actor stopped");
+    let missing = wait_for(&mut asker_rx, |event| match event {
+        IrcEvent::Whois(info) => Some(info.clone()),
+        // "No such nick" is the answer, not an error to show.
+        IrcEvent::Error { message, .. } => panic!("surfaced as an error: {message}"),
+        _ => None,
+    })
+    .await;
+    assert!(!missing.found);
+
+    disconnect(asker).await;
+    disconnect(subject).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the dev server: make dev-server"]
+async fn formatting_codes_arrive_as_formatting() {
+    // What the composer sends for `**bold** and *italic*` once markdown has
+    // become IRC formatting.
+    const CHANNEL: &str = "#ddirc-format";
+
+    let (listener, mut listener_rx) = connect("ddirc_reads").await;
+    join(&listener, &mut listener_rx, CHANNEL).await;
+    let (speaker, mut speaker_rx) = connect("ddirc_writes").await;
+    join(&speaker, &mut speaker_rx, CHANNEL).await;
+    wait_for(&mut listener_rx, |event| match event {
+        IrcEvent::Joined { nick, .. } if nick == "ddirc_writes" => Some(()),
+        _ => None,
+    })
+    .await;
+
+    speaker
+        .send(ClientCommand::SendMessage {
+            target: CHANNEL.to_owned(),
+            text: "\u{02}bold\u{02} and \u{1D}italic\u{1D}".to_owned(),
+        })
+        .await
+        .expect("actor stopped");
+    let message = wait_for(&mut listener_rx, |event| match event {
+        IrcEvent::Message(message) if message.sender == "ddirc_writes" => Some(message.clone()),
+        _ => None,
+    })
+    .await;
+
+    let bold: String = message
+        .spans
+        .iter()
+        .filter(|s| s.style.bold)
+        .map(|s| s.text.as_str())
+        .collect();
+    let italic: String = message
+        .spans
+        .iter()
+        .filter(|s| s.style.italic)
+        .map(|s| s.text.as_str())
+        .collect();
+    assert_eq!(bold, "bold");
+    assert_eq!(italic, "italic");
+
+    disconnect(speaker).await;
+    disconnect(listener).await;
+}

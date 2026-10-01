@@ -712,6 +712,14 @@ class SessionModel extends ChangeNotifier {
     if (first != null) conversation.unreadMarker = first;
   }
 
+  /// What [_restoreHistory] does once the store has answered, for a test
+  /// that has no store to ask.
+  @visibleForTesting
+  void restoreForTesting(Conversation conversation, List<ChatLine> older) {
+    conversation.restore(older);
+    _countRestoredUnread(conversation, older);
+  }
+
   /// Load the page of history above the top of [conversation].
   ///
   /// Returns how many lines came back. Nothing, and nothing asked, while

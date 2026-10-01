@@ -57,7 +57,9 @@ The generated certificate already carries `localhost` and `127.0.0.1` in its
 SAN, so hostname verification passes as-is.
 
 `irc-core/ddirc-core/tests/dev_server.rs` drives it: connect over real TLS,
-register, join, exchange a message between two clients, set a topic. Every test
+register, join, exchange a message between two clients, set a topic, ask WHOIS
+about someone online and someone not, and carry IRC formatting — what markdown
+in the composer becomes — from one client to another intact. Every test
 is `#[ignore]`d, so `cargo test` stays hermetic for CI and for machines without
 Docker. One of them is the guard — it asserts that **without**
 `extra_root_cert` the same connection is refused, so if verification is ever
