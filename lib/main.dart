@@ -12,11 +12,13 @@ import 'package:flutter/material.dart';
 import 'src/model/first_run.dart';
 import 'src/model/mcp.dart';
 import 'src/model/app_lock.dart';
+import 'src/model/chat_state.dart';
 import 'src/model/history.dart';
 import 'src/model/people.dart';
 import 'src/model/personas.dart';
 import 'src/model/local_server.dart';
 import 'src/model/log.dart';
+import 'src/model/marks.dart';
 import 'src/model/profile.dart';
 import 'src/model/proxy.dart';
 import 'src/model/settings.dart';
@@ -112,6 +114,11 @@ void _followHistorySetting(AppSettings settings) {
     // holds and what disk holds are reconciled for both.
     await People.instance.sync();
     await Personas.instance.sync();
+    // And so do drafts, read positions, pins and saved messages. Marks also
+    // let go of what they held when the switch goes off, since there is then
+    // nowhere they are kept.
+    await ConversationStates.instance.sync();
+    await Marks.instance.sync();
   }
 
   void apply() => unawaited(follow());
@@ -306,6 +313,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
     // awaited — dispose cannot be — but the write is queued before teardown
     // continues, which is the most that can be promised here.
     unawaited(MessageHistory.instance.flush());
+    unawaited(ConversationStates.instance.flush());
     _background.dispose();
     _notifications.dispose();
     // Closes every live connection, so quitting never leaves a socket behind.

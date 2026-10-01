@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -359,6 +359,9 @@ sealed class IrcEvent with _$IrcEvent {
     /// is showing the busiest rather than all of them.
     required bool truncated,
   }) = IrcEvent_ChannelList;
+
+  /// The answer to `whois`.
+  const factory IrcEvent.whois(WhoisInfo field0) = IrcEvent_Whois;
   const factory IrcEvent.error({required String message, required bool fatal}) =
       IrcEvent_Error;
 }
@@ -675,4 +678,80 @@ class TextSpan {
           runtimeType == other.runtimeType &&
           text == other.text &&
           style == other.style;
+}
+
+/// What the server says about one nick. See `ddirc_core::api::types::WhoisInfo`.
+class WhoisInfo {
+  final String nick;
+
+  /// False when the server said there is no such nick.
+  final bool found;
+  final String? user;
+  final String? host;
+  final String? realname;
+  final String? server;
+  final String? serverInfo;
+  final String? account;
+  final List<String> channels;
+  final BigInt? idleSecs;
+
+  /// Seconds since the Unix epoch.
+  final BigInt? signonSecs;
+  final String? away;
+  final bool operator_;
+  final bool secure;
+
+  const WhoisInfo({
+    required this.nick,
+    required this.found,
+    this.user,
+    this.host,
+    this.realname,
+    this.server,
+    this.serverInfo,
+    this.account,
+    required this.channels,
+    this.idleSecs,
+    this.signonSecs,
+    this.away,
+    required this.operator_,
+    required this.secure,
+  });
+
+  @override
+  int get hashCode =>
+      nick.hashCode ^
+      found.hashCode ^
+      user.hashCode ^
+      host.hashCode ^
+      realname.hashCode ^
+      server.hashCode ^
+      serverInfo.hashCode ^
+      account.hashCode ^
+      channels.hashCode ^
+      idleSecs.hashCode ^
+      signonSecs.hashCode ^
+      away.hashCode ^
+      operator_.hashCode ^
+      secure.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is WhoisInfo &&
+          runtimeType == other.runtimeType &&
+          nick == other.nick &&
+          found == other.found &&
+          user == other.user &&
+          host == other.host &&
+          realname == other.realname &&
+          server == other.server &&
+          serverInfo == other.serverInfo &&
+          account == other.account &&
+          channels == other.channels &&
+          idleSecs == other.idleSecs &&
+          signonSecs == other.signonSecs &&
+          away == other.away &&
+          operator_ == other.operator_ &&
+          secure == other.secure;
 }

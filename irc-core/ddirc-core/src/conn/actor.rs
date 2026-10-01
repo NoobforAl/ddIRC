@@ -26,7 +26,7 @@ use zeroize::Zeroizing;
 use crate::api::events::IrcEvent;
 use crate::api::types::{
     AuthOutcome, ChannelListing, ChatMessage, ConfigError, ConnectionStatus, MemberView, ReplyRef,
-    ServerConfig, Target,
+    ServerConfig, Target, WhoisInfo,
 };
 use crate::conn::diagnose;
 use crate::conn::ratelimit::{ReceiveLimiter, SendLimiter};
@@ -130,6 +130,16 @@ pub enum ClientCommand {
     /// twice would double a burst that is already the largest thing this
     /// connection ever receives.
     ListChannels,
+
+    /// Ask the server about one nick. The answer arrives as
+    /// [`IrcEvent::Whois`].
+    ///
+    /// One at a time, like [`ListChannels`](Self::ListChannels): a second
+    /// request replaces the first, since a profile sheet only ever shows one
+    /// person and the earlier answer would arrive for a sheet already closed.
+    Whois {
+        nick: String,
+    },
 
     /// Stop waiting out the backoff and attempt the next connection now.
     ///
@@ -282,6 +292,9 @@ struct Actor {
     /// a flood: nothing else on this connection is both enormous and asked
     /// for.
     listing: Option<Listing>,
+    /// The `WHOIS` currently being answered, if any. Its numerics arrive
+    /// separately and are gathered here until the server ends the list.
+    whois: Option<WhoisInfo>,
     /// Whether this connection's server granted `message-tags`, and so will
     /// pass a `+draft/reply` tag along rather than reject the line. Per
     /// connection: decided afresh by every negotiation.
@@ -378,6 +391,7 @@ impl Actor {
             ever_registered: false,
             transfers: Transfers::default(),
             listing: None,
+            whois: None,
             client_tags: false,
         }
     }
@@ -778,6 +792,19 @@ impl Actor {
                     outgoing.push_back(Message::from(Irc::LIST(None, None)));
                 }
             }
+            ClientCommand::Whois { nick } => {
+                let nick = nick.trim().to_owned();
+                // A nick is one word; anything else would be a second
+                // argument to the server, or a second command.
+                if !nick.is_empty() && !nick.contains(|c: char| c.is_whitespace() || c.is_control())
+                {
+                    self.whois = Some(WhoisInfo {
+                        nick: nick.clone(),
+                        ..WhoisInfo::default()
+                    });
+                    outgoing.push_back(Message::from(Irc::WHOIS(None, nick)));
+                }
+            }
             ClientCommand::SetNick(nick) => outgoing.push_back(Message::from(Irc::NICK(nick))),
             ClientCommand::SetTopic { channel, topic } => {
                 // A topic is one protocol line, so newlines are collapsed
@@ -947,6 +974,34 @@ impl Actor {
                     });
                 }
             }
+            // The answer to a WHOIS we asked. Checked before the error arm
+            // below, so "no such nick" is an answer about a person rather than
+            // an error line in whatever conversation is on screen.
+            Irc::Response(
+                response @ (Response::RPL_WHOISUSER
+                | Response::RPL_WHOISSERVER
+                | Response::RPL_WHOISOPERATOR
+                | Response::RPL_WHOISIDLE
+                | Response::RPL_WHOISCHANNELS
+                | Response::RPL_AWAY
+                | Response::RPL_ENDOFWHOIS
+                | Response::ERR_NOSUCHNICK),
+                args,
+            ) if self.is_whois_about(args) => self.on_whois_reply(*response, args),
+            Irc::Raw(code, args)
+                if (code == "330" || code == "671") && self.is_whois_about(args) =>
+            {
+                let Some(whois) = self.whois.as_mut() else {
+                    return;
+                };
+                if code == "330" {
+                    // 330: <me> <nick> <account> :is logged in as
+                    whois.account = args.get(2).cloned();
+                } else {
+                    // 671: <me> <nick> :is using a secure connection
+                    whois.secure = true;
+                }
+            }
             Irc::Response(response, args) if is_error_numeric(*response) => {
                 let message = args
                     .last()
@@ -1097,6 +1152,77 @@ impl Actor {
             auth: auth.clone(),
         });
         self.status(ConnectionStatus::Connected, None);
+    }
+
+    /// Whether a numeric is about the nick a pending `WHOIS` asked after.
+    ///
+    /// Every WHOIS numeric names the nick second, after our own. Matching on
+    /// it, rather than on "a WHOIS is pending", is what keeps an `RPL_AWAY`
+    /// that answers a message we sent from being filed as part of a profile.
+    fn is_whois_about(&self, args: &[String]) -> bool {
+        match (&self.whois, args.get(1)) {
+            (Some(whois), Some(nick)) => self.session.same_nick(&whois.nick, nick),
+            _ => false,
+        }
+    }
+
+    /// One line of a `WHOIS` answer.
+    fn on_whois_reply(&mut self, response: Response, args: &[String]) {
+        let Some(whois) = self.whois.as_mut() else {
+            return;
+        };
+        let arg = |i: usize| args.get(i).cloned();
+        match response {
+            // 311: <me> <nick> <user> <host> * :<realname>
+            Response::RPL_WHOISUSER => {
+                whois.found = true;
+                whois.nick = arg(1).unwrap_or_default();
+                whois.user = arg(2);
+                whois.host = arg(3);
+                whois.realname = args
+                    .last()
+                    .filter(|_| args.len() > 4)
+                    .map(|r| format::strip(r));
+            }
+            // 312: <me> <nick> <server> :<info>
+            Response::RPL_WHOISSERVER => {
+                whois.server = arg(2);
+                whois.server_info = arg(3).map(|i| format::strip(&i));
+            }
+            Response::RPL_WHOISOPERATOR => whois.operator = true,
+            // 317: <me> <nick> <idle> [<signon>] :seconds idle
+            Response::RPL_WHOISIDLE => {
+                whois.idle_secs = arg(2).and_then(|n| n.parse().ok());
+                whois.signon_secs = args
+                    .get(3)
+                    .filter(|_| args.len() > 4)
+                    .and_then(|n| n.parse().ok());
+            }
+            // 319: <me> <nick> :<channels> — may arrive more than once.
+            Response::RPL_WHOISCHANNELS => {
+                if let Some(list) = args.get(2) {
+                    whois
+                        .channels
+                        .extend(list.split_whitespace().map(str::to_owned));
+                }
+            }
+            // 301: <me> <nick> :<away message>
+            Response::RPL_AWAY => whois.away = arg(2).map(|a| format::strip(&a)),
+            // 401: <me> <nick> :No such nick/channel — the whole answer.
+            Response::ERR_NOSUCHNICK => {
+                whois.found = false;
+                self.finish_whois();
+            }
+            // 318: <me> <nick> :End of /WHOIS list
+            Response::RPL_ENDOFWHOIS => self.finish_whois(),
+            _ => {}
+        }
+    }
+
+    fn finish_whois(&mut self) {
+        if let Some(whois) = self.whois.take() {
+            self.emit(IrcEvent::Whois(Box::new(whois)));
+        }
     }
 
     /// One `RPL_LIST` line.
@@ -2922,6 +3048,91 @@ mod tests {
     /// real answer would arrive into.
     fn start_listing(actor: &mut Actor, outgoing: &mut VecDeque<Message>) {
         actor.queue(outgoing, ClientCommand::ListChannels);
+    }
+
+    fn last_whois(rx: &mut mpsc::Receiver<IrcEvent>) -> Option<WhoisInfo> {
+        drain(rx).into_iter().find_map(|event| match event {
+            IrcEvent::Whois(info) => Some(*info),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn a_whois_is_gathered_into_one_answer() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        actor.queue(
+            &mut outgoing,
+            ClientCommand::Whois {
+                nick: "Alice".into(),
+            },
+        );
+        assert!(outgoing.iter().any(|m| matches!(m.command, Irc::WHOIS(..))));
+
+        for line in [
+            ":s 311 me alice ~a example.org * :Alice Liddell",
+            ":s 312 me alice irc.example.org :Example server",
+            ":s 319 me alice :@#ops #chat",
+            ":s 330 me alice alice_acct :is logged in as",
+            ":s 671 me alice :is using a secure connection",
+            ":s 317 me alice 42 1700000000 :seconds idle, signon time",
+            ":s 301 me alice :lunch",
+        ] {
+            feed(&mut actor, &mut outgoing, line);
+        }
+        assert!(
+            last_whois(&mut rx).is_none(),
+            "nothing until the server says it is done"
+        );
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":s 318 me alice :End of /WHOIS list",
+        );
+
+        let whois = last_whois(&mut rx).expect("answered");
+        assert!(whois.found);
+        assert_eq!(whois.host.as_deref(), Some("example.org"));
+        assert_eq!(whois.realname.as_deref(), Some("Alice Liddell"));
+        assert_eq!(whois.server.as_deref(), Some("irc.example.org"));
+        assert_eq!(whois.channels, ["@#ops", "#chat"]);
+        assert_eq!(whois.account.as_deref(), Some("alice_acct"));
+        assert!(whois.secure);
+        assert_eq!(whois.idle_secs, Some(42));
+        assert_eq!(whois.signon_secs, Some(1_700_000_000));
+        assert_eq!(whois.away.as_deref(), Some("lunch"));
+    }
+
+    #[test]
+    fn whois_for_nobody_is_an_answer_not_an_error() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        actor.queue(
+            &mut outgoing,
+            ClientCommand::Whois {
+                nick: "ghost".into(),
+            },
+        );
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":s 401 me ghost :No such nick/channel",
+        );
+        let events = drain(&mut rx);
+        assert!(!events.iter().any(|e| matches!(e, IrcEvent::Error { .. })));
+        let whois = events
+            .into_iter()
+            .find_map(|e| match e {
+                IrcEvent::Whois(info) => Some(info),
+                _ => None,
+            })
+            .expect("answered");
+        assert!(!whois.found);
+    }
+
+    #[test]
+    fn an_away_reply_with_no_whois_pending_is_left_alone() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        feed(&mut actor, &mut outgoing, ":s 301 me bob :gone fishing");
+        assert!(last_whois(&mut rx).is_none());
     }
 
     fn last_list(rx: &mut mpsc::Receiver<IrcEvent>) -> (Vec<ChannelListing>, bool, bool) {

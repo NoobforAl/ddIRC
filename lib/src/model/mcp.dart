@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart';
 import '../version.dart';
+import 'history.dart';
 import 'secrets.dart';
 import 'session.dart';
 import 'workspace.dart';
@@ -605,7 +606,7 @@ class McpService extends ChangeNotifier {
         'list_networks' => _listNetworks(workspace),
         'list_conversations' => _listConversations(workspace, args),
         'read_messages' => _readMessages(workspace, args),
-        'search_messages' => _search(workspace, args),
+        'search_messages' => await _search(workspace, args),
         'send_message' => await _send(workspace, args),
         _ => throw _ToolError('no such tool: $name'),
       };
@@ -770,7 +771,10 @@ class McpService extends ChangeNotifier {
     };
   }
 
-  Map<String, Object?> _search(McpSource workspace, Map<String, Object?> args) {
+  Future<Map<String, Object?>> _search(
+    McpSource workspace,
+    Map<String, Object?> args,
+  ) async {
     final query = args['query'];
     if (query is! String || query.trim().length < 2) {
       throw const _ToolError('query needs at least two characters');
@@ -801,12 +805,50 @@ class McpService extends ChangeNotifier {
         }
       }
     }
+    // With history on, what has scrolled out of memory is searched too —
+    // through the store's full-text index, so this costs an index lookup and
+    // not a walk of two million rows. Merged in by what it is rather than by
+    // where it came from: a line both in memory and on disk is one result.
+    if (MessageHistory.instance.enabled) {
+      final seen = {
+        for (final f in found) '${f['network']}|${f['time']}|${f['sender']}',
+      };
+      for (final session in sessions) {
+        final hits = await MessageHistory.instance.search(
+          profileId: session.profileId,
+          conversation: args['conversation'] == null
+              ? null
+              : _conversation(session, args['conversation']).name,
+          query: query,
+          limit: limit,
+        );
+        for (final hit in hits) {
+          final described = {
+            'network': session.profileId,
+            'conversation': _nameIn(session, hit.conversation),
+            ..._describe(hit.line),
+          };
+          final key =
+              '${described['network']}|${described['time']}|${described['sender']}';
+          if (seen.add(key)) found.add(described);
+        }
+      }
+    }
     found.sort(
       (a, b) => (b['time']! as String).compareTo(a['time']! as String),
     );
     final results = found.take(limit).toList();
     _record('search_messages', '${results.length} for "$query"');
     return {'results': results};
+  }
+
+  /// A conversation's name as the session spells it, from the folded key
+  /// the store files it under; the key itself when it is not open.
+  static String _nameIn(SessionModel session, String key) {
+    for (final conversation in session.conversations) {
+      if (conversation.name.toLowerCase() == key) return conversation.name;
+    }
+    return key;
   }
 
   static String _allowKey(String profileId, String conversation) =>

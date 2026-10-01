@@ -27,6 +27,11 @@ use crate::api::types::{ReplyRef, TextSpan};
 /// become a database migration.
 #[derive(Debug, Clone)]
 pub struct StoredLine {
+    /// The id the store gave this line, on the way out; ignored on the way in.
+    ///
+    /// What a read position, a pin or a search result holds on to — a server
+    /// id is only there when the server sent one.
+    pub id: Option<i64>,
     /// Which saved network this belongs to.
     pub profile_id: String,
     /// The conversation's key, already case-folded by the caller. IRC's case
@@ -88,9 +93,19 @@ impl From<StoredLine> for store::StoredLine {
     }
 }
 
+impl From<store::Row> for StoredLine {
+    fn from(row: store::Row) -> Self {
+        Self {
+            id: Some(row.id),
+            ..row.line.into()
+        }
+    }
+}
+
 impl From<store::StoredLine> for StoredLine {
     fn from(line: store::StoredLine) -> Self {
         Self {
+            id: None,
             profile_id: line.profile_id,
             conversation: line.conversation,
             at_ms: line.at_ms,
@@ -141,10 +156,17 @@ pub fn store_is_open() -> bool {
     store::is_open()
 }
 
-/// Write a batch of lines.
-pub fn store_append(lines: Vec<StoredLine>) -> Result<(), String> {
+/// Write a batch of lines, and return the id each was stored under — `null`
+/// for a line already stored, a replay of one the server sent before.
+pub fn store_append(lines: Vec<StoredLine>) -> Result<Vec<Option<i64>>, String> {
     let lines: Vec<store::StoredLine> = lines.into_iter().map(Into::into).collect();
     store::append(&lines).map_err(|e| e.to_string())
+}
+
+fn rows(result: Result<Vec<store::Row>, store::StoreError>) -> Result<Vec<StoredLine>, String> {
+    result
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
 }
 
 /// The last `limit` lines of one conversation, oldest first.
@@ -153,14 +175,54 @@ pub fn store_recent(
     conversation: String,
     limit: u32,
 ) -> Result<Vec<StoredLine>, String> {
-    store::recent(&profile_id, &conversation, limit)
-        .map(|lines| lines.into_iter().map(Into::into).collect())
-        .map_err(|e| e.to_string())
+    rows(store::tail(&profile_id, &conversation, limit))
 }
 
-/// How much history is being kept.
+/// The `limit` lines just older than the line at (`at_ms`, `id`), oldest
+/// first: the next page up the scrollback.
+pub fn store_before(
+    profile_id: String,
+    conversation: String,
+    at_ms: i64,
+    id: i64,
+    limit: u32,
+) -> Result<Vec<StoredLine>, String> {
+    rows(store::before(&profile_id, &conversation, at_ms, id, limit))
+}
+
+/// The lines either side of one, for opening a conversation at it.
+pub fn store_around(
+    profile_id: String,
+    conversation: String,
+    at_ms: i64,
+    id: i64,
+    radius: u32,
+) -> Result<Vec<StoredLine>, String> {
+    rows(store::around(&profile_id, &conversation, at_ms, id, radius))
+}
+
+/// Lines matching what the user typed, newest first, optionally scoped to a
+/// network and a conversation. `before_id` pages down from a previous result.
+pub fn store_search(
+    profile_id: Option<String>,
+    conversation: Option<String>,
+    query: String,
+    limit: u32,
+    before_id: Option<i64>,
+) -> Result<Vec<StoredLine>, String> {
+    rows(store::search(
+        profile_id.as_deref(),
+        conversation.as_deref(),
+        &query,
+        limit,
+        before_id,
+    ))
+}
+
+/// How much history is being kept. The line count is approximate — see
+/// `ddirc_core::store::approximate_count` — so the screen says "about".
 pub fn store_stats() -> Result<StoreStats, String> {
-    let lines = store::count().map_err(|e| e.to_string())?;
+    let lines = store::approximate_count().map_err(|e| e.to_string())?;
     let bytes = store::size_bytes().map_err(|e| e.to_string())?;
     Ok(StoreStats { lines, bytes })
 }
@@ -173,6 +235,150 @@ pub fn store_clear() -> Result<(), String> {
 /// Delete one conversation's history, leaving the rest.
 pub fn store_forget(profile_id: String, conversation: String) -> Result<(), String> {
     store::forget(&profile_id, &conversation).map_err(|e| e.to_string())
+}
+
+/// Delete everything kept for one saved network, for when it is deleted.
+pub fn store_forget_profile(profile_id: String) -> Result<(), String> {
+    store::forget_profile(&profile_id).map_err(|e| e.to_string())
+}
+
+/// What the user keeps about one conversation apart from its messages: an
+/// unsent draft, how far it was read, whether it is pinned or archived.
+pub struct ConversationState {
+    pub profile_id: String,
+    /// Already case-folded by the caller.
+    pub conversation: String,
+    pub draft: Option<String>,
+    pub draft_reply_msgid: Option<String>,
+    pub read_line_id: Option<i64>,
+    pub read_at_ms: Option<i64>,
+    /// Place among the pinned conversations, lowest first; null when not
+    /// pinned.
+    pub pin_order: Option<i64>,
+    pub archived: bool,
+}
+
+impl From<store::ConversationState> for ConversationState {
+    fn from(s: store::ConversationState) -> Self {
+        Self {
+            profile_id: s.profile_id,
+            conversation: s.conversation,
+            draft: s.draft,
+            draft_reply_msgid: s.draft_reply_msgid,
+            read_line_id: s.read_line_id,
+            read_at_ms: s.read_at_ms,
+            pin_order: s.pin_order,
+            archived: s.archived,
+        }
+    }
+}
+
+impl From<ConversationState> for store::ConversationState {
+    fn from(s: ConversationState) -> Self {
+        Self {
+            profile_id: s.profile_id,
+            conversation: s.conversation,
+            draft: s.draft,
+            draft_reply_msgid: s.draft_reply_msgid,
+            read_line_id: s.read_line_id,
+            read_at_ms: s.read_at_ms,
+            pin_order: s.pin_order,
+            archived: s.archived,
+        }
+    }
+}
+
+/// Every conversation's state, on every network.
+pub fn store_conversation_states() -> Result<Vec<ConversationState>, String> {
+    store::conversation_states()
+        .map(|list| list.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Write one conversation's state; one with nothing left in it loses its row.
+pub fn store_set_conversation_state(state: ConversationState) -> Result<(), String> {
+    store::set_conversation_state(&state.into()).map_err(|e| e.to_string())
+}
+
+/// A message the user pinned (`kind` 1) or saved (`kind` 2): a copy of it,
+/// so it outlives the line it came from.
+pub struct Mark {
+    /// Zero when adding.
+    pub id: i64,
+    pub kind: i64,
+    pub profile_id: String,
+    pub conversation: String,
+    pub line_id: Option<i64>,
+    pub msgid: Option<String>,
+    pub at_ms: i64,
+    pub sender: Option<String>,
+    pub spans: Vec<TextSpan>,
+    pub created_ms: i64,
+}
+
+impl From<store::Mark> for Mark {
+    fn from(m: store::Mark) -> Self {
+        Self {
+            id: m.id,
+            kind: m.kind,
+            profile_id: m.profile_id,
+            conversation: m.conversation,
+            line_id: m.line_id,
+            msgid: m.msgid,
+            at_ms: m.at_ms,
+            sender: m.sender,
+            spans: format::parse(&m.text)
+                .into_iter()
+                .map(TextSpan::from)
+                .collect(),
+            created_ms: m.created_ms,
+        }
+    }
+}
+
+impl From<Mark> for store::Mark {
+    fn from(m: Mark) -> Self {
+        Self {
+            id: m.id,
+            kind: m.kind,
+            profile_id: m.profile_id,
+            conversation: m.conversation,
+            line_id: m.line_id,
+            msgid: m.msgid,
+            at_ms: m.at_ms,
+            sender: m.sender,
+            text: format::encode(
+                &m.spans
+                    .into_iter()
+                    .map(format::TextSpan::from)
+                    .collect::<Vec<_>>(),
+            ),
+            created_ms: m.created_ms,
+        }
+    }
+}
+
+/// Pins and saved messages: of one kind or all, on one network or all, in
+/// one conversation or all. Oldest message first.
+pub fn store_marks(
+    kind: Option<i64>,
+    profile_id: Option<String>,
+    conversation: Option<String>,
+) -> Result<Vec<Mark>, String> {
+    store::marks(kind, profile_id.as_deref(), conversation.as_deref())
+        .map(|list| list.into_iter().map(Into::into).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Pin or save a message, returning the mark's id. Marking the same message
+/// twice returns the first mark's id rather than making a second.
+pub fn store_add_mark(mark: Mark) -> Result<i64, String> {
+    store::add_mark(&mark.into()).map_err(|e| e.to_string())
+}
+
+/// Unpin or unsave.
+pub fn store_remove_mark(id: i64) -> Result<(), String> {
+    store::remove_mark(id).map_err(|e| e.to_string())
 }
 
 /// What the user has written down about one person on one network: a name

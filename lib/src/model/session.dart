@@ -6,6 +6,8 @@ import 'package:flutter/scheduler.dart';
 
 import '../rust/api/client.dart' as core;
 import '../rust/api/types.dart';
+import '../text/markdown.dart';
+import 'chat_state.dart';
 import 'errors.dart';
 import 'history.dart';
 import 'log.dart';
@@ -59,6 +61,13 @@ class ChatLine {
   /// `server-time`, and the time it arrived otherwise — which is what every
   /// client on a network without it shows.
   final DateTime at;
+
+  /// The id the message store gave this line, once it has been written; null
+  /// before then, and always while history is off.
+  ///
+  /// What a read position or a pin points at when there is no server id —
+  /// which, on most networks, is every line.
+  int? dbId;
 
   bool get isSystem => system != null;
   bool get isMention => message?.isMention ?? false;
@@ -170,6 +179,23 @@ class Conversation {
       // go rather than anything that arrived live.
       lines.removeRange(0, lines.length - _maxLinesPerConversation);
     }
+  }
+
+  /// Whether the store may hold lines older than the first one here.
+  ///
+  /// True until a page comes back short: there is no cheaper way to know, and
+  /// asking once more than necessary costs one empty query.
+  bool hasOlder = true;
+
+  /// Put a page of older lines in front, from scrolling up past the top.
+  ///
+  /// Unlike [restore], not trimmed to the cap: these were asked for, and
+  /// trimming from the front would throw away exactly the page just loaded.
+  /// The cap catches up on the next line that arrives, from the oldest end,
+  /// which is the right end to lose.
+  void prependOlder(List<ChatLine> older) {
+    if (older.isEmpty) return;
+    lines.insertAll(0, older);
   }
 
   void markRead() {
@@ -375,6 +401,9 @@ class SessionModel extends ChangeNotifier {
 
   String _nick;
   String? _active;
+
+  /// Answers to `WHOIS` still on their way, by folded nick.
+  final Map<String, Completer<WhoisInfo?>> _whois = {};
 
   /// The one thing the app is currently telling the user, if any.
   ///
@@ -645,9 +674,85 @@ class SessionModel extends ChangeNotifier {
           .then((older) {
             if (_disposed || older.isEmpty) return;
             conversation.restore(older);
+            _countRestoredUnread(conversation, older);
             _queueNotify();
           }),
     );
+  }
+
+  /// Count what arrived after the read position last time, now that it has
+  /// been put back.
+  ///
+  /// Only past a position that was actually recorded — see
+  /// [ConversationStates.isAfterRead] — so a conversation never opened does
+  /// not come back reporting its whole history as news. With that, closing
+  /// the app no longer forgets what had not been read: the badge and the
+  /// "new messages" rule come back where they were.
+  void _countRestoredUnread(Conversation conversation, List<ChatLine> older) {
+    if (_key(conversation.name) == _active) return;
+    final states = ConversationStates.instance;
+    final notify = settings.notifyFor(profileId, conversation.name);
+    ChatLine? first;
+    for (final line in older) {
+      if (line.isSystem || line.isSelf) continue;
+      if (!states.isAfterRead(profileId, conversation.name, line)) continue;
+      first ??= line;
+      switch (notify) {
+        case NotifyLevel.none:
+          continue;
+        case NotifyLevel.mentions:
+          if (!line.isMention) continue;
+        case NotifyLevel.all:
+          break;
+      }
+      conversation.unread++;
+      if (line.isMention) conversation.unreadMentions++;
+    }
+    // Earlier than anything live, which arrived after these.
+    if (first != null) conversation.unreadMarker = first;
+  }
+
+  /// Load the page of history above the top of [conversation].
+  ///
+  /// Returns how many lines came back. Nothing, and nothing asked, while
+  /// history is off or once a page has come back short.
+  Future<int> loadOlder(Conversation conversation) async {
+    if (!conversation.hasOlder || !MessageHistory.instance.enabled) return 0;
+    final oldest = conversation.lines.isEmpty ? null : conversation.lines.first;
+    if (oldest == null) {
+      conversation.hasOlder = false;
+      return 0;
+    }
+    const page = MessageHistory.restoreLines;
+    final older = await MessageHistory.instance.loadBefore(
+      profileId: profileId,
+      conversation: conversation.name,
+      isChannel: conversation.isChannel,
+      oldest: oldest,
+      limit: page,
+    );
+    if (_disposed) return 0;
+    if (older.length < page) conversation.hasOlder = false;
+    conversation.prependOlder(older);
+    if (older.isNotEmpty) notifyListeners();
+    return older.length;
+  }
+
+  /// Page back through [conversation] until it reaches back to [at], so a
+  /// saved message or a search result from further back can be scrolled to.
+  ///
+  /// Bounded, so a mark from years ago cannot turn into an unbounded read:
+  /// past that, the caller says it is too far back to show in place.
+  Future<bool> reachBack(Conversation conversation, DateTime at) async {
+    for (var page = 0; page < 25; page++) {
+      if (conversation.lines.isNotEmpty &&
+          !conversation.lines.first.at.isAfter(at)) {
+        return true;
+      }
+      if (await loadOlder(conversation) == 0) break;
+    }
+    return conversation.lines.isNotEmpty &&
+        !conversation.lines.first.at.isAfter(at);
   }
 
   /// Join a channel because the user just said to.
@@ -780,8 +885,32 @@ class SessionModel extends ChangeNotifier {
     _active = key;
     final conversation = _conversations[key]!;
     conversation.markRead();
+    _rememberRead(conversation);
     onRead?.call(conversation);
     notifyListeners();
+  }
+
+  /// Mark [name] as read without opening it — from the list's menu, for a
+  /// channel whose backlog the user has decided not to read.
+  void markRead(String name) {
+    final conversation = _conversations[_key(name)];
+    if (conversation == null) return;
+    conversation.markRead();
+    if (_key(name) != _active) conversation.unreadMarker = null;
+    _rememberRead(conversation);
+    onRead?.call(conversation);
+    notifyListeners();
+  }
+
+  /// Note that [conversation] has been read to its end, so the next launch
+  /// knows where the unread part begins.
+  void _rememberRead(Conversation conversation) {
+    final lines = conversation.lines;
+    ConversationStates.instance.markRead(
+      profileId,
+      conversation.name,
+      lines.isEmpty ? null : lines.last,
+    );
   }
 
   /// Close a tab without leaving the conversation.
@@ -818,13 +947,23 @@ class SessionModel extends ChangeNotifier {
       pending: pending,
       openTab: openTab,
     );
+    final isActive = _key(name) == _active;
     conversation.add(
       line,
-      active: _key(name) == _active,
+      active: isActive,
       notify: settings.notifyFor(profileId, name),
     );
     _log(name, line);
     _save(name, line);
+    if (isActive) {
+      ConversationStates.instance.markRead(profileId, name, line);
+    } else if (line.isMention &&
+        ConversationStates.instance.isArchived(profileId, name)) {
+      // Put away is not the same as unreachable: somebody asking for you by
+      // name brings it back, which is what archiving means in every client
+      // that has it.
+      ConversationStates.instance.setArchived(profileId, name, false);
+    }
     // Handed on with the conversation it landed in, so whoever is listening
     // can see whether it is a request, whether it is the one on screen, and
     // what the network is called. Deciding whether it is worth interrupting
@@ -940,6 +1079,15 @@ class SessionModel extends ChangeNotifier {
         if (!isChannel &&
             !message.isSelf &&
             settings.isBlocked(profileId, name)) {
+          return;
+        }
+        // Muted in channels: kept, if history is, but not shown. Quieter than
+        // a block — they can still reach you directly — and narrower than
+        // leaving a room because of one person in it.
+        if (isChannel &&
+            !message.isSelf &&
+            settings.isNickMuted(profileId, message.sender)) {
+          _save(name, ChatLine.message(message, _sentAt(message, now)));
           return;
         }
         _addLine(
@@ -1210,6 +1358,10 @@ class SessionModel extends ChangeNotifier {
           isChannel: _looksLikeChannel(channel),
         );
 
+      case IrcEvent_Whois(:final field0):
+        _whois.remove(field0.nick.toLowerCase())?.complete(field0);
+        return;
+
       case IrcEvent_Error(:final message, :final fatal):
         _logConnection('error: $message');
         AppLog.instance.debug('[${_network ?? config.host}] error: $message');
@@ -1299,6 +1451,41 @@ class SessionModel extends ChangeNotifier {
   // -------------------------------------------------------------------------
   // Commands
   // -------------------------------------------------------------------------
+
+  /// Ask the server about [nick], and wait for the answer.
+  ///
+  /// Null when the request could not be sent, or no answer came in time — a
+  /// profile sheet shows what it already knows either way, and a spinner that
+  /// never stops is a worse answer than none.
+  Future<WhoisInfo?> whois(String nick) {
+    final key = nick.trim().toLowerCase();
+    if (key.isEmpty) return Future.value(null);
+    final pending = _whois[key];
+    if (pending != null) return pending.future;
+    final completer = Completer<WhoisInfo?>();
+    _whois[key] = completer;
+    unawaited(
+      _run(() => core.whois(id: connectionId, nick: nick.trim())).then((error) {
+        if (error != null) _whois.remove(key)?.complete(null);
+      }),
+    );
+    return completer.future.timeout(
+      const Duration(seconds: 15),
+      onTimeout: () {
+        _whois.remove(key);
+        return null;
+      },
+    );
+  }
+
+  /// The half of [whois] a test can reach: a request recorded as though it
+  /// had gone out, so an answer fed through [receiveForTesting] lands.
+  @visibleForTesting
+  Future<WhoisInfo?> whoisForTesting(String nick) {
+    final completer = Completer<WhoisInfo?>();
+    _whois[nick.toLowerCase()] = completer;
+    return completer.future;
+  }
 
   /// Change our nickname. The server decides whether it sticks; the rename
   /// only lands in the UI once it comes back as a NICK event.
@@ -1392,8 +1579,15 @@ class SessionModel extends ChangeNotifier {
   /// With [replyTo], plain text is sent as a reply to that message. A slash
   /// command ignores it: `/me` and the rest have no room for a quote.
   Future<String?> submit(String input, {ReplyRef? replyTo}) async {
-    final text = input.trim();
-    if (text.isEmpty) return null;
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return null;
+    // Markdown becomes IRC formatting before anything else looks at the line,
+    // so every client on the other end sees bold rather than asterisks. Never
+    // inside a command other than `/me`: a topic or a nick with formatting
+    // codes in it is not what anybody typed `**` for.
+    final text = settings.markdown && !trimmed.startsWith('/')
+        ? markdownToMirc(trimmed)
+        : trimmed;
 
     if (!text.startsWith('/') && replyTo != null) {
       final target = active;
@@ -1456,7 +1650,7 @@ class SessionModel extends ChangeNotifier {
           await core.sendAction(
             id: connectionId,
             target: target.name,
-            text: argument,
+            text: settings.markdown ? markdownToMirc(argument) : argument,
           );
         case SlashCommand.topic:
           if (argument.isEmpty) return usage();

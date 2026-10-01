@@ -41,7 +41,12 @@ import 'session.dart';
 /// Failures are swallowed on purpose. A full disk or a revoked permission must
 /// not take the app down or interrupt a conversation — history is a
 /// convenience, never something the client depends on.
-class MessageHistory {
+///
+/// A [ChangeNotifier] because more than the settings page now cares whether it
+/// is on: pinning, saving and archiving are offered only while there is
+/// somewhere to keep them, and those controls have to change when it opens or
+/// closes.
+class MessageHistory extends ChangeNotifier {
   MessageHistory._();
 
   static final MessageHistory instance = MessageHistory._();
@@ -59,6 +64,14 @@ class MessageHistory {
 
   String? _path;
   final List<store.StoredLine> _pending = [];
+
+  /// The lines behind [_pending], in the same order, so each can be told the
+  /// id it was stored under once the batch is written. That id is what a read
+  /// position, a pin or a search result points at.
+  final List<ChatLine> _pendingLines = [];
+
+  /// Whether the batch now being written has already failed once.
+  bool _retried = false;
   Timer? _timer;
   bool _writing = false;
   bool _enabled = false;
@@ -96,9 +109,12 @@ class MessageHistory {
     if (enabled && path == null) return;
 
     if (!enabled) {
-      _enabled = false;
+      // Flushed while still enabled — `flush` writes nothing once this is off,
+      // and the tail of what was said would be lost to the switch.
       await flush();
+      _enabled = false;
       _pending.clear();
+      _pendingLines.clear();
       _timer?.cancel();
       _timer = null;
       try {
@@ -106,6 +122,7 @@ class MessageHistory {
       } catch (error) {
         debugPrint('ddIRC: could not close the message store ($error)');
       }
+      notifyListeners();
       return;
     }
 
@@ -113,6 +130,7 @@ class MessageHistory {
       await store.storeOpen(path: path!);
       _enabled = true;
       _lastError = null;
+      notifyListeners();
     } catch (error) {
       // Left off rather than half on, and the reason is kept rather than only
       // printed. The commonest cause is a file written by a newer build, and a
@@ -121,6 +139,7 @@ class MessageHistory {
       _enabled = false;
       _lastError = describeError(error);
       debugPrint('ddIRC: message history unavailable ($error)');
+      notifyListeners();
     }
   }
 
@@ -142,6 +161,7 @@ class MessageHistory {
   }) {
     if (!_enabled) return;
     _pending.add(_encode(profileId, conversation, line));
+    _pendingLines.add(line);
     _timer ??= Timer(_flushEvery, () {
       _timer = null;
       unawaited(flush());
@@ -153,21 +173,39 @@ class MessageHistory {
   /// Exposed so a test does not have to wait out the timer, and so turning
   /// history off does not leave its tail unwritten.
   Future<void> flush() async {
-    if (_pending.isEmpty || _writing) return;
+    if (_pending.isEmpty || _writing || !_enabled) return;
 
     // Guarded rather than queued: two overlapping flushes would write the same
     // batch twice. Anything that arrives while one is in flight goes out with
     // the next.
     _writing = true;
     final batch = List<store.StoredLine>.of(_pending);
+    final lines = List<ChatLine>.of(_pendingLines);
     _pending.clear();
+    _pendingLines.clear();
     try {
-      await store.storeAppend(lines: batch);
+      final ids = await store.storeAppend(lines: batch);
+      for (var i = 0; i < ids.length && i < lines.length; i++) {
+        lines[i].dbId = ids[i]?.toInt();
+      }
+      _retried = false;
     } catch (error) {
-      // Deliberately terminal, and deliberately not put back on the queue: a
-      // store that is failing will fail the retry too, and a queue that only
-      // grows is a memory leak wearing a recovery strategy's clothes.
-      debugPrint('ddIRC: could not save ${batch.length} line(s) ($error)');
+      // One more go, with the next batch, and then let it go. A busy database
+      // is worth a second attempt; a store that is failing will fail the retry
+      // too, and a queue that only grows is a memory leak wearing a recovery
+      // strategy's clothes.
+      if (!_retried) {
+        _retried = true;
+        _pending.insertAll(0, batch);
+        _pendingLines.insertAll(0, lines);
+        _timer ??= Timer(_flushEvery, () {
+          _timer = null;
+          unawaited(flush());
+        });
+      } else {
+        _retried = false;
+        debugPrint('ddIRC: could not save ${batch.length} line(s) ($error)');
+      }
     } finally {
       _writing = false;
     }
@@ -194,6 +232,109 @@ class MessageHistory {
     }
   }
 
+  /// The [limit] lines older than [oldest], oldest first: the next page up a
+  /// scrollback. Empty when there are none, or nothing is open.
+  ///
+  /// A line that was never written — history was off when it arrived — has no
+  /// id, and is placed by its time alone: everything strictly before that
+  /// millisecond.
+  Future<List<ChatLine>> loadBefore({
+    required String profileId,
+    required String conversation,
+    required bool isChannel,
+    required ChatLine oldest,
+    int limit = restoreLines,
+  }) async {
+    if (!_enabled) return const [];
+    await flush();
+    try {
+      final rows = await store.storeBefore(
+        profileId: profileId,
+        conversation: key(conversation),
+        atMs: oldest.at.millisecondsSinceEpoch,
+        id: oldest.dbId ?? 0,
+        limit: limit,
+      );
+      return [for (final row in rows) _decode(row, conversation, isChannel)];
+    } catch (error) {
+      debugPrint('ddIRC: could not read older history ($error)');
+      return const [];
+    }
+  }
+
+  /// The lines either side of the one stored at ([atMs], [id]), for opening
+  /// a conversation at something that has left the scrollback in memory.
+  Future<List<ChatLine>> around({
+    required String profileId,
+    required String conversation,
+    required bool isChannel,
+    required int atMs,
+    required int id,
+    int radius = 50,
+  }) async {
+    if (!_enabled) return const [];
+    await flush();
+    try {
+      final rows = await store.storeAround(
+        profileId: profileId,
+        conversation: key(conversation),
+        atMs: atMs,
+        id: id,
+        radius: radius,
+      );
+      return [for (final row in rows) _decode(row, conversation, isChannel)];
+    } catch (error) {
+      debugPrint('ddIRC: could not read history around a line ($error)');
+      return const [];
+    }
+  }
+
+  /// Saved lines matching [query], newest first, from the full-text index.
+  ///
+  /// Scoped to one network and one conversation when given. [beforeId] pages
+  /// down from the last result of a previous call. Only what somebody said is
+  /// indexed — joins and the rest are not things anyone searches for.
+  Future<List<HistoryHit>> search({
+    String? profileId,
+    String? conversation,
+    required String query,
+    int limit = 50,
+    int? beforeId,
+  }) async {
+    if (!_enabled || query.trim().isEmpty) return const [];
+    await flush();
+    try {
+      final rows = await store.storeSearch(
+        profileId: profileId,
+        conversation: conversation == null ? null : key(conversation),
+        query: query,
+        limit: limit,
+        beforeId: beforeId,
+      );
+      return [
+        for (final row in rows)
+          HistoryHit(
+            profileId: row.profileId,
+            conversation: row.conversation,
+            // Where it was filed is all the row says about what it was; a
+            // conversation key that starts like a channel was one.
+            line: _decode(
+              row,
+              row.conversation,
+              looksLikeChannel(row.conversation),
+            ),
+          ),
+      ];
+    } catch (error) {
+      debugPrint('ddIRC: could not search message history ($error)');
+      return const [];
+    }
+  }
+
+  /// Whether a conversation name is a channel's rather than a person's.
+  static bool looksLikeChannel(String name) =>
+      name.isNotEmpty && '#&+!'.contains(name[0]);
+
   /// How much is being kept, or null when nothing is open or it cannot be read.
   Future<store.StoreStats?> stats() async {
     if (!_enabled) return null;
@@ -209,6 +350,7 @@ class MessageHistory {
   /// Delete everything, and give the disk space back.
   Future<void> clear() async {
     _pending.clear();
+    _pendingLines.clear();
     if (!_enabled) return;
     try {
       await store.storeClear();
@@ -233,12 +375,33 @@ class MessageHistory {
     }
   }
 
+  /// Delete everything kept for one network — its history, its pins and
+  /// saved messages, its drafts and read positions, what was noted about its
+  /// people — because the network itself is being deleted.
+  ///
+  /// Anything still queued for it is dropped first, or the flush after this
+  /// would write a little of it straight back.
+  Future<void> forgetProfile(String profileId) async {
+    for (var i = _pending.length - 1; i >= 0; i--) {
+      if (_pending[i].profileId == profileId) {
+        _pending.removeAt(i);
+        _pendingLines.removeAt(i);
+      }
+    }
+    if (!_enabled) return;
+    try {
+      await store.storeForgetProfile(profileId: profileId);
+    } catch (error) {
+      debugPrint('ddIRC: could not forget a network ($error)');
+    }
+  }
+
   /// How a conversation name is filed.
   ///
   /// The same fold [SessionModel] uses for its own map, and it has to stay that
   /// way: a channel stored under one spelling and looked up under another is
-  /// history that exists and can never be found.
-  @visibleForTesting
+  /// history that exists and can never be found. Shared with everything else
+  /// filed per conversation in the same database, for the same reason.
   static String key(String name) => name.toLowerCase();
 
   /// Zero for a message; a system line's kind is stored one higher so that the
@@ -293,7 +456,7 @@ class MessageHistory {
         row.spans.map((span) => span.text).join(),
         at,
         _kindFrom(row.kind),
-      );
+      )..dbId = row.id?.toInt();
     }
     return ChatLine.message(
       rust.ChatMessage(
@@ -314,7 +477,7 @@ class MessageHistory {
         replyTo: row.replyTo,
       ),
       at,
-    );
+    )..dbId = row.id?.toInt();
   }
 
   /// The style a system line is written with: none. System text carries no
@@ -350,12 +513,37 @@ class MessageHistory {
     _timer?.cancel();
     _timer = null;
     _pending.clear();
+    _pendingLines.clear();
     _enabled = false;
     _lastError = null;
     _path = null;
   }
 
+  /// Pretend the store is open, for a test of something that only offers
+  /// itself while history is on. Nothing is written: there is no native
+  /// library in a widget test, and every call into it fails quietly.
+  @visibleForTesting
+  void enableForTest(bool enabled) {
+    _enabled = enabled;
+    notifyListeners();
+  }
+
   /// Point the store at a path of the caller's choosing.
   @visibleForTesting
   void useFile(String path) => _path = path;
+}
+
+/// One saved line that matched a search, and where it was said.
+class HistoryHit {
+  HistoryHit({
+    required this.profileId,
+    required this.conversation,
+    required this.line,
+  });
+
+  final String profileId;
+
+  /// The conversation's key — folded, as it is filed.
+  final String conversation;
+  final ChatLine line;
 }

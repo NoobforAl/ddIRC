@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -67,6 +68,16 @@ class AppSettings extends ChangeNotifier {
   static const _kNotifyPreview = 'app.notifyPreview';
   static const _kNotifyPrefix = 'notify.';
   static const _kShowMembers = 'ui.showMembers';
+  static const _kMarkdown = 'ui.markdown';
+
+  /// When a timed mute ends, in milliseconds since the epoch, per
+  /// conversation. Kept apart from the level itself: "muted until 18:30" is
+  /// a mute that knows when to stop, and the level underneath it is what the
+  /// conversation goes back to.
+  static const _kMuteUntilPrefix = 'muteUntil.';
+
+  /// People whose lines are hidden in channels, without blocking them.
+  static const _kMutedNickPrefix = 'mutedNick.';
 
   /// People whose first message was declined, and people whose was accepted.
   ///
@@ -144,11 +155,23 @@ class AppSettings extends ChangeNotifier {
   /// which is the part of it that is worth having at a glance.
   bool _showMembers = false;
 
+  /// On. Markdown is how people already type emphasis, and turning `**this**`
+  /// into bold — on the way out as IRC formatting every client understands,
+  /// and on the way in for whoever typed it by hand — costs nothing to anyone
+  /// who never types an asterisk.
+  bool _markdown = true;
+
   Density _density = Density.comfortable;
   ThemeMode _themeMode = ThemeMode.dark;
   final Map<String, NotifyLevel> _notify = {};
   final Set<String> _blocked = {};
   final Set<String> _accepted = {};
+  final Map<String, int> _muteUntil = {};
+  final Set<String> _mutedNicks = {};
+
+  /// Fires when the soonest timed mute runs out, so the list stops showing
+  /// the conversation as muted without anyone touching it.
+  Timer? _muteExpiry;
 
   /// Load from disk, falling back to defaults if the store is unavailable.
   ///
@@ -184,6 +207,7 @@ class AppSettings extends ChangeNotifier {
     _notifications = prefs.getBool(_kNotifications) ?? _notifications;
     _notifyPreview = prefs.getBool(_kNotifyPreview) ?? _notifyPreview;
     _showMembers = prefs.getBool(_kShowMembers) ?? _showMembers;
+    _markdown = prefs.getBool(_kMarkdown) ?? _markdown;
     _density = Density.values.firstWhere(
       (d) => d.name == prefs.getString(_kDensity),
       orElse: () => _density,
@@ -207,8 +231,16 @@ class AppSettings extends ChangeNotifier {
         _blocked.add(key.substring(_kBlockedPrefix.length));
       } else if (key.startsWith(_kAcceptedPrefix)) {
         _accepted.add(key.substring(_kAcceptedPrefix.length));
+      } else if (key.startsWith(_kMuteUntilPrefix)) {
+        final until = prefs.getInt(key);
+        if (until != null) {
+          _muteUntil[key.substring(_kMuteUntilPrefix.length)] = until;
+        }
+      } else if (key.startsWith(_kMutedNickPrefix)) {
+        _mutedNicks.add(key.substring(_kMutedNickPrefix.length));
       }
     }
+    _expireMutes();
   }
 
   bool get showTimestamps => _showTimestamps;
@@ -224,6 +256,10 @@ class AppSettings extends ChangeNotifier {
   bool get notifications => _notifications;
   bool get notifyPreview => _notifyPreview;
   bool get showMembers => _showMembers;
+
+  /// Whether `**bold**`, `*italic*`, `~~struck~~` and `` `code` `` are turned
+  /// into formatting — when sending, and when showing what arrived.
+  bool get markdown => _markdown;
   Density get density => _density;
   ThemeMode get themeMode => _themeMode;
 
@@ -297,6 +333,10 @@ class AppSettings extends ChangeNotifier {
     _showMembers = value;
   });
 
+  set markdown(bool value) => _set(_kMarkdown, value, () {
+    _markdown = value;
+  });
+
   set density(Density value) => _set(_kDensity, value.name, () {
     _density = value;
   });
@@ -310,11 +350,108 @@ class AppSettings extends ChangeNotifier {
   /// Scoped by profile, because `#chat` on two networks is two different
   /// rooms. Case-insensitive within a network, because IRC treats `#Foo` and
   /// `#foo` as the same channel and a server may use either casing.
-  NotifyLevel notifyFor(String profileId, String conversation) =>
-      _notify[_notifyKey(profileId, conversation)] ?? NotifyLevel.all;
+  ///
+  /// A timed mute that has not run out yet answers [NotifyLevel.none]
+  /// whatever the level underneath it is.
+  NotifyLevel notifyFor(String profileId, String conversation) {
+    final key = _notifyKey(profileId, conversation);
+    final until = _muteUntil[key];
+    if (until != null && until > DateTime.now().millisecondsSinceEpoch) {
+      return NotifyLevel.none;
+    }
+    return _notify[key] ?? NotifyLevel.all;
+  }
+
+  /// When a timed mute on this conversation ends, or null when there is none.
+  DateTime? mutedUntil(String profileId, String conversation) {
+    final until = _muteUntil[_notifyKey(profileId, conversation)];
+    if (until == null || until <= DateTime.now().millisecondsSinceEpoch) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(until);
+  }
+
+  /// Mute a conversation for [duration], after which it goes back to the
+  /// level it had. A null duration is muting with no end, which is the
+  /// [NotifyLevel.none] level itself.
+  void muteFor(String profileId, String conversation, Duration? duration) {
+    if (duration == null) {
+      _clearMuteUntil(_notifyKey(profileId, conversation));
+      setNotifyFor(profileId, conversation, NotifyLevel.none);
+      return;
+    }
+    final key = _notifyKey(profileId, conversation);
+    final until = DateTime.now().add(duration).millisecondsSinceEpoch;
+    _muteUntil[key] = until;
+    _prefs?.setInt('$_kMuteUntilPrefix$key', until);
+    _scheduleMuteExpiry();
+    notifyListeners();
+  }
+
+  void _clearMuteUntil(String key) {
+    if (_muteUntil.remove(key) != null) {
+      _prefs?.remove('$_kMuteUntilPrefix$key');
+    }
+  }
+
+  /// Drop every timed mute that has run out, and wait for the next one.
+  void _expireMutes() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final ended = [
+      for (final entry in _muteUntil.entries)
+        if (entry.value <= now) entry.key,
+    ];
+    for (final key in ended) {
+      _clearMuteUntil(key);
+    }
+    _scheduleMuteExpiry();
+  }
+
+  void _scheduleMuteExpiry() {
+    _muteExpiry?.cancel();
+    _muteExpiry = null;
+    if (_muteUntil.isEmpty) return;
+    final soonest = _muteUntil.values.reduce((a, b) => a < b ? a : b);
+    final wait = soonest - DateTime.now().millisecondsSinceEpoch;
+    _muteExpiry = Timer(Duration(milliseconds: wait.clamp(0, 1 << 31)), () {
+      _expireMutes();
+      notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    _muteExpiry?.cancel();
+    super.dispose();
+  }
+
+  /// Whether [nick]'s lines are hidden in this network's channels.
+  ///
+  /// Quieter than a block, and narrower: they can still message you, and
+  /// nothing they said is lost — it is simply not shown in a room you share.
+  bool isNickMuted(String profileId, String nick) =>
+      _mutedNicks.contains(_scopedKey(profileId, nick));
+
+  void setNickMuted(String profileId, String nick, bool muted) {
+    final key = _scopedKey(profileId, nick);
+    if (muted ? !_mutedNicks.add(key) : !_mutedNicks.remove(key)) return;
+    if (muted) {
+      _prefs?.setBool('$_kMutedNickPrefix$key', true);
+    } else {
+      _prefs?.remove('$_kMutedNickPrefix$key');
+    }
+    notifyListeners();
+  }
 
   void setNotifyFor(String profileId, String conversation, NotifyLevel level) {
     final key = _notifyKey(profileId, conversation);
+    // Choosing a level is choosing it now; a timed mute still running
+    // underneath would quietly override what was just picked.
+    if (_muteUntil.containsKey(key)) {
+      _clearMuteUntil(key);
+      _scheduleMuteExpiry();
+      notifyListeners();
+    }
     if (notifyFor(profileId, conversation) == level) return;
     if (level == NotifyLevel.all) {
       _notify.remove(key);
@@ -396,9 +533,16 @@ class AppSettings extends ChangeNotifier {
       changed = true;
     }
 
+    final mutes = _muteUntil.keys.where((k) => k.startsWith(prefix)).toList();
+    for (final key in mutes) {
+      _clearMuteUntil(key);
+      changed = true;
+    }
+
     for (final (set, storePrefix) in [
       (_blocked, _kBlockedPrefix),
       (_accepted, _kAcceptedPrefix),
+      (_mutedNicks, _kMutedNickPrefix),
     ]) {
       final gone = set.where((k) => k.startsWith(prefix)).toList();
       for (final key in gone) {

@@ -155,6 +155,131 @@ and App settings even got a look, and the empty screen carried a button for
 each — and folding them behind one is what kept the rail a rail rather than a
 list.
 
+## Chat
+
+IRC has no server-side anything for the conveniences a modern messenger has
+taught people to expect — there is nowhere to keep a draft, a pin or a read
+position but the client. So the client keeps them.
+
+### What needs message history, and what does not
+
+Some of these exist to be there *later*: a pinned message, a saved one, a
+conversation pinned to the top of the list. Without somewhere to keep them
+they would work for an afternoon and be gone on the next launch, which is a
+promise the app would be breaking quietly. So they are offered only while
+**Save messages to a database** (Privacy) is on, and where they would appear
+with it off, the control is there, greyed, saying so.
+
+| Works always | Needs message history |
+|---|---|
+| Drafts, while the app is open | Drafts that survive a restart |
+| Markdown, and tappable links | Pinned messages, and the pinned bar |
+| The message menu: reply, quote, copy, mention | Saved messages |
+| The @ button for unread mentions | Pinning and archiving conversations |
+| Search in what the scrollback holds | Search further back, and scrolling up past it |
+| Mute for a while; hiding a nick in channels | Unread counts and the "new messages" rule after a restart |
+| The profile sheet, with WHOIS | |
+
+All of it lives in the same database as the history, behind the same switch —
+see [privacy.md](privacy.md). **Delete saved messages** takes drafts, pins,
+saved messages and read positions with it; what you wrote about people stays,
+because that is not a message.
+
+### Drafts
+
+Whatever is typed into the composer belongs to the conversation it was typed
+in. Switching away puts it away, reply and all; switching back brings it
+out. A conversation with a draft says so in the list, under its name — except
+the one on screen, whose draft is already in front of you.
+
+### Reading
+
+The **New messages** rule and the unread badge used to be forgotten by
+closing the app: history put yesterday back, and called none of it new. Now
+the last line you saw is remembered, so a restart opens where you stopped
+reading and counts what came after.
+
+Above the way down sits an **@** button while there are mentions you have not
+seen. Each press goes to the next, oldest first.
+
+Scrolling to the top of a conversation loads the page above it from history,
+a couple of hundred lines at a time, holding the line you were reading still.
+
+### The message menu
+
+Hold a message — or right-click it — for **Reply**, **Copy**, **Mention**,
+**Pin** and **Save**. With part of the message selected, **Reply with quote**
+answers just that part, and **Copy** copies just that part.
+
+**Pinned messages** show in a bar at the top of the conversation. Tapping it
+goes to the pin and moves on to the one before; the list button shows them
+all. **Saved messages**, in the header menu, is your own list across every
+network, most recent first; each is a copy, so it outlasts the conversation
+it came from scrolling out of history.
+
+### Markdown and links
+
+`**bold**`, `*italic*` or `_italic_`, `~~struck~~` and `` `code` `` are sent
+as IRC formatting — real bold, which every IRC client shows, rather than
+asterisks only ddIRC would understand. The same marks typed by someone on
+another client are drawn the way they meant them, and a line beginning `> `
+is drawn as a quote. Nothing inside a code span or an address is touched, an
+underscore inside a word is just an underscore, and `2 * 3 * 4` is arithmetic.
+**Markdown** in Appearance turns all of it off.
+
+Links in messages can be tapped. Before anything opens, the whole address is
+shown — the part cut off at the edge of a bubble is exactly where a lookalike
+domain hides — and only `http` and `https` are opened at all.
+
+### Search
+
+**Ctrl+F**, or **Search in conversation** in the header menu, puts a search
+bar where the topic was. The arrows (or Enter and Shift+Enter) step through
+matches in the scrollback, each highlighted where it falls. With history on,
+older matches — from the full-text index in the store, so this does not read
+the whole file — are listed underneath; picking one loads the scrollback back
+to it.
+
+### People
+
+Tap a name for who they are: what the server says (`WHOIS` — asked when the
+sheet opens and not before, since the other side's server sees it), the
+channels you share, and what you wrote about them. From there: message them,
+edit their name and note, **hide them in channels** — their lines stop
+appearing in rooms you share, they can still message you, and nothing tells
+them — or block their direct messages.
+
+### The conversation list
+
+Hold or right-click a conversation to **pin** it to the top, **archive** it
+into a folded group at the bottom, **mute** it — for an hour, eight, a day, a
+week, or until you say — or mark it read without opening it. An archived
+conversation is still joined and still collecting messages; somebody saying
+your name in it brings it back.
+
+### The store underneath
+
+Schema 5 of the history database adds what these need, and the things it
+needed to scale:
+
+- **A second, read-only connection.** WAL lets a reader see the last commit
+  while a write is under way, but only if they are different connections;
+  with one, restoring a conversation or answering a search queued behind
+  whatever batch of messages was landing.
+- **A full-text index** (FTS5, contentless) over what people said, with mIRC
+  formatting stripped, kept in step with deletions by a trigger. What you
+  type is never handed to it as query syntax.
+- **Keyset paging** on (time, id), so loading the page above a line neither
+  repeats nor skips one that shares its millisecond.
+- **A unique server id per conversation**, so a bouncer replaying the last
+  hour stores nothing twice.
+- **Row ids returned to the app**, which is what a read position or a pin
+  holds on to when the server sent no id of its own.
+- Deleting a network now deletes its history too. It used to leave every
+  line in the file, unreachable from the app and still on disk.
+
+The full design is in `irc-core/ddirc-core/src/store/mod.rs`.
+
 ## Window
 
 On desktop the app draws its own title bar: traffic-light close, minimise and

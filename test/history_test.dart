@@ -150,6 +150,25 @@ void main() {
       expect(restored.kind, SystemKind.connection);
       expect(restored.system, 'something new happened');
     });
+
+    test('and a line comes back knowing the id it was stored under', () {
+      // What a read position, a pin or a search result points at, when the
+      // server sent no id of its own — which is most of the time.
+      final row = store.StoredLine(
+        id: 42,
+        profileId: 'p1',
+        conversation: '#test',
+        atMs: DateTime(2026, 3, 1).millisecondsSinceEpoch,
+        sender: 'alice',
+        spans: [rust.TextSpan(text: 'hello', style: _plain)],
+        isSelf: false,
+        isMention: false,
+        isAction: false,
+        isNotice: false,
+        kind: 0,
+      );
+      expect(MessageHistory.decodeForTest(row, '#test', true).dbId, 42);
+    });
   });
 
   test('a conversation is filed under one folding of its name', () {

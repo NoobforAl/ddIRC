@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../model/chat_state.dart';
+import '../model/history.dart';
+import '../model/marks.dart';
 import '../model/people.dart';
 import '../model/personas.dart';
 import '../model/profile.dart';
@@ -67,6 +70,12 @@ Future<void> forgetNetwork(BuildContext context, Profile profile) async {
   // The identities stay; only the throwaway nicks they wore on this one
   // network go with it.
   await Personas.instance.forgetNetwork(profile.id);
+  // Its saved history goes too — every line, pin, saved message, draft and
+  // read position. Left behind, it would be messages from a network that no
+  // longer exists, unreachable from the app and still on disk.
+  ConversationStates.instance.forgetProfile(profile.id);
+  Marks.instance.forgetProfile(profile.id);
+  await MessageHistory.instance.forgetProfile(profile.id);
   await store.remove(profile.id);
 }
 
@@ -110,6 +119,12 @@ class ForgetNetworkDialog extends StatelessWidget {
             'turned away on it, along with the per-channel notification '
             'levels.',
       ),
+      if (MessageHistory.instance.enabled)
+        (
+          'Its saved messages',
+          'Everything kept from this network in message history, with its '
+              'pinned and saved messages and unsent drafts.',
+        ),
       if (connected)
         (
           'The connection you are on',

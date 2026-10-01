@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/session.dart';
 import '../../model/settings.dart';
+import '../channel_list.dart' show muteDurations;
 import 'settings_chrome.dart';
 
 /// Settings for one channel: its topic, how loudly it may interrupt, and the
@@ -164,6 +165,33 @@ class _ChannelSettingsDialogState extends State<ChannelSettingsDialog> {
                 );
                 setState(() {});
               },
+            ),
+            // A mute that ends by itself: for the evening a channel is busy
+            // with something you do not care about, without having to
+            // remember to come back and undo it.
+            if (settings.mutedUntil(widget.session.profileId, conversation.name)
+                case final until?)
+              SettingsReadout(
+                label: 'Muted until',
+                value:
+                    '${AppSettings.describeDay(until)} '
+                    '${settings.formatTime(until)}',
+              ),
+            SettingsActions(
+              children: [
+                for (final (label, duration) in muteDurations.take(4))
+                  SettingsTertiaryButton(
+                    label: 'Mute ${label.toLowerCase()}',
+                    onPressed: () {
+                      settings.muteFor(
+                        widget.session.profileId,
+                        conversation.name,
+                        duration,
+                      );
+                      setState(() {});
+                    },
+                  ),
+              ],
             ),
           ],
         ),

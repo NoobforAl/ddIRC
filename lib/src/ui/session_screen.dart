@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../model/chat_state.dart';
+import '../model/history.dart';
+import '../model/marks.dart';
 import '../model/profile.dart';
 import '../model/media.dart';
 import '../model/notice.dart';
@@ -10,7 +15,8 @@ import '../model/session.dart';
 import '../model/transfer.dart';
 import '../model/settings.dart';
 import '../model/workspace.dart';
-import '../rust/api/types.dart';
+import '../rust/api/store.dart' as store;
+import '../rust/api/types.dart' hide TextSpan;
 import '../theme.dart';
 import 'channel_list.dart';
 import 'connection_log_dialog.dart';
@@ -20,8 +26,10 @@ import 'member_list.dart';
 import 'menu.dart';
 import 'message_view.dart';
 import 'motion.dart';
+import 'settings/settings_chrome.dart';
 import 'notice_bar.dart';
-import 'person_dialog.dart';
+import 'person_sheet.dart';
+import 'saved_messages_dialog.dart';
 import 'send_file_sheet.dart';
 import 'touchable.dart';
 import 'transfer_bar.dart';
@@ -77,7 +85,36 @@ class _SessionScreenState extends State<SessionScreen> {
   /// The line the next message answers, and the conversation it is in. The
   /// conversation is kept alongside so that switching away quietly drops a
   /// reply meant for somewhere else instead of sending it here.
-  ({String conversation, ChatLine line})? _replying;
+  ///
+  /// [excerpt] is set when only part of the line is being answered — "reply
+  /// with quote" on a selection — and is what the quote then carries.
+  ({String conversation, ChatLine line, String? excerpt})? _replying;
+
+  /// Replies started in other conversations and left there, by conversation
+  /// key, so coming back finds the half-written answer still answering.
+  final Map<String, ({ChatLine line, String? excerpt})> _parkedReplies = {};
+
+  /// Which conversation the composer's text belongs to. When the active one
+  /// changes, what is typed is put away under this name and the new one's
+  /// draft brought out — the way a messenger keeps a draft per chat.
+  String? _draftFor;
+
+  final _view = MessageViewController();
+
+  /// The search bar, when open: what is typed, the matches in the
+  /// scrollback (oldest first), and which of them is showing.
+  bool _searching = false;
+  final _searchField = TextEditingController();
+  final _searchFocus = FocusNode();
+  List<ChatLine> _matches = const [];
+  int _match = -1;
+
+  /// Matches from saved history, older than anything in the scrollback.
+  List<HistoryHit> _older = const [];
+  Timer? _searchDebounce;
+
+  /// Which pin the pinned bar is showing, counted from the newest.
+  int _pin = 0;
 
   SessionModel get session => widget.session;
 
@@ -88,6 +125,13 @@ class _SessionScreenState extends State<SessionScreen> {
     // What the user wrote about people is drawn on every nick, so an edit
     // has to reach the scrollback and the roster the same way a message does.
     People.instance.addListener(_onChanged);
+    // Pins come and go from the message menu, and the bar above the
+    // scrollback shows them; history turning on or off changes what the menu
+    // and the header can offer.
+    Marks.instance.addListener(_onChanged);
+    MessageHistory.instance.addListener(_onChanged);
+    _draftFor = session.active?.name;
+    _restoreDraft(session.active);
     _composer.addListener(_onTyped);
     // On the focus node rather than an ancestor Shortcuts: the focused node is
     // asked first, so arrows and Enter can be claimed for the list before the
@@ -170,22 +214,109 @@ class _SessionScreenState extends State<SessionScreen> {
 
   @override
   void dispose() {
+    // Leaving the network is leaving its conversation too: what was typed
+    // goes with it, to be there when it is opened again.
+    _parkDraft(_draftFor, tearingDown: true);
     session.removeListener(_onChanged);
     People.instance.removeListener(_onChanged);
+    Marks.instance.removeListener(_onChanged);
+    MessageHistory.instance.removeListener(_onChanged);
     _composer.removeListener(_onTyped);
     _composerFocus.onKeyEvent = null;
     _composer.dispose();
     _composerFocus.dispose();
     _suggestionRevision.dispose();
+    _searchField.dispose();
+    _searchFocus.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
   void _onChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final now = session.active?.name;
+    if (now != _draftFor) _switchedTo(session.active);
+    setState(() {});
   }
 
-  void _editPerson(String nick) {
-    PersonDialog.show(context, profileId: session.profileId, nick: nick);
+  /// The conversation on screen changed: put away what was typed for the old
+  /// one, bring out what was typed for the new one, and close a search that
+  /// was about the old one.
+  void _switchedTo(Conversation? next) {
+    _parkDraft(_draftFor);
+    _draftFor = next?.name;
+    _restoreDraft(next);
+    _pin = 0;
+    if (_searching) _closeSearch();
+  }
+
+  /// Keep what is in the composer, and the reply it is part of, under
+  /// [name].
+  void _parkDraft(String? name, {bool tearingDown = false}) {
+    if (name == null) return;
+    final key = name.toLowerCase();
+    final replying = _replying;
+    if (replying != null && replying.conversation == name) {
+      _parkedReplies[key] = (line: replying.line, excerpt: replying.excerpt);
+    } else {
+      _parkedReplies.remove(key);
+    }
+    ConversationStates.instance.setDraft(
+      session.profileId,
+      name,
+      _composer.text,
+      replyMsgid: replying?.line.message?.msgid,
+      notify: !tearingDown,
+    );
+  }
+
+  /// Bring out what was typed for [conversation], if anything.
+  void _restoreDraft(Conversation? conversation) {
+    final text = conversation == null
+        ? null
+        : ConversationStates.instance.draftOf(
+            session.profileId,
+            conversation.name,
+          );
+    _composer.value = text == null
+        ? TextEditingValue.empty
+        : TextEditingValue(
+            text: text,
+            selection: TextSelection.collapsed(offset: text.length),
+          );
+    _replying = null;
+    if (conversation == null) return;
+    final parked = _parkedReplies[conversation.name.toLowerCase()];
+    if (parked != null) {
+      _replying = (
+        conversation: conversation.name,
+        line: parked.line,
+        excerpt: parked.excerpt,
+      );
+      return;
+    }
+    // A draft from a previous run knows only the id of what it answered;
+    // the line is found again if it is still in the scrollback.
+    final msgid = ConversationStates.instance
+        .of(session.profileId, conversation.name)
+        ?.draftReplyMsgid;
+    if (msgid == null) return;
+    for (final line in conversation.lines.reversed) {
+      if (line.message?.msgid == msgid) {
+        _replying = (
+          conversation: conversation.name,
+          line: line,
+          excerpt: null,
+        );
+        return;
+      }
+    }
+  }
+
+  /// Who someone is: what the server says, what you wrote about them, and
+  /// what you can do about them.
+  void _showPerson(String nick) {
+    PersonSheet.show(context, session: session, nick: nick);
   }
 
   /// Reply to [line]: remember it, show it above the composer, and put the
@@ -193,8 +324,186 @@ class _SessionScreenState extends State<SessionScreen> {
   void _replyTo(ChatLine line) {
     final active = session.active;
     if (active == null || line.message == null) return;
-    setState(() => _replying = (conversation: active.name, line: line));
+    setState(
+      () => _replying = (conversation: active.name, line: line, excerpt: null),
+    );
     _composerFocus.requestFocus();
+  }
+
+  /// Reply to [line], quoting only [excerpt] of it — what was selected.
+  void _quote(ChatLine line, String excerpt) {
+    final active = session.active;
+    if (active == null || line.message == null) return;
+    setState(
+      () =>
+          _replying = (conversation: active.name, line: line, excerpt: excerpt),
+    );
+    _composerFocus.requestFocus();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search
+  // ---------------------------------------------------------------------------
+
+  void _openSearch() {
+    if (session.active == null) return;
+    setState(() => _searching = true);
+    _searchFocus.requestFocus();
+    _searchField.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _searchField.text.length,
+    );
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    setState(() {
+      _searching = false;
+      _matches = const [];
+      _match = -1;
+      _older = const [];
+    });
+  }
+
+  /// Find [query] in what is in the scrollback now, at once, and — with
+  /// history on — in what is saved further back, a moment later.
+  void _search(String query) {
+    final active = session.active;
+    final needle = query.trim().toLowerCase();
+    if (active == null || needle.isEmpty) {
+      setState(() {
+        _matches = const [];
+        _match = -1;
+        _older = const [];
+      });
+      return;
+    }
+    final matches = [
+      for (final line in active.lines)
+        if (line.message case final message?)
+          if (message.spans
+              .map((s) => s.text)
+              .join()
+              .toLowerCase()
+              .contains(needle))
+            line,
+    ];
+    setState(() {
+      _matches = matches;
+      _match = matches.length - 1;
+    });
+    if (matches.isNotEmpty) _view.reveal(matches.last);
+
+    _searchDebounce?.cancel();
+    if (!MessageHistory.instance.enabled) return;
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () async {
+      final hits = await MessageHistory.instance.search(
+        profileId: session.profileId,
+        conversation: active.name,
+        query: query,
+        limit: 30,
+      );
+      if (!mounted || _searchField.text != query) return;
+      // Only what the scrollback no longer holds; the rest is already in
+      // the arrows above.
+      final oldest = active.lines.isEmpty ? null : active.lines.first.at;
+      setState(() {
+        _older = [
+          for (final hit in hits)
+            if (oldest == null || hit.line.at.isBefore(oldest)) hit,
+        ];
+      });
+    });
+  }
+
+  /// Step through the matches: back is older, forward is newer.
+  void _step(int by) {
+    if (_matches.isEmpty) return;
+    setState(() {
+      _match = (_match + by).clamp(0, _matches.length - 1);
+    });
+    _view.reveal(_matches[_match]);
+  }
+
+  /// Open the scrollback at a line from further back than it reaches.
+  Future<void> _openOlder(ChatLine target) async {
+    final active = session.active;
+    if (active == null) return;
+    final reached = await session.reachBack(active, target.at);
+    if (!mounted) return;
+    final line = _findLine(active, target);
+    if (!reached || line == null) {
+      _say('That is too far back to show in place.');
+      return;
+    }
+    await WidgetsBinding.instance.endOfFrame;
+    await _view.reveal(line);
+  }
+
+  /// The line in [conversation] that is [like] — the same moment, the same
+  /// person, the same words — whatever object it is now.
+  static ChatLine? _findLine(Conversation conversation, ChatLine like) {
+    final message = like.message;
+    if (message == null) return null;
+    final at = like.at.millisecondsSinceEpoch;
+    final text = Marks.plainText(message.spans);
+    for (final line in conversation.lines.reversed) {
+      final m = line.message;
+      if (m != null &&
+          line.at.millisecondsSinceEpoch == at &&
+          m.sender == message.sender &&
+          Marks.plainText(m.spans) == text) {
+        return line;
+      }
+    }
+    return null;
+  }
+
+  void _say(String text) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+    SnackBar(content: Text(text), duration: const Duration(seconds: 2)),
+  );
+
+  // ---------------------------------------------------------------------------
+  // Pins and saved messages
+  // ---------------------------------------------------------------------------
+
+  /// Go to a pinned or saved message, in this network.
+  Future<void> _openMark(store.Mark mark) async {
+    if (mark.profileId != session.profileId) return;
+    final conversation = session.conversations
+        .where((c) => MessageHistory.key(c.name) == mark.conversation)
+        .firstOrNull;
+    if (conversation == null) {
+      _say('You are not in ${mark.conversation} right now.');
+      return;
+    }
+    if (session.active != conversation) session.select(conversation.name);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    final like = Marks.lineOf(mark);
+    final here = _findLine(conversation, like);
+    if (here != null) {
+      await _view.reveal(here);
+    } else {
+      await _openOlder(like);
+    }
+  }
+
+  /// The pinned bar was tapped: go to the pin it shows, then show the one
+  /// before it, the way a messenger cycles through a chat's pins.
+  void _cyclePins(List<store.Mark> pins) {
+    if (pins.isEmpty) return;
+    final index = _pin.clamp(0, pins.length - 1);
+    _openMark(pins[pins.length - 1 - index]);
+    setState(() => _pin = (index + 1) % pins.length);
+  }
+
+  void _openSaved() {
+    SavedMessagesDialog.show(
+      context,
+      profileId: session.profileId,
+      onOpen: _openMark,
+    );
   }
 
   /// Address [nick]: their name at the start of the composer, the IRC way,
@@ -225,7 +534,14 @@ class _SessionScreenState extends State<SessionScreen> {
     if (text.trim().isEmpty) return;
     _composer.clear();
     final message = _replyLine?.message;
+    final excerpt = _replying?.excerpt;
     if (_replying != null) setState(() => _replying = null);
+    // Sent is no longer a draft, here or on disk.
+    final active = session.active;
+    if (active != null) {
+      _parkedReplies.remove(active.name.toLowerCase());
+      ConversationStates.instance.setDraft(session.profileId, active.name, '');
+    }
     final error = await session.submit(
       text,
       replyTo: message == null
@@ -233,7 +549,7 @@ class _SessionScreenState extends State<SessionScreen> {
           : ReplyRef(
               msgid: message.msgid,
               nick: message.sender,
-              excerpt: message.spans.map((s) => s.text).join(),
+              excerpt: excerpt ?? message.spans.map((s) => s.text).join(),
             ),
     );
     if (!mounted) return;
@@ -423,7 +739,7 @@ class _SessionScreenState extends State<SessionScreen> {
                 : () => Navigator.of(context).maybePop(),
             onOpenDirect: _openDirect,
             profileId: session.profileId,
-            onEditPerson: _editPerson,
+            onEditPerson: _showPerson,
           );
 
     return Scaffold(
@@ -486,100 +802,149 @@ class _SessionScreenState extends State<SessionScreen> {
 
   Widget _conversationPane(Tokens t, Layout layout, Conversation? active) {
     final topic = active?.topic;
-    return Column(
-      children: [
-        _Header(
-          session: session,
-          conversation: active,
-          layout: layout,
-          onOpenChannels: () => _scaffold.currentState?.openDrawer(),
-          onOpenMembers: _toggleMembers,
-          membersOpen: _membersBeside,
-          onChannelSettings: _openChannelSettings,
-          onServerSettings: _openServerSettings,
-          onNetworkEditor: _openNetworkEditor,
-          onAppSettings: _openAppSettings,
-          onConnectionLog: _openConnectionLog,
-        ),
-        // Anything other than "connected" gets a bar of its own. The status
-        // dot in the header can say something is wrong, but it has nowhere to
-        // put the reason, the countdown, or a way to stop waiting.
-        _ConnectionBar(
-          status: session.status,
-          detail: session.statusDetail,
-          onRetry: _retry,
-          onViewLog: _openConnectionLog,
-        ),
-        ConversationTabs(
-          session: session,
-          onSelect: session.select,
-          onClose: session.closeTab,
-        ),
-        // A topic arriving, or switching to a channel that has none, moves
-        // the whole scrollback. Unrolling it says which way everything went.
-        Reveal(child: topic == null ? null : _TopicBar(topic: topic)),
-        Expanded(
-          child: AnimatedSwitcher(
-            // Fast, and a fade with nothing sliding: a wall of text in motion
-            // is unreadable for as long as the transition lasts.
-            duration: context.motion.fast,
-            child: active == null
-                ? Center(
-                    key: const ValueKey('no-channel'),
-                    child: Text(
-                      'Not in a channel yet.\nUse /join #channel below.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: t.faint,
-                        fontSize: 13,
-                        height: 1.6,
-                      ),
-                    ),
+    final pins = active == null
+        ? const <store.Mark>[]
+        : Marks.instance.pinsFor(session.profileId, active.name);
+    // Ctrl+F, or Cmd+F — wherever focus is in the conversation, the composer
+    // included, which is where it nearly always is.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _openSearch,
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true): _openSearch,
+      },
+      child: Column(
+        children: [
+          _Header(
+            session: session,
+            conversation: active,
+            layout: layout,
+            onOpenChannels: () => _scaffold.currentState?.openDrawer(),
+            onOpenMembers: _toggleMembers,
+            membersOpen: _membersBeside,
+            onChannelSettings: _openChannelSettings,
+            onServerSettings: _openServerSettings,
+            onNetworkEditor: _openNetworkEditor,
+            onAppSettings: _openAppSettings,
+            onConnectionLog: _openConnectionLog,
+            onSearch: _openSearch,
+            onSaved: _openSaved,
+          ),
+          // Anything other than "connected" gets a bar of its own. The status
+          // dot in the header can say something is wrong, but it has nowhere to
+          // put the reason, the countdown, or a way to stop waiting.
+          _ConnectionBar(
+            status: session.status,
+            detail: session.statusDetail,
+            onRetry: _retry,
+            onViewLog: _openConnectionLog,
+          ),
+          ConversationTabs(
+            session: session,
+            onSelect: session.select,
+            onClose: session.closeTab,
+          ),
+          // A topic arriving, or switching to a channel that has none, moves
+          // the whole scrollback. Unrolling it says which way everything went.
+          Reveal(
+            child: _searching
+                ? _SearchBar(
+                    controller: _searchField,
+                    focusNode: _searchFocus,
+                    matches: _matches.length,
+                    current: _match,
+                    older: _older,
+                    onChanged: _search,
+                    onOlder: () => _step(-1),
+                    onNewer: () => _step(1),
+                    onClose: _closeSearch,
+                    onOpenOlder: (hit) => _openOlder(hit.line),
                   )
-                : MessageView(
-                    // Rebuild the scroll state when switching conversations.
-                    key: ValueKey(active.name),
-                    conversation: active,
-                    profileId: session.profileId,
-                    onPersonTap: _editPerson,
-                    onReply: active.pending ? null : _replyTo,
-                    onMention: active.pending ? null : _mention,
+                : topic == null
+                ? null
+                : _TopicBar(topic: topic),
+          ),
+          Reveal(
+            child: pins.isEmpty || _searching
+                ? null
+                : _PinnedBar(
+                    pins: pins,
+                    showing: _pin.clamp(0, pins.length - 1),
+                    onTap: () => _cyclePins(pins),
+                    onOpen: _openMark,
                   ),
           ),
-        ),
-        // Offers and transfers in flight, between the scrollback and the
-        // composer. Revealed rather than appearing, so a transfer starting
-        // does not shove the composer out from under a caret mid-word.
-        Reveal(
-          child: active == null || active.transfers.isEmpty
-              ? null
-              : TransferBar(
-                  session: session,
-                  conversation: active,
-                  onAccept: _acceptTransfer,
-                ),
-        ),
-        // Growing rather than appearing, so a notice never shoves the
-        // composer out from under a caret already being typed into.
-        NoticeReveal(notice: session.notice, onDismiss: session.dismissNotice),
-        ListenableBuilder(
-          listenable: _suggestionRevision,
-          builder: (context, _) => _CommandSuggestions(
-            commands: _suggestions,
-            highlighted: _highlighted,
-            onPick: _complete,
+          Expanded(
+            child: AnimatedSwitcher(
+              // Fast, and a fade with nothing sliding: a wall of text in motion
+              // is unreadable for as long as the transition lasts.
+              duration: context.motion.fast,
+              child: active == null
+                  ? Center(
+                      key: const ValueKey('no-channel'),
+                      child: Text(
+                        'Not in a channel yet.\nUse /join #channel below.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: t.faint,
+                          fontSize: 13,
+                          height: 1.6,
+                        ),
+                      ),
+                    )
+                  : MessageView(
+                      // Rebuild the scroll state when switching conversations.
+                      key: ValueKey(active.name),
+                      conversation: active,
+                      profileId: session.profileId,
+                      controller: _view,
+                      highlight: _searching ? _searchField.text : null,
+                      onPersonTap: _showPerson,
+                      onReply: active.pending ? null : _replyTo,
+                      onQuote: active.pending ? null : _quote,
+                      onMention: active.pending ? null : _mention,
+                      onLoadOlder: () => session.loadOlder(active),
+                    ),
+            ),
           ),
-        ),
-        Reveal(
-          child: _replyLine == null
-              ? null
-              : _ReplyStrip(
-                  line: _replyLine!,
-                  onCancel: () => setState(() => _replying = null),
-                ),
-        ),
-        _composerBar(t, active),
-      ],
+          // Offers and transfers in flight, between the scrollback and the
+          // composer. Revealed rather than appearing, so a transfer starting
+          // does not shove the composer out from under a caret mid-word.
+          Reveal(
+            child: active == null || active.transfers.isEmpty
+                ? null
+                : TransferBar(
+                    session: session,
+                    conversation: active,
+                    onAccept: _acceptTransfer,
+                  ),
+          ),
+          // Growing rather than appearing, so a notice never shoves the
+          // composer out from under a caret already being typed into.
+          NoticeReveal(
+            notice: session.notice,
+            onDismiss: session.dismissNotice,
+          ),
+          ListenableBuilder(
+            listenable: _suggestionRevision,
+            builder: (context, _) => _CommandSuggestions(
+              commands: _suggestions,
+              highlighted: _highlighted,
+              onPick: _complete,
+            ),
+          ),
+          Reveal(
+            child: _replyLine == null
+                ? null
+                : _ReplyStrip(
+                    line: _replyLine!,
+                    excerpt: _replying?.excerpt,
+                    onCancel: () => setState(() => _replying = null),
+                  ),
+          ),
+          _composerBar(t, active),
+        ],
+      ),
     );
   }
 
@@ -674,10 +1039,13 @@ class _SessionScreenState extends State<SessionScreen> {
 
 /// What the next message will answer, above the composer, with a way out.
 class _ReplyStrip extends StatelessWidget {
-  const _ReplyStrip({required this.line, required this.onCancel});
+  const _ReplyStrip({required this.line, required this.onCancel, this.excerpt});
 
   final ChatLine line;
   final VoidCallback onCancel;
+
+  /// The part of [line] being quoted, when it is not all of it.
+  final String? excerpt;
 
   @override
   Widget build(BuildContext context) {
@@ -719,7 +1087,9 @@ class _ReplyStrip extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  message.spans.map((s) => s.text).join(),
+                  excerpt == null
+                      ? message.spans.map((s) => s.text).join()
+                      : '“$excerpt”',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: t.muted, fontSize: 12.5),
@@ -752,10 +1122,14 @@ class _Header extends StatelessWidget {
     required this.onNetworkEditor,
     required this.onAppSettings,
     required this.onConnectionLog,
+    required this.onSearch,
+    required this.onSaved,
   });
 
   final SessionModel session;
   final Conversation? conversation;
+  final VoidCallback onSearch;
+  final VoidCallback onSaved;
   final Layout layout;
   final VoidCallback onOpenChannels;
   final VoidCallback onOpenMembers;
@@ -850,6 +1224,8 @@ class _Header extends StatelessWidget {
             onNetworkEditor: onNetworkEditor,
             onAppSettings: onAppSettings,
             onConnectionLog: onConnectionLog,
+            onSearch: onSearch,
+            onSaved: onSaved,
           ),
         ],
       ),
@@ -858,7 +1234,15 @@ class _Header extends StatelessWidget {
 }
 
 /// The one place every settings dialog can be reached from.
-enum _SettingsTarget { channel, server, network, app, connectionLog }
+enum _SettingsTarget {
+  search,
+  saved,
+  channel,
+  server,
+  network,
+  app,
+  connectionLog,
+}
 
 class _SettingsMenu extends StatelessWidget {
   const _SettingsMenu({
@@ -869,8 +1253,12 @@ class _SettingsMenu extends StatelessWidget {
     required this.onNetworkEditor,
     required this.onAppSettings,
     required this.onConnectionLog,
+    required this.onSearch,
+    required this.onSaved,
   });
 
+  final VoidCallback onSearch;
+  final VoidCallback onSaved;
   final bool hasChannel;
   final String? channelName;
   final VoidCallback onChannelSettings;
@@ -895,6 +1283,8 @@ class _SettingsMenu extends StatelessWidget {
       position: PopupMenuPosition.under,
       shape: menuShape(t),
       onSelected: (target) => switch (target) {
+        _SettingsTarget.search => onSearch(),
+        _SettingsTarget.saved => onSaved(),
         _SettingsTarget.channel => onChannelSettings(),
         _SettingsTarget.server => onServerSettings(),
         _SettingsTarget.network => onNetworkEditor(),
@@ -902,6 +1292,29 @@ class _SettingsMenu extends StatelessWidget {
         _SettingsTarget.connectionLog => onConnectionLog(),
       },
       itemBuilder: (context) => [
+        PopupMenuItem(
+          value: _SettingsTarget.search,
+          enabled: hasChannel,
+          child: MenuRow(
+            icon: Icons.search_rounded,
+            label: 'Search in conversation',
+            enabled: hasChannel,
+          ),
+        ),
+        PopupMenuItem(
+          value: _SettingsTarget.saved,
+          // Disabled rather than hidden, like the channel entry below, with
+          // the reason in the label.
+          enabled: MessageHistory.instance.enabled,
+          child: MenuRow(
+            icon: Icons.bookmarks_outlined,
+            label: MessageHistory.instance.enabled
+                ? 'Saved messages'
+                : 'Saved messages — needs message history',
+            enabled: MessageHistory.instance.enabled,
+          ),
+        ),
+        const PopupMenuDivider(),
         PopupMenuItem(
           value: _SettingsTarget.channel,
           // Disabled rather than hidden, so the menu never changes shape and
@@ -1018,6 +1431,341 @@ class _TopicBar extends StatelessWidget {
           style: TextStyle(color: t.muted, fontSize: 12, height: 1.3),
         ),
       ),
+    );
+  }
+}
+
+/// Finding something in the conversation: where the topic was, for as long
+/// as it is open.
+///
+/// The arrows step through what the scrollback holds, newest first, the way
+/// every find bar does. What is saved further back — with history on — is
+/// listed underneath rather than folded into the count, because reaching it
+/// means loading pages the scrollback does not hold, and an arrow press that
+/// sometimes took a second would be an arrow that felt broken.
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({
+    required this.controller,
+    required this.focusNode,
+    required this.matches,
+    required this.current,
+    required this.older,
+    required this.onChanged,
+    required this.onOlder,
+    required this.onNewer,
+    required this.onClose,
+    required this.onOpenOlder,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final int matches;
+  final int current;
+  final List<HistoryHit> older;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onOlder;
+  final VoidCallback onNewer;
+  final VoidCallback onClose;
+  final ValueChanged<HistoryHit> onOpenOlder;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final g = context.layout.gutter;
+    final settings = SettingsScope.of(context);
+    final counter = controller.text.trim().isEmpty
+        ? ''
+        : matches == 0
+        ? 'None here'
+        : '${current + 1} of $matches';
+
+    final field = CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): onClose,
+        const SingleActivator(LogicalKeyboardKey.enter): onOlder,
+        const SingleActivator(LogicalKeyboardKey.enter, shift: true): onNewer,
+        const SingleActivator(LogicalKeyboardKey.arrowUp): onOlder,
+        const SingleActivator(LogicalKeyboardKey.arrowDown): onNewer,
+      },
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        onChanged: onChanged,
+        autocorrect: false,
+        style: TextStyle(color: t.text, fontSize: 13.5),
+        decoration: InputDecoration(
+          hintText: 'Search this conversation',
+          hintStyle: TextStyle(color: t.faint, fontSize: 13.5),
+          prefixIcon: Icon(Icons.search_rounded, size: 18, color: t.muted),
+          isDense: true,
+          border: InputBorder.none,
+        ),
+      ),
+    );
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: t.surface,
+        border: Border(
+          bottom: BorderSide(color: t.rule, width: Tokens.hairline),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.fromLTRB(g - 8, 2, 4, 2),
+            child: Row(
+              children: [
+                Expanded(child: field),
+                Text(counter, style: TextStyle(color: t.muted, fontSize: 12)),
+                IconButton(
+                  onPressed: matches == 0 || current <= 0 ? null : onOlder,
+                  icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 20),
+                  color: t.muted,
+                  tooltip: 'Older match',
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  onPressed: matches == 0 || current >= matches - 1
+                      ? null
+                      : onNewer,
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+                  color: t.muted,
+                  tooltip: 'Newer match',
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  color: t.muted,
+                  tooltip: 'Close search',
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ),
+          if (older.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 180),
+              child: ListView(
+                shrinkWrap: true,
+                padding: EdgeInsets.fromLTRB(g, 0, g, 8),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      'Further back',
+                      style: TextStyle(
+                        color: t.muted,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  for (final hit in older)
+                    Touchable(
+                      onTap: () => onOpenOlder(hit),
+                      borderRadius: BorderRadius.circular(Tokens.radiusS),
+                      builder: (context, touch) => Container(
+                        color: t.surfaceHover.withValues(alpha: touch.wash),
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text:
+                                    '${AppSettings.describeDay(hit.line.at)} '
+                                    '${settings.formatTime(hit.line.at)}  ',
+                                style: TextStyle(color: t.faint),
+                              ),
+                              TextSpan(
+                                text: '${hit.line.message?.sender}: ',
+                                style: TextStyle(
+                                  color: t.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              TextSpan(
+                                text: Marks.plainText(
+                                  hit.line.message?.spans ?? const [],
+                                ),
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: t.text, fontSize: 12.5),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The conversation's pinned messages, one at a time, above the scrollback.
+///
+/// Tapping it goes to the pin it shows and moves on to the one before, so
+/// every pin is a few taps away without opening anything; the list button
+/// shows them all at once.
+class _PinnedBar extends StatelessWidget {
+  const _PinnedBar({
+    required this.pins,
+    required this.showing,
+    required this.onTap,
+    required this.onOpen,
+  });
+
+  /// Oldest first, as the store keeps them.
+  final List<store.Mark> pins;
+
+  /// Which, counted from the newest.
+  final int showing;
+  final VoidCallback onTap;
+  final ValueChanged<store.Mark> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final g = context.layout.gutter;
+    final pin = pins[pins.length - 1 - showing];
+    return Touchable(
+      onTap: onTap,
+      builder: (context, touch) => Container(
+        width: double.infinity,
+        padding: EdgeInsets.fromLTRB(g, 6, 4, 6),
+        decoration: BoxDecoration(
+          color: Color.alphaBlend(
+            t.surfaceHover.withValues(alpha: touch.wash),
+            t.surface,
+          ),
+          border: Border(
+            bottom: BorderSide(color: t.rule, width: Tokens.hairline),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 3,
+              height: 30,
+              decoration: BoxDecoration(
+                color: t.accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    pins.length == 1
+                        ? 'Pinned message'
+                        : 'Pinned message ${pins.length - showing} of '
+                              '${pins.length}',
+                    style: TextStyle(
+                      color: t.accent,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Text(
+                    '${pin.sender ?? ''}: ${Marks.plainText(pin.spans)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: t.text, fontSize: 12.5),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              onPressed: () => _showPinnedList(context, pins, onOpen),
+              icon: const Icon(Icons.format_list_bulleted_rounded, size: 18),
+              color: t.muted,
+              tooltip: 'All pinned messages',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Every pin in the conversation, newest first, each with a way to it and a
+/// way to unpin it. Follows [Marks] while open, so unpinning one takes it off
+/// the list at once.
+Future<void> _showPinnedList(
+  BuildContext context,
+  List<store.Mark> pins,
+  ValueChanged<store.Mark> onOpen,
+) {
+  final first = pins.first;
+  return showDialog<void>(
+    context: context,
+    builder: (_) => ListenableBuilder(
+      listenable: Marks.instance,
+      builder: (context, _) => _PinnedListBody(
+        pins: Marks.instance
+            .pinsFor(first.profileId, first.conversation)
+            .reversed
+            .toList(),
+        onOpen: onOpen,
+      ),
+    ),
+  );
+}
+
+class _PinnedListBody extends StatelessWidget {
+  const _PinnedListBody({required this.pins, required this.onOpen});
+
+  final List<store.Mark> pins;
+  final ValueChanged<store.Mark> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final settings = SettingsScope.of(context);
+    return SettingsDialog(
+      title: 'Pinned messages',
+      subtitle: pins.isEmpty ? 'Nothing pinned' : '${pins.length} pinned',
+      children: [
+        if (pins.isEmpty)
+          const SettingsNote(text: 'Nothing is pinned here any more.'),
+        for (final pin in pins)
+          ListTile(
+            dense: true,
+            title: Text(
+              Marks.plainText(pin.spans),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: t.text, fontSize: 13),
+            ),
+            subtitle: Text(
+              '${pin.sender ?? ''} · '
+              '${AppSettings.describeDay(DateTime.fromMillisecondsSinceEpoch(pin.atMs))} '
+              '${settings.formatTime(DateTime.fromMillisecondsSinceEpoch(pin.atMs))}',
+              style: TextStyle(color: t.muted, fontSize: 11.5),
+            ),
+            onTap: () {
+              Navigator.of(context).pop();
+              onOpen(pin);
+            },
+            trailing: IconButton(
+              onPressed: () => Marks.instance.remove(pin),
+              icon: const Icon(Icons.push_pin, size: 18),
+              color: t.muted,
+              tooltip: 'Unpin',
+            ),
+          ),
+      ],
     );
   }
 }

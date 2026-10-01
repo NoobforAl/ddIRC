@@ -205,6 +205,11 @@ impl Session {
         self.isupport.casemapping.eq(nick, &self.nick)
     }
 
+    /// True if `a` and `b` are the same nick under this server's case rules.
+    pub fn same_nick(&self, a: &str, b: &str) -> bool {
+        self.isupport.casemapping.eq(a, b)
+    }
+
     pub fn channel(&self, name: &str) -> Option<&Channel> {
         self.channels.get(&self.normalize(name))
     }

@@ -261,6 +261,12 @@ pub fn set_nick(id: u64, nick: String) -> Result<(), String> {
     send(id, ClientCommand::SetNick(nick))
 }
 
+/// Ask the server about one nick. The answer arrives on the event stream as
+/// `IrcEvent::Whois`, once the server has finished sending it.
+pub fn whois(id: u64, nick: String) -> Result<(), String> {
+    send(id, ClientCommand::Whois { nick })
+}
+
 /// Set a channel topic. An empty string clears it.
 pub fn set_topic(id: u64, channel: String, topic: String) -> Result<(), String> {
     send(id, ClientCommand::SetTopic { channel, topic })

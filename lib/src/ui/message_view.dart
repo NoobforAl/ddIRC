@@ -1,22 +1,40 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, TapGestureRecognizer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show Clipboard, ClipboardData, HapticFeedback;
 import 'package:flutter/rendering.dart' show SelectedContent;
 
+import '../model/marks.dart';
 import '../model/people.dart';
 import '../model/session.dart';
 import '../model/settings.dart';
 import '../rust/api/types.dart' as rust;
+import '../text/markdown.dart';
 import '../theme.dart';
 import 'avatar.dart';
 import 'count_badge.dart';
 import 'layout.dart';
+import 'link.dart';
 import 'menu.dart';
 import 'motion.dart';
 import 'nick_color.dart';
 import 'touchable.dart';
+
+/// A handle on a [MessageView], for the screen around it to point at a line.
+///
+/// Search results, pinned messages and saved messages all end the same way:
+/// scroll the scrollback to one line and light it up. The view owns the
+/// scrolling — only it knows which rows are built — so this is how a bar
+/// above it asks.
+class MessageViewController {
+  _MessageViewState? _view;
+
+  /// Scroll to [line] and flash it. False when it is not in the scrollback.
+  Future<bool> reveal(ChatLine line) async =>
+      await _view?._reveal(line) ?? false;
+}
 
 /// The scrollback for one conversation.
 class MessageView extends StatefulWidget {
@@ -27,9 +45,24 @@ class MessageView extends StatefulWidget {
     this.onPersonTap,
     this.onReply,
     this.onMention,
+    this.onQuote,
+    this.onLoadOlder,
+    this.controller,
+    this.highlight,
   });
 
   final Conversation conversation;
+
+  /// Reply to a line quoting only part of it — the part selected.
+  final void Function(ChatLine line, String excerpt)? onQuote;
+
+  /// Fetch the page of history above the top. Returns how many lines came.
+  final Future<int> Function()? onLoadOlder;
+
+  final MessageViewController? controller;
+
+  /// Text to light up wherever it appears — what is being searched for.
+  final String? highlight;
 
   /// Which network this is, for what the user has written about the people
   /// on it. Null draws everyone as the server names them.
@@ -122,20 +155,93 @@ class _MessageViewState extends State<MessageView> {
   /// The line a tapped quote pointed at, lit up for a moment on arrival.
   final _flash = ValueNotifier<ChatLine?>(null);
 
+  /// Unread mentions not yet jumped to, oldest first: the ones after the
+  /// marker when the view opened, and any that land while reading above.
+  final _mentions = ValueNotifier<List<ChatLine>>(const []);
+
+  /// What is selected in the scrollback right now, for "reply with quote".
+  String? _selected;
+
+  /// Whether a page of older history is on its way, so reaching the top
+  /// twice in a row does not ask twice.
+  bool _loadingOlder = false;
+
   @override
   void initState() {
     super.initState();
     _marker = widget.conversation.unreadMarker;
     _controller.addListener(_onScroll);
+    widget.controller?._view = this;
+    final marker = _marker;
+    if (marker != null) {
+      final lines = widget.conversation.lines;
+      final from = lines.indexOf(marker);
+      if (from >= 0) {
+        _mentions.value = [
+          for (var i = from; i < lines.length; i++)
+            if (lines[i].isMention && !lines[i].isSelf) lines[i],
+        ];
+      }
+    }
+  }
+
+  @override
+  void didUpdateWidget(MessageView old) {
+    super.didUpdateWidget(old);
+    if (old.controller != widget.controller) {
+      if (old.controller?._view == this) old.controller?._view = null;
+      widget.controller?._view = this;
+    }
   }
 
   @override
   void dispose() {
+    if (widget.controller?._view == this) widget.controller?._view = null;
     _controller.dispose();
     _away.dispose();
     _arrived.dispose();
     _flash.dispose();
+    _mentions.dispose();
     super.dispose();
+  }
+
+  /// Near the top, with more above in the store: fetch it.
+  ///
+  /// The list is anchored at its bottom, so lines put in front would push
+  /// what is on screen down by however tall they are. The scroll position is
+  /// moved by the same amount once they are laid out, which keeps the line
+  /// being read exactly where it was.
+  Future<void> _maybeLoadOlder() async {
+    final load = widget.onLoadOlder;
+    if (load == null || _loadingOlder || !_controller.hasClients) return;
+    if (!widget.conversation.hasOlder) return;
+    final position = _controller.position;
+    if (position.pixels > position.minScrollExtent + 300) return;
+    _loadingOlder = true;
+    final before = position.maxScrollExtent - position.pixels;
+    try {
+      final added = await load();
+      if (!mounted || added == 0 || _split) return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !_controller.hasClients) return;
+      final after = _controller.position.maxScrollExtent - before;
+      _controller.jumpTo(
+        after.clamp(
+          _controller.position.minScrollExtent,
+          _controller.position.maxScrollExtent,
+        ),
+      );
+    } finally {
+      _loadingOlder = false;
+    }
+  }
+
+  /// Go to the next unread mention, and stop offering it.
+  Future<void> _jumpToMention() async {
+    final pending = _mentions.value;
+    if (pending.isEmpty) return;
+    _mentions.value = pending.sublist(1);
+    await _reveal(pending.first);
   }
 
   void _onScroll() {
@@ -146,8 +252,14 @@ class _MessageViewState extends State<MessageView> {
     final pinned = position.pixels >= position.maxScrollExtent - 40;
     _pinnedToBottom = pinned;
     _away.value = !pinned;
-    // Reaching the bottom is reading what was there.
-    if (pinned) _arrived.value = 0;
+    // Reaching the bottom is reading what was there — mentions included.
+    if (pinned) {
+      _arrived.value = 0;
+      if (_mentions.value.isNotEmpty) _mentions.value = const [];
+    }
+    if (position.pixels <= position.minScrollExtent + 300) {
+      _maybeLoadOlder();
+    }
   }
 
   void _scrollIfPinned() {
@@ -275,13 +387,18 @@ class _MessageViewState extends State<MessageView> {
     if (!identical(last, _lastLine)) {
       var arrived = 0;
       var spoke = false;
+      final mentioned = <ChatLine>[];
       if (_lastLine != null) {
         for (var i = all.length - 1; i >= 0; i--) {
           if (identical(all[i], _lastLine)) break;
           if (all[i].isSystem) continue;
           arrived++;
           if (all[i].isSelf) spoke = true;
+          if (all[i].isMention) mentioned.insert(0, all[i]);
         }
+      }
+      if (mentioned.isNotEmpty && !_pinnedToBottom && !spoke) {
+        _mentions.value = [..._mentions.value, ...mentioned];
       }
       _lastLine = last;
       // Saying something is a decision to be at the bottom: the reply will
@@ -392,6 +509,7 @@ class _MessageViewState extends State<MessageView> {
       children: [
         Positioned.fill(
           child: SelectionArea(
+            onSelectionChanged: (content) => _selected = content?.plainText,
             child: CustomScrollView(
               controller: _controller,
               center: split ? _centerKey : null,
@@ -416,6 +534,25 @@ class _MessageViewState extends State<MessageView> {
                           _JumpToLatest(count: count, onTap: _jumpToLatest),
                     )
                   : null,
+            ),
+          ),
+        ),
+        // Above the way down, the way to what was said *to* you: each press
+        // goes to the next unread mention, oldest first, the way a messenger's
+        // @ button does.
+        Positioned(
+          right: context.layout.gutter,
+          bottom: 64,
+          child: ValueListenableBuilder<List<ChatLine>>(
+            valueListenable: _mentions,
+            builder: (context, pending, _) => Appear(
+              child: pending.isEmpty
+                  ? null
+                  : _JumpToMention(
+                      key: const ValueKey('mention'),
+                      count: pending.length,
+                      onTap: _jumpToMention,
+                    ),
             ),
           ),
         ),
@@ -530,8 +667,13 @@ class _MessageViewState extends State<MessageView> {
             : People.instance.of(widget.profileId!, message.sender),
         quoted: reply == null ? null : _original(reply, before: group.start),
         flash: _flash,
+        profileId: widget.profileId,
+        conversation: widget.conversation.name,
+        highlight: widget.highlight,
+        selection: () => _selected,
         onPersonTap: widget.onPersonTap,
         onReply: widget.onReply,
+        onQuote: widget.onQuote,
         onMention: widget.onMention,
         onQuoteTap: reply == null ? null : () => _showOriginal(reply, g),
       );
@@ -600,8 +742,21 @@ class _MessageViewState extends State<MessageView> {
       );
       return;
     }
+    await _reveal(target);
+  }
+
+  /// Scroll to [target] and make it blink.
+  ///
+  /// The list is lazy, so the line may not be built yet and there is nothing
+  /// to scroll *to*. So it scrolls *towards* it a screen at a time, each frame
+  /// checking whether the row has been built, and settles on it the moment it
+  /// has.
+  Future<bool> _reveal(ChatLine target) async {
+    final groups = _groups;
     final lineIndex = _lines.indexOf(target);
+    if (lineIndex < 0) return false;
     final g = groups.lastIndexWhere((group) => group.start <= lineIndex);
+    if (g < 0) return false;
     final anchor = _lines[groups[g].start];
     final slow = context.motion.slow;
 
@@ -617,10 +772,10 @@ class _MessageViewState extends State<MessageView> {
         _flash.value = target;
         await Future<void>.delayed(const Duration(milliseconds: 1200));
         if (mounted && identical(_flash.value, target)) _flash.value = null;
-        return;
+        return true;
       }
       final range = _selection.builtRange();
-      if (range == null || !_controller.hasClients) return;
+      if (range == null || !_controller.hasClients) return false;
       final position = _controller.position;
       final step = position.viewportDimension * 0.9;
       final up = lineIndex < range.$1;
@@ -628,10 +783,11 @@ class _MessageViewState extends State<MessageView> {
         position.minScrollExtent,
         position.maxScrollExtent,
       );
-      if (to == position.pixels) return;
+      if (to == position.pixels) return false;
       _controller.jumpTo(to);
       await WidgetsBinding.instance.endOfFrame;
     }
+    return false;
   }
 }
 
@@ -865,6 +1021,60 @@ class _JumpToLatest extends StatelessWidget {
   }
 }
 
+/// The way to the next unread mention. An @ in the accent, with how many are
+/// left — the count is what makes it worth pressing more than once.
+class _JumpToMention extends StatelessWidget {
+  const _JumpToMention({super.key, required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: count == 1
+          ? 'Jump to mention'
+          : 'Jump to the next of $count mentions',
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Touchable(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(21),
+            builder: (context, touch) => AnimatedContainer(
+              duration: context.motion.fast,
+              curve: Motion.curve,
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color.alphaBlend(
+                  t.surfaceHover.withValues(alpha: touch.wash),
+                  t.surface,
+                ),
+                border: Border.all(color: t.accent, width: 1.2),
+              ),
+              child: Icon(
+                Icons.alternate_email_rounded,
+                size: 19,
+                color: t.accent,
+              ),
+            ),
+          ),
+          Positioned(
+            top: -7,
+            right: -7,
+            child: IgnorePointer(
+              child: CountBadge(count: count, highlighted: true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Joins, parts, topics, connection changes: smaller, muted, centred —
 /// subordinate to real messages but never hidden.
 class _SystemLine extends StatelessWidget {
@@ -957,13 +1167,30 @@ class _Bubble extends StatefulWidget {
     required this.endsRun,
     required this.settings,
     required this.flash,
+    this.profileId,
+    this.conversation,
+    this.highlight,
+    this.selection,
     this.card,
     this.quoted,
     this.onPersonTap,
     this.onReply,
+    this.onQuote,
     this.onMention,
     this.onQuoteTap,
   });
+
+  /// Where this bubble is, for pinning and saving its lines.
+  final String? profileId;
+  final String? conversation;
+
+  /// Text to light up, when a search is open.
+  final String? highlight;
+
+  /// What is selected in the scrollback at the moment of asking.
+  final String? Function()? selection;
+
+  final void Function(ChatLine line, String excerpt)? onQuote;
 
   final List<ChatLine> lines;
 
@@ -1054,31 +1281,65 @@ class _BubbleState extends State<_Bubble> {
 
   void _reply(int i) => widget.onReply?.call(widget.lines[i]);
 
-  /// What holding a message offers on a touch screen: reply to it, copy it
-  /// whole, or address its author. The way messengers do it, and the way to
-  /// reach all three without aiming at a small button.
+  /// What holding a message offers — or right-clicking it: reply to it,
+  /// quote part of it, copy it, address its author, pin it, save it. The way
+  /// messengers do it, and the way to reach all of it without aiming at a
+  /// small button.
   ///
-  /// Touch only. A mouse has right-click for the text selection's own menu,
-  /// and a long press with a mouse is nobody's gesture.
-  Future<void> _menu(int i) async {
+  /// [at] is where the pointer was; a long press opens it on the line.
+  Future<void> _menu(int i, {Offset? at}) async {
     final line = widget.lines[i];
     final message = line.message!;
     final box = _lineKeys[i].currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
-    HapticFeedback.selectionClick();
-    final at = box.localToGlobal(box.size.center(Offset.zero));
+    if (at == null) HapticFeedback.selectionClick();
+    final where = at ?? box.localToGlobal(box.size.center(Offset.zero));
+    final text = message.spans.map((s) => s.text).join();
+
+    // Part of this line selected: that part is what a quote is of, and what
+    // Copy copies. Selected text from somewhere else is not this line's.
+    final selected = widget.selection?.call()?.trim();
+    final excerpt =
+        selected != null && selected.isNotEmpty && text.contains(selected)
+        ? selected
+        : null;
+
+    final profileId = widget.profileId;
+    final conversation = widget.conversation;
+    final marks = Marks.instance;
+    final canMark = profileId != null && conversation != null;
+    final available = canMark && marks.available;
+    final pinned =
+        canMark &&
+        marks.isMarked(MarkKind.pinned, profileId, conversation, line);
+    final saved =
+        canMark &&
+        marks.isMarked(MarkKind.saved, profileId, conversation, line);
+    const needsHistory = 'Turn on message history in Privacy';
+
     final choice = await showPointerMenu<String>(
       context,
-      at: at,
+      at: where,
       items: [
         if (widget.onReply != null)
           const PopupMenuItem(
             value: 'reply',
             child: MenuRow(icon: Icons.reply_rounded, label: 'Reply'),
           ),
-        const PopupMenuItem(
+        if (widget.onQuote != null && excerpt != null)
+          const PopupMenuItem(
+            value: 'quote',
+            child: MenuRow(
+              icon: Icons.format_quote_rounded,
+              label: 'Reply with quote',
+            ),
+          ),
+        PopupMenuItem(
           value: 'copy',
-          child: MenuRow(icon: Icons.copy_rounded, label: 'Copy'),
+          child: MenuRow(
+            icon: Icons.copy_rounded,
+            label: excerpt == null ? 'Copy' : 'Copy selection',
+          ),
         ),
         if (widget.onMention != null && !message.isSelf)
           PopupMenuItem(
@@ -1088,25 +1349,70 @@ class _BubbleState extends State<_Bubble> {
               label: 'Mention ${message.sender}',
             ),
           ),
+        if (canMark) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'pin',
+            enabled: available,
+            child: MenuRow(
+              icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
+              label: pinned ? 'Unpin' : 'Pin',
+              enabled: available,
+            ),
+          ),
+          PopupMenuItem(
+            value: 'save',
+            enabled: available,
+            child: MenuRow(
+              icon: saved
+                  ? Icons.bookmark_rounded
+                  : Icons.bookmark_border_rounded,
+              label: saved ? 'Remove from saved' : 'Save',
+              enabled: available,
+            ),
+          ),
+          // Said rather than left to be guessed: a greyed-out row with no
+          // reason is a row that looks broken.
+          if (!available)
+            const PopupMenuItem(
+              enabled: false,
+              height: 28,
+              child: Text(needsHistory, style: TextStyle(fontSize: 11.5)),
+            ),
+        ],
       ],
     );
     if (!mounted) return;
+    void say(String text) => ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      SnackBar(content: Text(text), duration: const Duration(seconds: 2)),
+    );
     switch (choice) {
       case 'reply':
         _reply(i);
+      case 'quote':
+        widget.onQuote?.call(line, excerpt!);
       case 'copy':
-        await Clipboard.setData(
-          ClipboardData(text: message.spans.map((s) => s.text).join()),
-        );
+        await Clipboard.setData(ClipboardData(text: excerpt ?? text));
         if (!mounted) return;
-        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-          const SnackBar(
-            content: Text('Message copied'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        say(excerpt == null ? 'Message copied' : 'Selection copied');
       case 'mention':
         widget.onMention?.call(message.sender);
+      case 'pin':
+        final now = await marks.toggle(
+          MarkKind.pinned,
+          profileId!,
+          conversation!,
+          line,
+        );
+        if (mounted) say(now ? 'Pinned' : 'Unpinned');
+      case 'save':
+        final now = await marks.toggle(
+          MarkKind.saved,
+          profileId!,
+          conversation!,
+          line,
+        );
+        if (mounted) say(now ? 'Saved' : 'Removed from saved');
     }
   }
 
@@ -1351,34 +1657,43 @@ class _BubbleState extends State<_Bubble> {
     final body = _MessageBody(
       message: line.message!,
       renderColors: widget.settings.renderColors,
+      markdown: widget.settings.markdown,
+      highlight: widget.highlight,
       time: time,
       timeStyle: timeStyle,
     );
 
+    // A right-click is the mouse's long press. It takes over from the
+    // selection's own menu on a message, which only ever offered Copy and
+    // Select all; this one offers Copy too, of the selection when there is
+    // one.
     return MouseRegion(
       key: _lineKeys[i],
       onEnter: (_) => _target = i,
       child: GestureDetector(
-        supportedDevices: _Bubble._swipeDevices,
-        onLongPress: () => _menu(i),
-        child: ValueListenableBuilder<ChatLine?>(
-          valueListenable: widget.flash,
-          builder: (context, flashing, child) => AnimatedContainer(
-            duration: context.motion.slow,
-            curve: Motion.curve,
-            margin: EdgeInsets.only(top: i == 0 ? 0 : 3),
-            decoration: BoxDecoration(
-              color: identical(flashing, line)
-                  ? t.accent.withValues(alpha: 0.18)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
+        onSecondaryTapUp: (d) => _menu(i, at: d.globalPosition),
+        child: GestureDetector(
+          supportedDevices: _Bubble._swipeDevices,
+          onLongPress: () => _menu(i),
+          child: ValueListenableBuilder<ChatLine?>(
+            valueListenable: widget.flash,
+            builder: (context, flashing, child) => AnimatedContainer(
+              duration: context.motion.slow,
+              curve: Motion.curve,
+              margin: EdgeInsets.only(top: i == 0 ? 0 : 3),
+              decoration: BoxDecoration(
+                color: identical(flashing, line)
+                    ? t.accent.withValues(alpha: 0.18)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: child,
             ),
-            child: child,
-          ),
-          child: _SelectableLine(
-            index: index,
-            scrollback: widget.scrollback,
-            child: Arrive(play: fresh, child: body),
+            child: _SelectableLine(
+              index: index,
+              scrollback: widget.scrollback,
+              child: Arrive(play: fresh, child: body),
+            ),
           ),
         ),
       ),
@@ -1526,15 +1841,23 @@ class _SenderLabel extends StatelessWidget {
   }
 }
 
-class _MessageBody extends StatelessWidget {
+class _MessageBody extends StatefulWidget {
   const _MessageBody({
     required this.message,
     required this.renderColors,
+    this.markdown = true,
+    this.highlight,
     this.time,
     this.timeStyle,
   });
 
   final rust.ChatMessage message;
+
+  /// Whether `**this**` is drawn bold. See [decorate].
+  final bool markdown;
+
+  /// Text to light up wherever it appears in the line.
+  final String? highlight;
 
   /// The bubble's time, when this is its last line. Tucked in beside the end
   /// of the text when there is room on its last line, and on a line of its
@@ -1550,7 +1873,49 @@ class _MessageBody extends StatelessWidget {
   final bool renderColors;
 
   @override
+  State<_MessageBody> createState() => _MessageBodyState();
+}
+
+class _MessageBodyState extends State<_MessageBody> {
+  /// One per link in the line. Held so they can be disposed: a recogniser
+  /// is a gesture arena entrant, and one leaked per rebuild adds up in a
+  /// scrollback of thousands.
+  final List<TapGestureRecognizer> _links = [];
+
+  /// The line, decorated, for the message and setting it was made for —
+  /// rebuilt only when either changes, not on every scroll.
+  DecoratedLine? _decorated;
+  rust.ChatMessage? _decoratedFor;
+  bool? _decoratedWith;
+
+  @override
+  void dispose() {
+    _disposeLinks();
+    super.dispose();
+  }
+
+  void _disposeLinks() {
+    for (final link in _links) {
+      link.dispose();
+    }
+    _links.clear();
+  }
+
+  DecoratedLine _decorate() {
+    if (!identical(_decoratedFor, widget.message) ||
+        _decoratedWith != widget.markdown) {
+      _decoratedFor = widget.message;
+      _decoratedWith = widget.markdown;
+      _decorated = decorate(widget.message.spans, markdown: widget.markdown);
+    }
+    return _decorated!;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final message = widget.message;
+    final renderColors = widget.renderColors;
+    final timeStyle = widget.timeStyle;
     final t = context.tokens;
     final base = TextStyle(color: t.text, fontSize: 14.5, height: 1.45);
 
@@ -1569,23 +1934,57 @@ class _MessageBody extends StatelessWidget {
         ? base.copyWith(color: t.muted)
         : base;
 
+    final decorated = _decorate();
+    final runStyle = decorated.quote ? style.copyWith(color: t.muted) : style;
+    _disposeLinks();
+    final runs = <InlineSpan>[];
+    for (final run in decorated.runs) {
+      final link = run.link;
+      TapGestureRecognizer? tap;
+      if (link != null) {
+        tap = TapGestureRecognizer()..onTap = () => openLink(context, link);
+        _links.add(tap);
+      }
+      runs.addAll(
+        _span(
+          rust.TextSpan(text: run.text, style: run.style),
+          runStyle,
+          renderColors,
+          t,
+          link: tap,
+          highlight: widget.highlight,
+        ),
+      );
+    }
+
     // `Text.rich` rather than the bare `RichText` this used to be: a `Text`
     // registers itself with whatever selection is in scope, and a hand-built
     // `RichText` does not — it would draw identically and be the one thing on
     // the screen that could not be selected.
     final span = TextSpan(
-      style: style,
+      style: runStyle,
       children: [
         if (leading.isNotEmpty)
           TextSpan(
             text: leading,
             style: style.copyWith(color: t.faint),
           ),
-        ...message.spans.map((span) => _span(span, style, renderColors, t)),
+        ...runs,
       ],
     );
-    final text = Text.rich(span);
-    final time = this.time;
+    Widget text = Text.rich(span);
+    // A line that began `> ` is somebody quoting: drawn with a bar down its
+    // side, the way the quote on a reply is, and the marker itself gone.
+    if (decorated.quote) {
+      text = Container(
+        padding: const EdgeInsets.only(left: 8),
+        decoration: BoxDecoration(
+          border: Border(left: BorderSide(color: t.faint, width: 3)),
+        ),
+        child: text,
+      );
+    }
+    final time = widget.time;
     if (time == null) return text;
 
     // Out of the selection: the time is the app's, not what anyone said.
@@ -1613,7 +2012,11 @@ class _MessageBody extends StatelessWidget {
         )..layout();
         final lines = paragraph.computeLineMetrics();
         final lastLine = lines.isEmpty ? 0.0 : lines.last.width;
-        final needed = lastLine + _timeGap + clock.width;
+        final needed =
+            lastLine +
+            _MessageBody._timeGap +
+            clock.width +
+            (decorated.quote ? 11 : 0);
         final single = lines.length <= 1;
         final width = paragraph.width;
         paragraph.dispose();
@@ -1626,7 +2029,7 @@ class _MessageBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Flexible(child: text),
-              const SizedBox(width: _timeGap),
+              const SizedBox(width: _MessageBody._timeGap),
               Padding(padding: const EdgeInsets.only(bottom: 1), child: stamp),
             ],
           );
@@ -1657,12 +2060,14 @@ class _MessageBody extends StatelessWidget {
   ///
   /// The text is already free of control characters, so nothing here needs to
   /// re-sanitise; only the styling flags matter.
-  static TextSpan _span(
+  static List<TextSpan> _span(
     rust.TextSpan span,
     TextStyle base,
     bool colors,
-    Tokens t,
-  ) {
+    Tokens t, {
+    TapGestureRecognizer? link,
+    String? highlight,
+  }) {
     final s = span.style;
     final background = colors ? MircPalette.background(s.bg) : null;
     // Contrast is measured against whatever this run actually sits on, so a
@@ -1694,6 +2099,40 @@ class _MessageBody extends StatelessWidget {
       );
     }
 
-    return TextSpan(text: span.text, style: style);
+    // A link reads as one: the accent, underlined, and a hand over it.
+    if (link != null) {
+      style = style.copyWith(
+        color: t.accent,
+        decoration: TextDecoration.underline,
+        decorationColor: t.accent.withValues(alpha: 0.6),
+      );
+    }
+
+    TextSpan piece(String text, TextStyle style) => TextSpan(
+      text: text,
+      style: style,
+      recognizer: link,
+      mouseCursor: link == null ? null : SystemMouseCursors.click,
+    );
+
+    final needle = highlight?.trim().toLowerCase() ?? '';
+    if (needle.isEmpty) return [piece(span.text, style)];
+
+    // What is being searched for, lit up wherever it falls in the run.
+    final lit = style.copyWith(
+      backgroundColor: t.accent.withValues(alpha: 0.35),
+    );
+    final haystack = span.text.toLowerCase();
+    final out = <TextSpan>[];
+    var at = 0;
+    while (true) {
+      final found = haystack.indexOf(needle, at);
+      if (found < 0) break;
+      if (found > at) out.add(piece(span.text.substring(at, found), style));
+      out.add(piece(span.text.substring(found, found + needle.length), lit));
+      at = found + needle.length;
+    }
+    if (at < span.text.length) out.add(piece(span.text.substring(at), style));
+    return out;
   }
 }

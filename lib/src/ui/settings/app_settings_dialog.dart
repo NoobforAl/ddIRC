@@ -393,6 +393,16 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
             value: settings.colorNicks,
             onChanged: (v) => settings.colorNicks = v,
           ),
+          SettingsSwitch(
+            label: 'Markdown',
+            description:
+                '**bold**, *italic*, ~~struck~~ and `code` become real '
+                'formatting — sent as IRC formatting every client shows, and '
+                'drawn that way when somebody else types them. A line that '
+                'starts with "> " is shown as a quote.',
+            value: settings.markdown,
+            onChanged: (v) => settings.markdown = v,
+          ),
         ],
       ),
     ];

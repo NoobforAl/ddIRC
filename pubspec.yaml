@@ -103,6 +103,11 @@ dependencies:
   # other dependency.
   mobile_scanner: 7.4.2
 
+  # Opens a link from a message in the browser, after the app has shown the
+  # whole address and been told to — see `lib/src/ui/link.dart`. http and
+  # https only. Pinned like every other dependency.
+  url_launcher: 6.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

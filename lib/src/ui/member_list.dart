@@ -225,7 +225,7 @@ class _MemberRow extends StatelessWidget {
           ),
         const PopupMenuItem(
           value: 'edit',
-          child: MenuRow(icon: Icons.edit_outlined, label: 'Edit person…'),
+          child: MenuRow(icon: Icons.person_outline, label: 'Profile…'),
         ),
       ],
     );

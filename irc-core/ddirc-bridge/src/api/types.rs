@@ -82,6 +82,48 @@ pub struct ChannelListing {
     pub topic: String,
 }
 
+/// What the server says about one nick. See `ddirc_core::api::types::WhoisInfo`.
+#[derive(Debug, Clone)]
+pub struct WhoisInfo {
+    pub nick: String,
+    /// False when the server said there is no such nick.
+    pub found: bool,
+    pub user: Option<String>,
+    pub host: Option<String>,
+    pub realname: Option<String>,
+    pub server: Option<String>,
+    pub server_info: Option<String>,
+    pub account: Option<String>,
+    pub channels: Vec<String>,
+    pub idle_secs: Option<u64>,
+    /// Seconds since the Unix epoch.
+    pub signon_secs: Option<u64>,
+    pub away: Option<String>,
+    pub operator: bool,
+    pub secure: bool,
+}
+
+impl From<types::WhoisInfo> for WhoisInfo {
+    fn from(w: types::WhoisInfo) -> Self {
+        Self {
+            nick: w.nick,
+            found: w.found,
+            user: w.user,
+            host: w.host,
+            realname: w.realname,
+            server: w.server,
+            server_info: w.server_info,
+            account: w.account,
+            channels: w.channels,
+            idle_secs: w.idle_secs,
+            signon_secs: w.signon_secs,
+            away: w.away,
+            operator: w.operator,
+            secure: w.secure,
+        }
+    }
+}
+
 /// Where a message was addressed.
 #[derive(Debug, Clone)]
 pub enum Target {
@@ -267,6 +309,8 @@ pub enum IrcEvent {
         /// is showing the busiest rather than all of them.
         truncated: bool,
     },
+    /// The answer to `whois`.
+    Whois(WhoisInfo),
 
     Error {
         message: String,
@@ -605,6 +649,7 @@ impl From<events::IrcEvent> for IrcEvent {
                 done,
                 truncated,
             },
+            events::IrcEvent::Whois(info) => Self::Whois((*info).into()),
             events::IrcEvent::FileOffered {
                 id,
                 channel,

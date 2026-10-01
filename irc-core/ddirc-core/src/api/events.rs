@@ -4,7 +4,9 @@
 //! Dart `Stream`, keeps ordering guarantees obvious, and means adding an event
 //! later does not change the API surface.
 
-use crate::api::types::{AuthOutcome, ChannelListing, ChatMessage, ConnectionStatus, MemberView};
+use crate::api::types::{
+    AuthOutcome, ChannelListing, ChatMessage, ConnectionStatus, MemberView, WhoisInfo,
+};
 use crate::dcc::DccOffer;
 
 /// Something that happened on a connection.
@@ -195,6 +197,10 @@ pub enum IrcEvent {
         truncated: bool,
     },
 
+    /// The answer to a `WHOIS`, gathered from the several numerics a server
+    /// answers one with, and sent once it says it has finished.
+    Whois(Box<WhoisInfo>),
+
     /// A server error or a protocol-level problem worth showing the user.
     Error { message: String, fatal: bool },
 }
@@ -224,6 +230,8 @@ impl IrcEvent {
             // Belongs to the network, not to any one conversation: it is a
             // list of rooms the user is precisely not in.
             Self::ChannelList { .. } => None,
+            // About a person, and shown about them rather than in a room.
+            Self::Whois(_) => None,
             Self::Status { .. }
             | Self::Registered { .. }
             | Self::NetworkNamed { .. }

@@ -7,7 +7,8 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'types.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These functions are ignored because they are not marked as `pub`: `rows`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 /// Open, or create, the history database at `path`.
 ///
@@ -25,8 +26,9 @@ Future<void> storeClose() => RustLib.instance.api.crateApiStoreStoreClose();
 /// Whether history is currently being kept.
 bool storeIsOpen() => RustLib.instance.api.crateApiStoreStoreIsOpen();
 
-/// Write a batch of lines.
-Future<void> storeAppend({required List<StoredLine> lines}) =>
+/// Write a batch of lines, and return the id each was stored under — `null`
+/// for a line already stored, a replay of one the server sent before.
+Future<List<PlatformInt64?>> storeAppend({required List<StoredLine> lines}) =>
     RustLib.instance.api.crateApiStoreStoreAppend(lines: lines);
 
 /// The last `limit` lines of one conversation, oldest first.
@@ -40,7 +42,55 @@ Future<List<StoredLine>> storeRecent({
   limit: limit,
 );
 
-/// How much history is being kept.
+/// The `limit` lines just older than the line at (`at_ms`, `id`), oldest
+/// first: the next page up the scrollback.
+Future<List<StoredLine>> storeBefore({
+  required String profileId,
+  required String conversation,
+  required PlatformInt64 atMs,
+  required PlatformInt64 id,
+  required int limit,
+}) => RustLib.instance.api.crateApiStoreStoreBefore(
+  profileId: profileId,
+  conversation: conversation,
+  atMs: atMs,
+  id: id,
+  limit: limit,
+);
+
+/// The lines either side of one, for opening a conversation at it.
+Future<List<StoredLine>> storeAround({
+  required String profileId,
+  required String conversation,
+  required PlatformInt64 atMs,
+  required PlatformInt64 id,
+  required int radius,
+}) => RustLib.instance.api.crateApiStoreStoreAround(
+  profileId: profileId,
+  conversation: conversation,
+  atMs: atMs,
+  id: id,
+  radius: radius,
+);
+
+/// Lines matching what the user typed, newest first, optionally scoped to a
+/// network and a conversation. `before_id` pages down from a previous result.
+Future<List<StoredLine>> storeSearch({
+  String? profileId,
+  String? conversation,
+  required String query,
+  required int limit,
+  PlatformInt64? beforeId,
+}) => RustLib.instance.api.crateApiStoreStoreSearch(
+  profileId: profileId,
+  conversation: conversation,
+  query: query,
+  limit: limit,
+  beforeId: beforeId,
+);
+
+/// How much history is being kept. The line count is approximate — see
+/// `ddirc_core::store::approximate_count` — so the screen says "about".
 Future<StoreStats> storeStats() =>
     RustLib.instance.api.crateApiStoreStoreStats();
 
@@ -55,6 +105,39 @@ Future<void> storeForget({
   profileId: profileId,
   conversation: conversation,
 );
+
+/// Delete everything kept for one saved network, for when it is deleted.
+Future<void> storeForgetProfile({required String profileId}) =>
+    RustLib.instance.api.crateApiStoreStoreForgetProfile(profileId: profileId);
+
+/// Every conversation's state, on every network.
+Future<List<ConversationState>> storeConversationStates() =>
+    RustLib.instance.api.crateApiStoreStoreConversationStates();
+
+/// Write one conversation's state; one with nothing left in it loses its row.
+Future<void> storeSetConversationState({required ConversationState state}) =>
+    RustLib.instance.api.crateApiStoreStoreSetConversationState(state: state);
+
+/// Pins and saved messages: of one kind or all, on one network or all, in
+/// one conversation or all. Oldest message first.
+Future<List<Mark>> storeMarks({
+  PlatformInt64? kind,
+  String? profileId,
+  String? conversation,
+}) => RustLib.instance.api.crateApiStoreStoreMarks(
+  kind: kind,
+  profileId: profileId,
+  conversation: conversation,
+);
+
+/// Pin or save a message, returning the mark's id. Marking the same message
+/// twice returns the first mark's id rather than making a second.
+Future<PlatformInt64> storeAddMark({required Mark mark}) =>
+    RustLib.instance.api.crateApiStoreStoreAddMark(mark: mark);
+
+/// Unpin or unsave.
+Future<void> storeRemoveMark({required PlatformInt64 id}) =>
+    RustLib.instance.api.crateApiStoreStoreRemoveMark(id: id);
 
 /// Everyone the user has annotated, on every network.
 Future<List<Person>> storePeople() =>
@@ -95,6 +178,118 @@ Future<void> storeForgetPersonaNicks({required String networkId}) => RustLib
     .instance
     .api
     .crateApiStoreStoreForgetPersonaNicks(networkId: networkId);
+
+/// What the user keeps about one conversation apart from its messages: an
+/// unsent draft, how far it was read, whether it is pinned or archived.
+class ConversationState {
+  final String profileId;
+
+  /// Already case-folded by the caller.
+  final String conversation;
+  final String? draft;
+  final String? draftReplyMsgid;
+  final PlatformInt64? readLineId;
+  final PlatformInt64? readAtMs;
+
+  /// Place among the pinned conversations, lowest first; null when not
+  /// pinned.
+  final PlatformInt64? pinOrder;
+  final bool archived;
+
+  const ConversationState({
+    required this.profileId,
+    required this.conversation,
+    this.draft,
+    this.draftReplyMsgid,
+    this.readLineId,
+    this.readAtMs,
+    this.pinOrder,
+    required this.archived,
+  });
+
+  @override
+  int get hashCode =>
+      profileId.hashCode ^
+      conversation.hashCode ^
+      draft.hashCode ^
+      draftReplyMsgid.hashCode ^
+      readLineId.hashCode ^
+      readAtMs.hashCode ^
+      pinOrder.hashCode ^
+      archived.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ConversationState &&
+          runtimeType == other.runtimeType &&
+          profileId == other.profileId &&
+          conversation == other.conversation &&
+          draft == other.draft &&
+          draftReplyMsgid == other.draftReplyMsgid &&
+          readLineId == other.readLineId &&
+          readAtMs == other.readAtMs &&
+          pinOrder == other.pinOrder &&
+          archived == other.archived;
+}
+
+/// A message the user pinned (`kind` 1) or saved (`kind` 2): a copy of it,
+/// so it outlives the line it came from.
+class Mark {
+  /// Zero when adding.
+  final PlatformInt64 id;
+  final PlatformInt64 kind;
+  final String profileId;
+  final String conversation;
+  final PlatformInt64? lineId;
+  final String? msgid;
+  final PlatformInt64 atMs;
+  final String? sender;
+  final List<TextSpan> spans;
+  final PlatformInt64 createdMs;
+
+  const Mark({
+    required this.id,
+    required this.kind,
+    required this.profileId,
+    required this.conversation,
+    this.lineId,
+    this.msgid,
+    required this.atMs,
+    this.sender,
+    required this.spans,
+    required this.createdMs,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      kind.hashCode ^
+      profileId.hashCode ^
+      conversation.hashCode ^
+      lineId.hashCode ^
+      msgid.hashCode ^
+      atMs.hashCode ^
+      sender.hashCode ^
+      spans.hashCode ^
+      createdMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Mark &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          kind == other.kind &&
+          profileId == other.profileId &&
+          conversation == other.conversation &&
+          lineId == other.lineId &&
+          msgid == other.msgid &&
+          atMs == other.atMs &&
+          sender == other.sender &&
+          spans == other.spans &&
+          createdMs == other.createdMs;
+}
 
 /// What the user has written down about one person on one network: a name
 /// to show instead of the nick, a note, a colour, a picture.
@@ -225,6 +420,12 @@ class StoreStats {
 /// deliberately does not know what those mean — a UI category should never
 /// become a database migration.
 class StoredLine {
+  /// The id the store gave this line, on the way out; ignored on the way in.
+  ///
+  /// What a read position, a pin or a search result holds on to — a server
+  /// id is only there when the server sent one.
+  final PlatformInt64? id;
+
   /// Which saved network this belongs to.
   final String profileId;
 
@@ -259,6 +460,7 @@ class StoredLine {
   final ReplyRef? replyTo;
 
   const StoredLine({
+    this.id,
     required this.profileId,
     required this.conversation,
     required this.atMs,
@@ -276,6 +478,7 @@ class StoredLine {
 
   @override
   int get hashCode =>
+      id.hashCode ^
       profileId.hashCode ^
       conversation.hashCode ^
       atMs.hashCode ^
@@ -295,6 +498,7 @@ class StoredLine {
       identical(this, other) ||
       other is StoredLine &&
           runtimeType == other.runtimeType &&
+          id == other.id &&
           profileId == other.profileId &&
           conversation == other.conversation &&
           atMs == other.atMs &&

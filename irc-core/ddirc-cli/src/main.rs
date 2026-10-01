@@ -189,6 +189,9 @@ fn command_for(line: &str, current: Option<&str>) -> Option<Action> {
             None => Action::Notice("usage: /msg <target> <text>".to_owned()),
         },
         "list" => Action::Send(ClientCommand::ListChannels),
+        "whois" if !argument.is_empty() => Action::Send(ClientCommand::Whois {
+            nick: argument.to_owned(),
+        }),
         "quit" => Action::Send(ClientCommand::Disconnect {
             reason: (!argument.is_empty()).then(|| argument.to_owned()),
         }),
@@ -390,6 +393,20 @@ fn render(event: &IrcEvent) {
             }
         }
         IrcEvent::ChannelList { done: false, .. } => {}
+
+        IrcEvent::Whois(whois) if !whois.found => println!("-- no such nick: {} --", whois.nick),
+        IrcEvent::Whois(whois) => {
+            println!(
+                "-- {} is {}@{} ({}) --",
+                whois.nick,
+                whois.user.as_deref().unwrap_or("?"),
+                whois.host.as_deref().unwrap_or("?"),
+                whois.realname.as_deref().unwrap_or(""),
+            );
+            if !whois.channels.is_empty() {
+                println!("-- on {} --", whois.channels.join(" "));
+            }
+        }
 
         IrcEvent::Error { message, fatal } => {
             let label = if *fatal { "fatal" } else { "error" };

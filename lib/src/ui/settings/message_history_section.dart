@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../model/chat_state.dart';
 import '../../model/history.dart';
+import '../../model/marks.dart';
 import '../../model/settings.dart';
 import '../../rust/api/store.dart' as store;
 import 'settings_chrome.dart';
@@ -80,6 +82,8 @@ class _MessageHistorySectionState extends State<MessageHistorySection> {
     }
     setState(() => _confirmingDelete = false);
     await history.clear();
+    ConversationStates.instance.clear();
+    await Marks.instance.sync();
     if (mounted) await _measure();
   }
 
@@ -100,8 +104,11 @@ class _MessageHistorySectionState extends State<MessageHistorySection> {
     if (_measuring && _stats == null) return 'Counting…';
     final stats = _stats;
     if (stats == null) return 'Unknown';
+    // About, because it is read off the ends of the id range rather than
+    // counted: counting means reading every row of a table that can hold
+    // two million, every time this page opens.
     final lines = stats.lines;
-    return '$lines line${lines == 1 ? '' : 's'}, ${_size(stats.bytes)}';
+    return 'About $lines line${lines == 1 ? '' : 's'}, ${_size(stats.bytes)}';
   }
 
   @override
@@ -137,14 +144,23 @@ class _MessageHistorySectionState extends State<MessageHistorySection> {
           label: 'Restored',
           value:
               'The last ${MessageHistory.restoreLines} lines of a conversation '
-              'when it opens',
+              'when it opens, and older ones as you scroll up',
+        ),
+        const SettingsReadout(
+          label: 'Also kept',
+          value:
+              'Unsent drafts, where you stopped reading, pinned and saved '
+              'messages, and pinned or archived conversations — none of '
+              'which are offered while this is off',
         ),
         if (settings.saveMessages) ...[
           if (_confirmingDelete)
             const SettingsNote(
               text:
-                  'This deletes every saved message, on every network, and '
-                  'gives the disk space back. It cannot be undone.',
+                  'This deletes every saved message on every network, with '
+                  'its pins, saved messages, drafts and read positions, and '
+                  'gives the disk space back. Names and notes you gave people '
+                  'are kept. It cannot be undone.',
             ),
           SettingsActions(
             children: [

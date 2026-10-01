@@ -348,6 +348,38 @@ pub struct ChannelListing {
     pub topic: String,
 }
 
+/// What the server says about one nick, in answer to a `WHOIS`.
+///
+/// Every field is the server's claim, and most are optional: networks differ
+/// in what they reveal, and a cloaked host or a hidden channel list is the
+/// server keeping something back on purpose, not a failure.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct WhoisInfo {
+    /// The nick as asked about.
+    pub nick: String,
+    /// False when the server said there is no such nick — offline, or never
+    /// there. Everything else is then empty.
+    pub found: bool,
+    pub user: Option<String>,
+    pub host: Option<String>,
+    pub realname: Option<String>,
+    /// Which server of the network they are on, and its description.
+    pub server: Option<String>,
+    pub server_info: Option<String>,
+    /// The services account they are logged in to.
+    pub account: Option<String>,
+    /// The channels the server is willing to show, with their status prefix.
+    pub channels: Vec<String>,
+    pub idle_secs: Option<u64>,
+    /// When they connected, in seconds since the Unix epoch.
+    pub signon_secs: Option<u64>,
+    /// Their away message, when they are away.
+    pub away: Option<String>,
+    pub operator: bool,
+    /// Connected over TLS, by the server's account.
+    pub secure: bool,
+}
+
 /// Where a message was addressed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {

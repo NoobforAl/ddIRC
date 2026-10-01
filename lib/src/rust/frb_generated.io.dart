@@ -50,6 +50,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ConnectionStatus dco_decode_box_autoadd_connection_status(dynamic raw);
 
   @protected
+  ConversationState dco_decode_box_autoadd_conversation_state(dynamic raw);
+
+  @protected
   DccOffer dco_decode_box_autoadd_dcc_offer(dynamic raw);
 
   @protected
@@ -57,6 +60,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LocalServerInfo dco_decode_box_autoadd_local_server_info(dynamic raw);
+
+  @protected
+  Mark dco_decode_box_autoadd_mark(dynamic raw);
 
   @protected
   MemberView dco_decode_box_autoadd_member_view(dynamic raw);
@@ -89,6 +95,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_box_autoadd_u_8(dynamic raw);
 
   @protected
+  WhoisInfo dco_decode_box_autoadd_whois_info(dynamic raw);
+
+  @protected
   ChannelListing dco_decode_channel_listing(dynamic raw);
 
   @protected
@@ -99,6 +108,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ConnectionStatus dco_decode_connection_status(dynamic raw);
+
+  @protected
+  ConversationState dco_decode_conversation_state(dynamic raw);
 
   @protected
   DccOffer dco_decode_dcc_offer(dynamic raw);
@@ -119,7 +131,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ChannelListing> dco_decode_list_channel_listing(dynamic raw);
 
   @protected
+  List<ConversationState> dco_decode_list_conversation_state(dynamic raw);
+
+  @protected
+  List<Mark> dco_decode_list_mark(dynamic raw);
+
+  @protected
   List<MemberView> dco_decode_list_member_view(dynamic raw);
+
+  @protected
+  List<PlatformInt64?> dco_decode_list_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
   List<Person> dco_decode_list_person(dynamic raw);
@@ -147,6 +168,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LocalServerInfo dco_decode_local_server_info(dynamic raw);
+
+  @protected
+  Mark dco_decode_mark(dynamic raw);
 
   @protected
   MemberView dco_decode_member_view(dynamic raw);
@@ -239,6 +263,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  WhoisInfo dco_decode_whois_info(dynamic raw);
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
@@ -272,6 +299,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ConversationState sse_decode_box_autoadd_conversation_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DccOffer sse_decode_box_autoadd_dcc_offer(SseDeserializer deserializer);
 
   @protected
@@ -281,6 +313,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   LocalServerInfo sse_decode_box_autoadd_local_server_info(
     SseDeserializer deserializer,
   );
+
+  @protected
+  Mark sse_decode_box_autoadd_mark(SseDeserializer deserializer);
 
   @protected
   MemberView sse_decode_box_autoadd_member_view(SseDeserializer deserializer);
@@ -315,6 +350,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_box_autoadd_u_8(SseDeserializer deserializer);
 
   @protected
+  WhoisInfo sse_decode_box_autoadd_whois_info(SseDeserializer deserializer);
+
+  @protected
   ChannelListing sse_decode_channel_listing(SseDeserializer deserializer);
 
   @protected
@@ -325,6 +363,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ConnectionStatus sse_decode_connection_status(SseDeserializer deserializer);
+
+  @protected
+  ConversationState sse_decode_conversation_state(SseDeserializer deserializer);
 
   @protected
   DccOffer sse_decode_dcc_offer(SseDeserializer deserializer);
@@ -347,7 +388,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ConversationState> sse_decode_list_conversation_state(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<Mark> sse_decode_list_mark(SseDeserializer deserializer);
+
+  @protected
   List<MemberView> sse_decode_list_member_view(SseDeserializer deserializer);
+
+  @protected
+  List<PlatformInt64?> sse_decode_list_opt_box_autoadd_i_64(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<Person> sse_decode_list_person(SseDeserializer deserializer);
@@ -375,6 +429,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   LocalServerInfo sse_decode_local_server_info(SseDeserializer deserializer);
+
+  @protected
+  Mark sse_decode_mark(SseDeserializer deserializer);
 
   @protected
   MemberView sse_decode_member_view(SseDeserializer deserializer);
@@ -473,6 +530,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_decode_unit(SseDeserializer deserializer);
 
   @protected
+  WhoisInfo sse_decode_whois_info(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -521,6 +581,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_conversation_state(
+    ConversationState self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_dcc_offer(
     DccOffer self,
     SseSerializer serializer,
@@ -537,6 +603,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     LocalServerInfo self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_box_autoadd_mark(Mark self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_member_view(
@@ -584,6 +653,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_whois_info(
+    WhoisInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_channel_listing(
     ChannelListing self,
     SseSerializer serializer,
@@ -598,6 +673,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_connection_status(
     ConnectionStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_conversation_state(
+    ConversationState self,
     SseSerializer serializer,
   );
 
@@ -623,8 +704,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_conversation_state(
+    List<ConversationState> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_mark(List<Mark> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_member_view(
     List<MemberView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_opt_box_autoadd_i_64(
+    List<PlatformInt64?> self,
     SseSerializer serializer,
   );
 
@@ -669,6 +765,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     LocalServerInfo self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_mark(Mark self, SseSerializer serializer);
 
   @protected
   void sse_encode_member_view(MemberView self, SseSerializer serializer);
@@ -777,6 +876,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_whois_info(WhoisInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);

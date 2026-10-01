@@ -43,6 +43,11 @@
 //! which random handles all belong to one person is exactly what wants keeping
 //! private, so it lives here too, behind the same switch. See [`Persona`].
 //!
+//! And the user's own bookkeeping about conversations: what was typed and not
+//! yet sent, how far each one has been read, which ones are pinned or put
+//! away, and the messages they pinned or saved. See [`ConversationState`] and
+//! [`Mark`]. All of it describes what was said, so it rides on the same switch.
+//!
 //! Nothing else is kept. No passwords, no capability negotiation, no
 //! connection log: this is a record of conversations, and everything about how
 //! the connection was made belongs in the debug log if it belongs anywhere.
@@ -69,7 +74,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 /// is what SQLite provides the pragma for. A file from a *newer* build is
 /// refused rather than opened: silently reading a schema we do not know would
 /// mean losing whatever the newer columns held the moment we wrote to it.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 /// How many lines the store keeps in total, across every network.
 ///
@@ -151,9 +156,22 @@ pub struct StoredLine {
     pub reply_excerpt: Option<String>,
 }
 
+/// The writer. Every change goes through here, one at a time.
 fn store() -> &'static Mutex<Option<Connection>> {
     static STORE: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(None))
+}
+
+/// A second connection to the same file, for reading only.
+///
+/// WAL lets a reader see the last committed state while a write is in
+/// progress, but only if the two are different connections: with one, the
+/// mutex in front of it serialises them anyway, and restoring a conversation
+/// or answering a search waits behind whatever batch of messages happens to be
+/// landing. Two connections is what turns WAL's promise into an actual one.
+fn reader() -> &'static Mutex<Option<Connection>> {
+    static READER: OnceLock<Mutex<Option<Connection>>> = OnceLock::new();
+    READER.get_or_init(|| Mutex::new(None))
 }
 
 /// Run `f` against the open connection.
@@ -165,6 +183,34 @@ fn store() -> &'static Mutex<Option<Connection>> {
 fn with<T>(f: impl FnOnce(&Connection) -> Result<T, StoreError>) -> Result<T, StoreError> {
     let guard = store().lock().unwrap_or_else(|e| e.into_inner());
     f(guard.as_ref().ok_or(StoreError::Closed)?)
+}
+
+/// [`with`], for a read: runs on the reading connection, so it does not queue
+/// behind a write.
+fn read<T>(f: impl FnOnce(&Connection) -> Result<T, StoreError>) -> Result<T, StoreError> {
+    let guard = reader().lock().unwrap_or_else(|e| e.into_inner());
+    f(guard.as_ref().ok_or(StoreError::Closed)?)
+}
+
+/// Settings every connection to the file gets.
+///
+/// None of them changes what is stored, only how fast it is reached:
+/// - `busy_timeout`, because with two connections one can briefly find the
+///   other holding a lock, and waiting a moment is the right answer to that
+///   rather than an error the user sees.
+/// - a larger page cache and memory-mapped reads, because the hot path is
+///   scrolling back through one conversation, which is the same few index
+///   pages again and again.
+/// - temporary tables in memory, which is where a sort for a search goes.
+fn tune(connection: &Connection) -> Result<(), StoreError> {
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    connection.execute_batch(
+        "PRAGMA temp_store = MEMORY;
+         PRAGMA cache_size = -16000;",
+    )?;
+    // Returns the size it settled on as a row, like `journal_mode` below.
+    connection.query_row("PRAGMA mmap_size = 67108864", [], |_| Ok(()))?;
+    Ok(())
 }
 
 /// Open (or create) the store at `path`, and bring its schema up to date.
@@ -198,10 +244,19 @@ pub fn open(path: &str) -> Result<(), StoreError> {
     // screen. Paying an fsync per message for that is the wrong trade.
     connection.execute_batch("PRAGMA synchronous = NORMAL")?;
     connection.execute_batch("PRAGMA foreign_keys = ON")?;
+    tune(&connection)?;
 
     migrate(&connection)?;
 
+    // Opened after the migration, so it never sees a schema half-built.
+    // `query_only` makes "this one only reads" a property of the connection
+    // rather than of the code that happens to use it today.
+    let reading = Connection::open(path)?;
+    tune(&reading)?;
+    reading.execute_batch("PRAGMA query_only = ON")?;
+
     *store().lock().unwrap_or_else(|e| e.into_inner()) = Some(connection);
+    *reader().lock().unwrap_or_else(|e| e.into_inner()) = Some(reading);
     Ok(())
 }
 
@@ -235,8 +290,18 @@ fn restrict_to_owner(path: &str) {
 }
 
 /// Close the store. Idempotent, so the UI never has to track whether it is open.
+///
+/// `PRAGMA optimize` on the way out is SQLite's own advice for a connection
+/// that is about to close: it refreshes the planner's statistics for whatever
+/// this session's queries actually used, cheaply, so the next session's plans
+/// are made from numbers that resemble the file.
 pub fn close() {
-    *store().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *reader().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let mut writer = store().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(connection) = writer.as_ref() {
+        let _ = connection.execute_batch("PRAGMA optimize");
+    }
+    *writer = None;
 }
 
 /// Whether anything is open to write to.
@@ -271,6 +336,9 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
     }
     if version < 4 {
         migrate_to_4(connection)?;
+    }
+    if version < 5 {
+        migrate_to_5(connection)?;
     }
     connection.execute_batch(&format!("PRAGMA user_version = {SCHEMA_VERSION}"))?;
     Ok(())
@@ -370,32 +438,215 @@ fn migrate_to_4(connection: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Append a batch of lines.
+/// Version 5: what scales, and what the user keeps about conversations.
+///
+/// Four things, each answering a query the app now asks:
+///
+/// - **A server id is unique per conversation.** A bouncer replaying the last
+///   hour, or a reconnect that sees the same lines twice, used to store them
+///   twice. The index makes the second copy a no-op (see [`append`]) and is
+///   also what a lookup by id walks. Existing duplicates are removed first,
+///   keeping the earliest, or the index could not be built.
+/// - **Full-text search**, in an FTS5 table — see [`create_search_index`].
+/// - **[`ConversationState`]**: drafts, read positions, pins, archiving.
+/// - **[`Mark`]s**: messages the user pinned or saved.
+///
+/// One transaction, because the backfill of the search index is the one step
+/// in this ladder that touches every row, and a file left with half an index
+/// is worse than one with none.
+fn migrate_to_5(connection: &Connection) -> Result<(), StoreError> {
+    let transaction = connection.unchecked_transaction()?;
+    transaction.execute_batch(
+        "DELETE FROM lines
+         WHERE msgid IS NOT NULL
+           AND id NOT IN (SELECT MIN(id) FROM lines
+                          WHERE msgid IS NOT NULL
+                          GROUP BY profile_id, conversation, msgid);
+         CREATE UNIQUE INDEX IF NOT EXISTS lines_by_msgid
+             ON lines (profile_id, conversation, msgid) WHERE msgid IS NOT NULL;
+
+         CREATE TABLE IF NOT EXISTS conversation_state (
+             profile_id         TEXT    NOT NULL,
+             conversation       TEXT    NOT NULL,
+             draft              TEXT,
+             draft_reply_msgid  TEXT,
+             read_line_id       INTEGER,
+             read_at_ms         INTEGER,
+             pin_order          INTEGER,
+             archived           INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (profile_id, conversation)
+         ) WITHOUT ROWID;
+
+         CREATE TABLE IF NOT EXISTS marks (
+             id            INTEGER PRIMARY KEY,
+             kind          INTEGER NOT NULL,
+             profile_id    TEXT    NOT NULL,
+             conversation  TEXT    NOT NULL,
+             line_id       INTEGER,
+             msgid         TEXT,
+             at_ms         INTEGER NOT NULL,
+             sender        TEXT,
+             text          TEXT    NOT NULL,
+             created_ms    INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS marks_by_conversation
+             ON marks (profile_id, conversation, kind, at_ms);
+         CREATE INDEX IF NOT EXISTS marks_by_kind ON marks (kind, created_ms);
+         -- One pin per message, one save per message.
+         CREATE UNIQUE INDEX IF NOT EXISTS marks_unique
+             ON marks (kind, profile_id, conversation, at_ms, sender, text);",
+    )?;
+
+    let indexed: bool = transaction.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE name = 'lines_fts')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !indexed {
+        create_search_index(&transaction)?;
+        backfill_search_index(&transaction)?;
+    }
+    transaction.commit()?;
+    Ok(())
+}
+
+/// The full-text index over what people said.
+///
+/// *Contentless*: it holds the tokens and the row id, not a second copy of the
+/// text, so searching costs index space rather than doubling the file. The
+/// text itself is read back from `lines` by id. `contentless_delete` is what
+/// lets a row be removed from such an index at all (SQLite 3.43 and later; the
+/// bundled copy is newer).
+///
+/// What is indexed is the line with its mIRC codes stripped — a word split by
+/// a colour code is still one word to the person reading it — and only lines
+/// somebody said: a search for "joined" should find a person saying it, not
+/// every join in the history.
+///
+/// Rows leave the index through a trigger, so every delete — pruning,
+/// forgetting a conversation or a network — keeps the two in step without
+/// each having to remember to. Rows *enter* it from [`append`], because the
+/// stripping is Rust's parser and not something SQL can do.
+fn create_search_index(connection: &Connection) -> Result<(), StoreError> {
+    connection.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS lines_fts USING fts5(
+             sender, body,
+             content = '',
+             contentless_delete = 1,
+             tokenize = 'unicode61 remove_diacritics 2'
+         );
+         CREATE TRIGGER IF NOT EXISTS lines_fts_delete AFTER DELETE ON lines
+         BEGIN
+             DELETE FROM lines_fts WHERE rowid = old.id;
+         END;",
+    )?;
+    Ok(())
+}
+
+/// Index every existing line, a page at a time so a large file is never held
+/// in memory at once.
+fn backfill_search_index(connection: &Connection) -> Result<(), StoreError> {
+    const PAGE: i64 = 5_000;
+    let mut after = 0_i64;
+    loop {
+        let page: Vec<(i64, String, String)> = connection
+            .prepare(
+                "SELECT id, sender, text FROM lines
+                 WHERE id > ?1 AND sender IS NOT NULL
+                 ORDER BY id LIMIT ?2",
+            )?
+            .query_map(params![after, PAGE], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        let Some(last) = page.last() else {
+            return Ok(());
+        };
+        after = last.0;
+        let mut insert = connection
+            .prepare_cached("INSERT INTO lines_fts (rowid, sender, body) VALUES (?1, ?2, ?3)")?;
+        for (id, sender, text) in &page {
+            insert.execute(params![id, sender, crate::text::format::strip(text)])?;
+        }
+    }
+}
+
+/// One stored line together with the id the store gave it.
+///
+/// The id is what everything that points *at* a message holds on to — a read
+/// position, a pin, the place a search result is — because a server id is
+/// only there when the server sent one, and a timestamp is not unique.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub id: i64,
+    pub line: StoredLine,
+}
+
+/// The columns [`row`] reads, in its order, each qualified by the table's
+/// alias `l` so a query that joins another table can use them as they are.
+const COLUMNS: &str = "l.id, l.profile_id, l.conversation, l.at_ms, l.sender,
+                       l.sender_prefix, l.text, l.is_self, l.is_mention,
+                       l.is_action, l.is_notice, l.kind, l.msgid,
+                       l.reply_msgid, l.reply_nick, l.reply_excerpt";
+
+fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Row> {
+    Ok(Row {
+        id: row.get(0)?,
+        line: StoredLine {
+            profile_id: row.get(1)?,
+            conversation: row.get(2)?,
+            at_ms: row.get(3)?,
+            sender: row.get(4)?,
+            sender_prefix: row.get(5)?,
+            text: row.get(6)?,
+            is_self: row.get(7)?,
+            is_mention: row.get(8)?,
+            is_action: row.get(9)?,
+            is_notice: row.get(10)?,
+            kind: row.get(11)?,
+            msgid: row.get(12)?,
+            reply_msgid: row.get(13)?,
+            reply_nick: row.get(14)?,
+            reply_excerpt: row.get(15)?,
+        },
+    })
+}
+
+/// Append a batch of lines, and say what each one became.
 ///
 /// A batch rather than one line at a time, and the reason is the FFI boundary
 /// rather than SQLite: a busy channel produces messages faster than it is worth
 /// crossing into Rust for, so the caller buffers and flushes. Everything in one
 /// transaction, so a failure halfway leaves the store exactly as it was.
 ///
+/// The result is one entry per line, in order: the id it was stored under, or
+/// `None` when it was already there — a line carrying a server id this
+/// conversation has already stored. That is a replay, not a second message,
+/// and keeping both is how a scrollback ends up saying everything twice.
+///
 /// Pruning happens here too, since this is the only thing that makes the file
 /// grow.
-pub fn append(lines: &[StoredLine]) -> Result<(), StoreError> {
+pub fn append(lines: &[StoredLine]) -> Result<Vec<Option<i64>>, StoreError> {
     if lines.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     with(|connection| {
         let transaction = connection.unchecked_transaction()?;
+        let mut ids = Vec::with_capacity(lines.len());
         {
             let mut insert = transaction.prepare_cached(
-                "INSERT INTO lines (
+                "INSERT OR IGNORE INTO lines (
                      profile_id, conversation, at_ms, sender, sender_prefix,
                      text, is_self, is_mention, is_action, is_notice, kind,
                      msgid, reply_msgid, reply_nick, reply_excerpt
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
                            ?12, ?13, ?14, ?15)",
             )?;
+            let mut index = transaction.prepare_cached(
+                "INSERT INTO lines_fts (rowid, sender, body) VALUES (?1, ?2, ?3)",
+            )?;
             for line in lines {
-                insert.execute(params![
+                let inserted = insert.execute(params![
                     line.profile_id,
                     line.conversation,
                     line.at_ms,
@@ -412,11 +663,20 @@ pub fn append(lines: &[StoredLine]) -> Result<(), StoreError> {
                     line.reply_nick,
                     line.reply_excerpt,
                 ])?;
+                if inserted == 0 {
+                    ids.push(None);
+                    continue;
+                }
+                let id = transaction.last_insert_rowid();
+                if let Some(sender) = &line.sender {
+                    index.execute(params![id, sender, crate::text::format::strip(&line.text)])?;
+                }
+                ids.push(Some(id));
             }
         }
         prune(&transaction)?;
         transaction.commit()?;
-        Ok(())
+        Ok(ids)
     })
 }
 
@@ -425,6 +685,9 @@ pub fn append(lines: &[StoredLine]) -> Result<(), StoreError> {
 /// By rowid rather than by timestamp: the id is the order things were written
 /// in, which is the order they should leave in, and it is immune to a server
 /// whose clock disagrees with ours.
+///
+/// Pins and saved messages are not lost with them: a [`Mark`] is a copy of the
+/// message, not a pointer into this table, precisely so that this can run.
 fn prune(connection: &Connection) -> Result<(), StoreError> {
     let highest: Option<i64> = connection
         .query_row("SELECT MAX(id) FROM lines", [], |row| row.get(0))
@@ -447,45 +710,162 @@ pub fn recent(
     conversation: &str,
     limit: u32,
 ) -> Result<Vec<StoredLine>, StoreError> {
-    with(|connection| {
-        let mut select = connection.prepare_cached(
-            "SELECT profile_id, conversation, at_ms, sender, sender_prefix,
-                    text, is_self, is_mention, is_action, is_notice, kind,
-                    msgid, reply_msgid, reply_nick, reply_excerpt
-             FROM lines
-             WHERE profile_id = ?1 AND conversation = ?2
-             ORDER BY at_ms DESC, id DESC
-             LIMIT ?3",
-        )?;
-        let rows = select.query_map(params![profile_id, conversation, limit], |row| {
-            Ok(StoredLine {
-                profile_id: row.get(0)?,
-                conversation: row.get(1)?,
-                at_ms: row.get(2)?,
-                sender: row.get(3)?,
-                sender_prefix: row.get(4)?,
-                text: row.get(5)?,
-                is_self: row.get(6)?,
-                is_mention: row.get(7)?,
-                is_action: row.get(8)?,
-                is_notice: row.get(9)?,
-                kind: row.get(10)?,
-                msgid: row.get(11)?,
-                reply_msgid: row.get(12)?,
-                reply_nick: row.get(13)?,
-                reply_excerpt: row.get(14)?,
-            })
-        })?;
+    Ok(tail(profile_id, conversation, limit)?
+        .into_iter()
+        .map(|r| r.line)
+        .collect())
+}
 
-        let mut lines = rows.collect::<Result<Vec<_>, _>>()?;
-        lines.reverse();
-        Ok(lines)
+/// [`recent`], with each line's id.
+pub fn tail(profile_id: &str, conversation: &str, limit: u32) -> Result<Vec<Row>, StoreError> {
+    before(profile_id, conversation, i64::MAX, i64::MAX, limit)
+}
+
+/// The `limit` lines just older than the line at (`at_ms`, `id`), oldest
+/// first — the page above what the scrollback already holds.
+///
+/// A *keyset*, not an offset: "older than this exact line" stays correct while
+/// new lines arrive, where "skip the first 200" would shift under them. Both
+/// halves of the key, because two lines can share a millisecond and the
+/// timestamp alone would either repeat one or skip one at the page boundary.
+pub fn before(
+    profile_id: &str,
+    conversation: &str,
+    at_ms: i64,
+    id: i64,
+    limit: u32,
+) -> Result<Vec<Row>, StoreError> {
+    read(|connection| {
+        let mut select = connection.prepare_cached(&format!(
+            "SELECT {COLUMNS} FROM lines l
+             WHERE l.profile_id = ?1 AND l.conversation = ?2
+               AND (l.at_ms, l.id) < (?3, ?4)
+             ORDER BY l.at_ms DESC, l.id DESC
+             LIMIT ?5"
+        ))?;
+        let mut rows = select
+            .query_map(params![profile_id, conversation, at_ms, id, limit], row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        rows.reverse();
+        Ok(rows)
     })
 }
 
-/// How many lines are held, for the settings screen to report.
+/// The lines either side of one, oldest first: `radius` before it, the line
+/// itself, and `radius` after.
+///
+/// For opening a conversation *at* something — a search result, a saved
+/// message — that has long since left the part of the scrollback in memory.
+pub fn around(
+    profile_id: &str,
+    conversation: &str,
+    at_ms: i64,
+    id: i64,
+    radius: u32,
+) -> Result<Vec<Row>, StoreError> {
+    let mut rows = before(profile_id, conversation, at_ms, id, radius)?;
+    read(|connection| {
+        let mut select = connection.prepare_cached(&format!(
+            "SELECT {COLUMNS} FROM lines l
+             WHERE l.profile_id = ?1 AND l.conversation = ?2
+               AND (l.at_ms, l.id) >= (?3, ?4)
+             ORDER BY l.at_ms, l.id
+             LIMIT ?5"
+        ))?;
+        rows.extend(
+            select
+                .query_map(
+                    params![profile_id, conversation, at_ms, id, radius + 1],
+                    row,
+                )?
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        Ok(rows)
+    })
+}
+
+/// Lines matching `query`, newest first.
+///
+/// Scoped to one network, or one conversation, or neither. `before_id` pages:
+/// pass the id of the last result to get the next page down.
+///
+/// What the user typed is never handed to FTS5 as query syntax — see
+/// [`match_expression`]. Typing `foo -bar` or `"` into a search box should
+/// find those characters, not raise a syntax error or exclude a word.
+pub fn search(
+    profile_id: Option<&str>,
+    conversation: Option<&str>,
+    query: &str,
+    limit: u32,
+    before_id: Option<i64>,
+) -> Result<Vec<Row>, StoreError> {
+    let Some(expression) = match_expression(query) else {
+        return Ok(Vec::new());
+    };
+    read(|connection| {
+        // Newest first by the index's own rowid order, which FTS5 can walk
+        // backwards and stop early on — no sort over every match.
+        let mut select = connection.prepare_cached(&format!(
+            "SELECT {COLUMNS} FROM lines_fts
+             JOIN lines l ON l.id = lines_fts.rowid
+             WHERE lines_fts MATCH ?1
+               AND lines_fts.rowid < ?2
+               AND (?3 IS NULL OR l.profile_id = ?3)
+               AND (?4 IS NULL OR l.conversation = ?4)
+             ORDER BY lines_fts.rowid DESC
+             LIMIT ?5"
+        ))?;
+        let rows = select
+            .query_map(
+                params![
+                    expression,
+                    before_id.unwrap_or(i64::MAX),
+                    profile_id,
+                    conversation,
+                    limit
+                ],
+                row,
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    })
+}
+
+/// What the user typed, as an FTS5 query that means what they typed.
+///
+/// Every word becomes a quoted string — so no character in it is syntax — and
+/// the last one is a prefix, so results appear while a word is still being
+/// typed. `None` for a query with no words at all.
+fn match_expression(query: &str) -> Option<String> {
+    let words: Vec<String> = query
+        .split_whitespace()
+        .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    Some(format!("{}*", words.join(" ")))
+}
+
+/// How many lines are held, exactly.
 pub fn count() -> Result<i64, StoreError> {
-    with(|connection| Ok(connection.query_row("SELECT COUNT(*) FROM lines", [], |r| r.get(0))?))
+    read(|connection| Ok(connection.query_row("SELECT COUNT(*) FROM lines", [], |r| r.get(0))?))
+}
+
+/// About how many lines are held, for the settings screen to report.
+///
+/// From the ends of the id range, which the primary key answers at once,
+/// rather than [`count`], which reads every row of a table that can hold two
+/// million. It runs high by however many lines were forgotten from the middle,
+/// and the screen says "about".
+pub fn approximate_count() -> Result<i64, StoreError> {
+    read(|connection| {
+        Ok(connection.query_row(
+            "SELECT COALESCE(MAX(id) - MIN(id) + 1, 0) FROM lines",
+            [],
+            |r| r.get(0),
+        )?)
+    })
 }
 
 /// Roughly how much disk the store is using.
@@ -494,14 +874,22 @@ pub fn count() -> Result<i64, StoreError> {
 /// caller has no reliable way to find the WAL and shared-memory files that go
 /// with it, and this is the number those add up to once they are checkpointed.
 pub fn size_bytes() -> Result<i64, StoreError> {
-    with(|connection| {
+    read(|connection| {
         let pages: i64 = connection.query_row("PRAGMA page_count", [], |r| r.get(0))?;
         let size: i64 = connection.query_row("PRAGMA page_size", [], |r| r.get(0))?;
         Ok(pages * size)
     })
 }
 
-/// Delete everything, and give the space back.
+/// Delete every message, everything kept about a conversation, every pin and
+/// saved message — and give the space back.
+///
+/// What the user wrote about *people*, and their own identities, stay: those
+/// are not messages, and the button says messages.
+///
+/// The search index is dropped and rebuilt empty rather than emptied through
+/// its trigger, which would visit every row one at a time to delete what is
+/// about to be deleted anyway.
 ///
 /// `VACUUM` is not optional here. Deleting rows leaves the pages in the file,
 /// which for this store would mean "delete my history" producing a file that is
@@ -509,7 +897,14 @@ pub fn size_bytes() -> Result<i64, StoreError> {
 /// free pages. That is not what the button says.
 pub fn clear() -> Result<(), StoreError> {
     with(|connection| {
-        connection.execute("DELETE FROM lines", [])?;
+        connection.execute_batch(
+            "DROP TRIGGER IF EXISTS lines_fts_delete;
+             DROP TABLE IF EXISTS lines_fts;
+             DELETE FROM lines;
+             DELETE FROM conversation_state;
+             DELETE FROM marks;",
+        )?;
+        create_search_index(connection)?;
         connection.execute_batch("VACUUM")?;
         Ok(())
     })
@@ -519,19 +914,268 @@ pub fn clear() -> Result<(), StoreError> {
 ///
 /// For the case the whole-store version is too blunt for: leaving a network
 /// but keeping everything else, or forgetting one conversation that should
-/// never have been written down.
+/// never have been written down. Its pins, saved messages and draft go with it
+/// — they are quotations from it.
+///
+/// No `VACUUM`: it rewrites the whole file while holding the writer, which
+/// can be seconds, for a few pages SQLite will reuse for the next messages
+/// anyway. [`clear`] is the button that promises the space back.
 pub fn forget(profile_id: &str, conversation: &str) -> Result<(), StoreError> {
     with(|connection| {
-        connection.execute(
-            "DELETE FROM lines WHERE profile_id = ?1 AND conversation = ?2",
-            params![profile_id, conversation],
-        )?;
-        connection.execute_batch("VACUUM")?;
+        let transaction = connection.unchecked_transaction()?;
+        for table in ["lines", "conversation_state", "marks"] {
+            transaction.execute(
+                &format!("DELETE FROM {table} WHERE profile_id = ?1 AND conversation = ?2"),
+                params![profile_id, conversation],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     })
 }
 
-/// What the user has written down about one person on one network.
+/// Delete everything kept for one saved network: its history, its
+/// conversations' state, its pins and saved messages, what the user wrote
+/// about people on it, and the nicks their identities wore there.
+///
+/// For when the network itself is deleted. Without this, deleting a network
+/// left every message from it in the file, unreachable from the app and still
+/// on disk — the one outcome a privacy-minded delete must not have.
+pub fn forget_profile(profile_id: &str) -> Result<(), StoreError> {
+    with(|connection| {
+        let transaction = connection.unchecked_transaction()?;
+        for table in ["lines", "conversation_state", "marks", "people"] {
+            transaction.execute(
+                &format!("DELETE FROM {table} WHERE profile_id = ?1"),
+                params![profile_id],
+            )?;
+        }
+        transaction.execute(
+            "DELETE FROM persona_nicks WHERE network_id = ?1",
+            params![profile_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    })
+}
+
+/// What the user keeps about one conversation, apart from its messages.
+///
+/// Every field is the user's own doing — something typed, a place read up to,
+/// a pin, an archive — and a row exists only while at least one is set; see
+/// [`set_conversation_state`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConversationState {
+    pub profile_id: String,
+    /// Already case-folded by the caller, as for [`StoredLine::conversation`].
+    pub conversation: String,
+    /// Text typed into the composer and not sent.
+    pub draft: Option<String>,
+    /// The server id of the message the draft replies to.
+    pub draft_reply_msgid: Option<String>,
+    /// The last line read: its [`Row::id`], and its time, which is what
+    /// placing the marker in a scrollback that may not reach back that far
+    /// needs.
+    pub read_line_id: Option<i64>,
+    pub read_at_ms: Option<i64>,
+    /// Where in the pinned group of the conversation list, lowest first;
+    /// `None` when not pinned.
+    pub pin_order: Option<i64>,
+    pub archived: bool,
+}
+
+impl ConversationState {
+    /// Whether there is anything here worth a row.
+    pub fn is_blank(&self) -> bool {
+        self.draft.is_none()
+            && self.draft_reply_msgid.is_none()
+            && self.read_line_id.is_none()
+            && self.read_at_ms.is_none()
+            && self.pin_order.is_none()
+            && !self.archived
+    }
+}
+
+/// Every conversation's state, on every network. Small — a row per
+/// conversation the user has touched — and wanted in memory whole.
+pub fn conversation_states() -> Result<Vec<ConversationState>, StoreError> {
+    read(|connection| {
+        let mut statement = connection.prepare(
+            "SELECT profile_id, conversation, draft, draft_reply_msgid,
+                    read_line_id, read_at_ms, pin_order, archived
+             FROM conversation_state",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(ConversationState {
+                profile_id: row.get(0)?,
+                conversation: row.get(1)?,
+                draft: row.get(2)?,
+                draft_reply_msgid: row.get(3)?,
+                read_line_id: row.get(4)?,
+                read_at_ms: row.get(5)?,
+                pin_order: row.get(6)?,
+                archived: row.get(7)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+/// Write one conversation's state, replacing what was there, or remove its
+/// row when nothing is left in it.
+pub fn set_conversation_state(state: &ConversationState) -> Result<(), StoreError> {
+    with(|connection| {
+        if state.is_blank() {
+            connection.execute(
+                "DELETE FROM conversation_state WHERE profile_id = ?1 AND conversation = ?2",
+                params![state.profile_id, state.conversation],
+            )?;
+            return Ok(());
+        }
+        connection.execute(
+            "INSERT INTO conversation_state (
+                 profile_id, conversation, draft, draft_reply_msgid,
+                 read_line_id, read_at_ms, pin_order, archived)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (profile_id, conversation) DO UPDATE SET
+                 draft = excluded.draft,
+                 draft_reply_msgid = excluded.draft_reply_msgid,
+                 read_line_id = excluded.read_line_id,
+                 read_at_ms = excluded.read_at_ms,
+                 pin_order = excluded.pin_order,
+                 archived = excluded.archived",
+            params![
+                state.profile_id,
+                state.conversation,
+                state.draft,
+                state.draft_reply_msgid,
+                state.read_line_id,
+                state.read_at_ms,
+                state.pin_order,
+                state.archived,
+            ],
+        )?;
+        Ok(())
+    })
+}
+
+/// What a [`Mark`] is: pinned to its conversation, for everyone looking at
+/// it on this device...
+pub const MARK_PINNED: i64 = 1;
+/// ...or saved, for the user's own list across every network.
+pub const MARK_SAVED: i64 = 2;
+
+/// A message the user pinned to its conversation, or saved for themselves.
+///
+/// A *copy* of the message — sender, time, text — and not only a pointer to
+/// it. The pointer ([`line_id`](Self::line_id), [`msgid`](Self::msgid)) is
+/// kept for jumping back to it, but the store prunes old lines, and a saved
+/// message that vanished because enough other things were said since would be
+/// a bookmark that does not keep its page.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Mark {
+    /// Zero for one not yet written; see [`add_mark`].
+    pub id: i64,
+    /// [`MARK_PINNED`] or [`MARK_SAVED`].
+    pub kind: i64,
+    pub profile_id: String,
+    pub conversation: String,
+    pub line_id: Option<i64>,
+    pub msgid: Option<String>,
+    pub at_ms: i64,
+    pub sender: Option<String>,
+    /// With its mIRC codes, like [`StoredLine::text`].
+    pub text: String,
+    pub created_ms: i64,
+}
+
+/// Marks of one kind, or every kind, optionally for one network or one
+/// conversation — oldest message first.
+pub fn marks(
+    kind: Option<i64>,
+    profile_id: Option<&str>,
+    conversation: Option<&str>,
+) -> Result<Vec<Mark>, StoreError> {
+    read(|connection| {
+        let mut statement = connection.prepare_cached(
+            "SELECT id, kind, profile_id, conversation, line_id, msgid, at_ms,
+                    sender, text, created_ms
+             FROM marks
+             WHERE (?1 IS NULL OR kind = ?1)
+               AND (?2 IS NULL OR profile_id = ?2)
+               AND (?3 IS NULL OR conversation = ?3)
+             ORDER BY at_ms, id",
+        )?;
+        let rows = statement.query_map(params![kind, profile_id, conversation], |row| {
+            Ok(Mark {
+                id: row.get(0)?,
+                kind: row.get(1)?,
+                profile_id: row.get(2)?,
+                conversation: row.get(3)?,
+                line_id: row.get(4)?,
+                msgid: row.get(5)?,
+                at_ms: row.get(6)?,
+                sender: row.get(7)?,
+                text: row.get(8)?,
+                created_ms: row.get(9)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
+/// Pin or save a message, and return the mark's id.
+///
+/// Doing it twice is not an error and does not make a second mark: the id of
+/// the one already there comes back.
+pub fn add_mark(mark: &Mark) -> Result<i64, StoreError> {
+    with(|connection| {
+        let inserted = connection.execute(
+            "INSERT OR IGNORE INTO marks (
+                 kind, profile_id, conversation, line_id, msgid, at_ms,
+                 sender, text, created_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                mark.kind,
+                mark.profile_id,
+                mark.conversation,
+                mark.line_id,
+                mark.msgid,
+                mark.at_ms,
+                mark.sender,
+                mark.text,
+                mark.created_ms,
+            ],
+        )?;
+        if inserted > 0 {
+            return Ok(connection.last_insert_rowid());
+        }
+        Ok(connection.query_row(
+            "SELECT id FROM marks
+             WHERE kind = ?1 AND profile_id = ?2 AND conversation = ?3
+               AND at_ms = ?4 AND sender IS ?5 AND text = ?6",
+            params![
+                mark.kind,
+                mark.profile_id,
+                mark.conversation,
+                mark.at_ms,
+                mark.sender,
+                mark.text
+            ],
+            |row| row.get(0),
+        )?)
+    })
+}
+
+/// Unpin or unsave.
+pub fn remove_mark(id: i64) -> Result<(), StoreError> {
+    with(|connection| {
+        connection.execute("DELETE FROM marks WHERE id = ?1", params![id])?;
+        Ok(())
+    })
+}
+
+// What the user has written down about one person on one network.
 ///
 /// The user's annotation, not the person's: nothing here came over the wire.
 /// `nick` is stored folded to lower case, because that is how IRC compares
@@ -1185,5 +1829,316 @@ mod tests {
         let left = persona_nicks().unwrap();
         assert_eq!(left.len(), 1, "only the nick on netB survives");
         assert_eq!(left[0].network_id, "netB");
+    }
+
+    fn tagged(conversation: &str, at_ms: i64, msgid: &str, text: &str) -> StoredLine {
+        StoredLine {
+            msgid: Some(msgid.to_owned()),
+            ..said(conversation, at_ms, "alice", text)
+        }
+    }
+
+    #[test]
+    fn a_replayed_line_is_stored_once() {
+        let _store = TempStore::new("dedupe");
+        let ids = append(&[tagged("#one", 1, "m1", "hello")]).unwrap();
+        assert!(ids[0].is_some());
+        // A bouncer replaying the same message, by the same id.
+        let again = append(&[
+            tagged("#one", 1, "m1", "hello"),
+            tagged("#one", 2, "m2", "new"),
+        ])
+        .unwrap();
+        assert_eq!(again[0], None, "the replay is not a second row");
+        assert!(again[1].is_some());
+        assert_eq!(count().unwrap(), 2);
+        // The same id in another conversation is another message.
+        assert!(append(&[tagged("#two", 1, "m1", "hello")]).unwrap()[0].is_some());
+    }
+
+    #[test]
+    fn search_finds_words_whatever_the_formatting() {
+        let _store = TempStore::new("search");
+        append(&[
+            said("#one", 1, "alice", "the \u{02}deploy\u{02} is done"),
+            said("#one", 2, "bob", "lunch?"),
+            said("#two", 3, "carol", "deploying now"),
+        ])
+        .unwrap();
+
+        let hits = search(Some("p1"), None, "deploy", 10, None).unwrap();
+        // Prefix match, newest first, and a bold word is still a word.
+        assert_eq!(
+            hits.iter()
+                .map(|r| r.line.sender.as_deref().unwrap())
+                .collect::<Vec<_>>(),
+            ["carol", "alice"],
+        );
+        assert_eq!(
+            search(None, Some("#two"), "deploy", 10, None)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(search(Some("p2"), None, "deploy", 10, None)
+            .unwrap()
+            .is_empty());
+        // Paging down from the first hit.
+        let next = search(Some("p1"), None, "deploy", 10, Some(hits[0].id)).unwrap();
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].line.sender.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn search_text_is_never_query_syntax() {
+        let _store = TempStore::new("search-syntax");
+        append(&[said("#one", 1, "alice", "a \"quoted\" -word OR not")]).unwrap();
+        for query in ["\"", "-word", "OR", "quoted\"", "NEAR(", "*", "   "] {
+            // Nothing here may be an error; most of it should still match.
+            search(None, None, query, 10, None).unwrap();
+        }
+        assert_eq!(search(None, None, "-word", 10, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn forgotten_lines_leave_the_search_index() {
+        let _store = TempStore::new("search-forget");
+        append(&[said("#one", 1, "alice", "secret plan")]).unwrap();
+        forget("p1", "#one").unwrap();
+        assert!(search(None, None, "secret", 10, None).unwrap().is_empty());
+        // And the index still takes new lines after a clear rebuilt it.
+        clear().unwrap();
+        append(&[said("#one", 2, "alice", "secret again")]).unwrap();
+        assert_eq!(search(None, None, "secret", 10, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn paging_back_neither_repeats_nor_skips_a_shared_millisecond() {
+        let _store = TempStore::new("paging");
+        // Ten lines, all in the same millisecond: only the id tells them apart.
+        let lines: Vec<_> = (0..10)
+            .map(|i| said("#one", 5, "alice", &format!("{i}")))
+            .collect();
+        append(&lines).unwrap();
+
+        let newest = tail("p1", "#one", 4).unwrap();
+        let older = before("p1", "#one", newest[0].line.at_ms, newest[0].id, 4).unwrap();
+        let oldest = before("p1", "#one", older[0].line.at_ms, older[0].id, 4).unwrap();
+        let all: Vec<_> = oldest
+            .iter()
+            .chain(&older)
+            .chain(&newest)
+            .map(|r| r.line.text.as_str())
+            .collect();
+        assert_eq!(all, ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    }
+
+    #[test]
+    fn around_opens_a_window_on_one_line() {
+        let _store = TempStore::new("around");
+        let lines: Vec<_> = (0..20)
+            .map(|i| said("#one", i, "alice", &format!("{i}")))
+            .collect();
+        let ids = append(&lines).unwrap();
+        let ten = ids[10].unwrap();
+
+        let window = around("p1", "#one", 10, ten, 2).unwrap();
+        assert_eq!(
+            window
+                .iter()
+                .map(|r| r.line.text.as_str())
+                .collect::<Vec<_>>(),
+            ["8", "9", "10", "11", "12"],
+        );
+    }
+
+    #[test]
+    fn conversation_state_is_kept_replaced_and_dropped_when_blank() {
+        let _store = TempStore::new("conversation-state");
+        let state = ConversationState {
+            profile_id: "p1".to_owned(),
+            conversation: "#one".to_owned(),
+            draft: Some("half a thought".to_owned()),
+            read_line_id: Some(7),
+            read_at_ms: Some(700),
+            pin_order: Some(0),
+            ..ConversationState::default()
+        };
+        set_conversation_state(&state).unwrap();
+        assert_eq!(conversation_states().unwrap(), vec![state.clone()]);
+
+        let archived = ConversationState {
+            draft: None,
+            archived: true,
+            ..state.clone()
+        };
+        set_conversation_state(&archived).unwrap();
+        assert_eq!(conversation_states().unwrap(), vec![archived]);
+
+        set_conversation_state(&ConversationState {
+            profile_id: "p1".to_owned(),
+            conversation: "#one".to_owned(),
+            ..ConversationState::default()
+        })
+        .unwrap();
+        assert!(conversation_states().unwrap().is_empty());
+    }
+
+    fn mark(kind: i64, text: &str) -> Mark {
+        Mark {
+            kind,
+            profile_id: "p1".to_owned(),
+            conversation: "#one".to_owned(),
+            at_ms: 1,
+            sender: Some("alice".to_owned()),
+            text: text.to_owned(),
+            created_ms: 2,
+            ..Mark::default()
+        }
+    }
+
+    #[test]
+    fn a_message_is_marked_once_and_unmarked() {
+        let _store = TempStore::new("marks");
+        let pinned = add_mark(&mark(MARK_PINNED, "the rules")).unwrap();
+        assert_eq!(add_mark(&mark(MARK_PINNED, "the rules")).unwrap(), pinned);
+        // Pinning and saving are separate marks on the same message.
+        let saved = add_mark(&mark(MARK_SAVED, "the rules")).unwrap();
+        assert_ne!(saved, pinned);
+
+        assert_eq!(marks(Some(MARK_PINNED), None, None).unwrap().len(), 1);
+        assert_eq!(marks(None, Some("p1"), Some("#one")).unwrap().len(), 2);
+
+        remove_mark(pinned).unwrap();
+        let left = marks(None, None, None).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].kind, MARK_SAVED);
+    }
+
+    #[test]
+    fn a_mark_outlives_the_line_it_copied() {
+        let _store = TempStore::new("marks-prune");
+        let id = append(&[said("#one", 1, "alice", "keep this")]).unwrap()[0];
+        add_mark(&Mark {
+            line_id: id,
+            ..mark(MARK_SAVED, "keep this")
+        })
+        .unwrap();
+        // What pruning does to the oldest lines.
+        with(|c| Ok(c.execute("DELETE FROM lines", [])?)).unwrap();
+        assert_eq!(marks(None, None, None).unwrap()[0].text, "keep this");
+    }
+
+    #[test]
+    fn forgetting_a_network_takes_everything_kept_for_it() {
+        let _store = TempStore::new("forget-profile");
+        let mut elsewhere = said("#one", 1, "mallory", "other network");
+        elsewhere.profile_id = "p2".to_owned();
+        append(&[said("#one", 1, "alice", "gone soon"), elsewhere]).unwrap();
+        add_mark(&mark(MARK_SAVED, "gone soon")).unwrap();
+        set_conversation_state(&ConversationState {
+            profile_id: "p1".to_owned(),
+            conversation: "#one".to_owned(),
+            archived: true,
+            ..ConversationState::default()
+        })
+        .unwrap();
+        set_person(&Person {
+            note: Some("x".to_owned()),
+            ..person("alice")
+        })
+        .unwrap();
+        set_persona_nick(&PersonaNick {
+            persona_id: "id1".to_owned(),
+            network_id: "p1".to_owned(),
+            nick: "x".to_owned(),
+        })
+        .unwrap();
+
+        forget_profile("p1").unwrap();
+        assert!(recent("p1", "#one", 10).unwrap().is_empty());
+        assert!(search(None, None, "gone", 10, None).unwrap().is_empty());
+        assert!(marks(None, None, None).unwrap().is_empty());
+        assert!(conversation_states().unwrap().is_empty());
+        assert!(people().unwrap().is_empty());
+        assert!(persona_nicks().unwrap().is_empty());
+        // The other network is untouched.
+        assert_eq!(recent("p2", "#one", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn clearing_takes_conversation_state_and_marks_but_not_people() {
+        let _store = TempStore::new("clear-all");
+        append(&[said("#one", 1, "alice", "x")]).unwrap();
+        add_mark(&mark(MARK_PINNED, "x")).unwrap();
+        set_conversation_state(&ConversationState {
+            profile_id: "p1".to_owned(),
+            conversation: "#one".to_owned(),
+            draft: Some("y".to_owned()),
+            ..ConversationState::default()
+        })
+        .unwrap();
+        set_person(&Person {
+            note: Some("x".to_owned()),
+            ..person("alice")
+        })
+        .unwrap();
+
+        clear().unwrap();
+        assert!(marks(None, None, None).unwrap().is_empty());
+        assert!(conversation_states().unwrap().is_empty());
+        assert_eq!(approximate_count().unwrap(), 0);
+        assert_eq!(
+            people().unwrap().len(),
+            1,
+            "notes about people are not messages"
+        );
+    }
+
+    #[test]
+    fn a_version_four_file_gains_an_index_of_what_it_already_held() {
+        let _guard = lock();
+        let directory = std::env::temp_dir().join("ddirc-store-v4");
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("history.db");
+
+        // A file as the previous release left it, with a replayed line in it.
+        {
+            let connection = Connection::open(&path).unwrap();
+            for step in [migrate_to_1, migrate_to_2, migrate_to_3, migrate_to_4] {
+                step(&connection).unwrap();
+            }
+            connection
+                .execute_batch(
+                    "INSERT INTO lines (profile_id, conversation, at_ms, sender, text,
+                         is_self, is_mention, is_action, is_notice, kind, msgid)
+                     VALUES ('p1', '#old', 1, 'alice', 'from \x02before\x02', 0, 0, 0, 0, 0, 'm1'),
+                            ('p1', '#old', 1, 'alice', 'from \x02before\x02', 0, 0, 0, 0, 0, 'm1'),
+                            ('p1', '#old', 2, NULL, 'alice joined', 0, 0, 0, 0, 1, NULL);
+                     PRAGMA user_version = 4",
+                )
+                .unwrap();
+        }
+
+        open(path.to_str().unwrap()).unwrap();
+        assert_eq!(
+            count().unwrap(),
+            2,
+            "the duplicate went, the system line stayed"
+        );
+        assert_eq!(search(None, None, "before", 10, None).unwrap().len(), 1);
+        assert!(
+            search(None, None, "joined", 10, None).unwrap().is_empty(),
+            "system lines are not indexed"
+        );
+        // And the replay is refused from now on.
+        assert_eq!(
+            append(&[tagged("#old", 1, "m1", "again")]).unwrap(),
+            vec![None]
+        );
+
+        close();
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

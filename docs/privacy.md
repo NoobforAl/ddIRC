@@ -181,7 +181,7 @@ there is no second representation of a message to keep in step.
 | | |
 |---|---|
 | **File** | `history.db`, beside the settings and the logs |
-| **Holds** | Messages and system lines, per network and per conversation |
+| **Holds** | Messages and system lines, per network and per conversation; a full-text index of what people said; unsent drafts, where you stopped reading, pinned and archived conversations, and copies of messages you pinned or saved |
 | **Does not hold** | Passwords, the connection log, anything about how the connection was made |
 | **Ceiling** | Two million lines, oldest dropped first, across every network |
 | **Encrypted** | No — anyone who can read the folder can read the conversations |
@@ -189,9 +189,13 @@ there is no second representation of a message to keep in step.
 The path and the current size are shown in App settings *before* the switch is
 turned on, and nothing is created until it is. Turning it off stops recording
 and leaves what was already recorded; **Delete saved messages** is the separate
-thing that destroys it, and it `VACUUM`s rather than only deleting rows — a
-delete that left every message sitting in the file's free pages would not be
-what the button says.
+thing that destroys it — messages, the search index, drafts, read positions,
+pins and saved messages, though not the names and notes you gave people — and
+it `VACUUM`s rather than only deleting rows: a delete that left every message
+sitting in the file's free pages would not be what the button says.
+
+Deleting a network deletes everything kept for it here too. It used to leave
+that network's history in the file, out of the app's reach and still on disk.
 
 It lives in Rust, in `ddirc-core::store`, rather than in a Dart sqlite package.
 A second persistence layer in a second language means two schemas to keep in

@@ -94,6 +94,11 @@ Future<void> sendAction({
 Future<void> setNick({required BigInt id, required String nick}) =>
     RustLib.instance.api.crateApiClientSetNick(id: id, nick: nick);
 
+/// Ask the server about one nick. The answer arrives on the event stream as
+/// `IrcEvent::Whois`, once the server has finished sending it.
+Future<void> whois({required BigInt id, required String nick}) =>
+    RustLib.instance.api.crateApiClientWhois(id: id, nick: nick);
+
 /// Set a channel topic. An empty string clears it.
 Future<void> setTopic({
   required BigInt id,
