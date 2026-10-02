@@ -903,7 +903,7 @@ class _SessionScreenState extends State<SessionScreen> {
                   ? Center(
                       key: const ValueKey('no-channel'),
                       child: Text(
-                        'Not in a channel yet.\nUse /join #channel below.',
+                        'No channel open',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: t.faint,
@@ -913,10 +913,10 @@ class _SessionScreenState extends State<SessionScreen> {
                       ),
                     )
                   : MessageView(
-                      // Rebuild the scroll state when switching conversations
-                      // — and once more if a "new messages" rule is placed
-                      // after it was built, which the view only reads then.
-                      key: ValueKey('${active.name}/${active.markerEpoch}'),
+                      // Rebuild the scroll state when switching conversations.
+                      // A "new messages" rule placed later is taken in place
+                      // — see MessageView's _takeMarker — never by a new key.
+                      key: ValueKey(active.name),
                       conversation: active,
                       profileId: session.profileId,
                       controller: _view,
@@ -1005,11 +1005,9 @@ class _SessionScreenState extends State<SessionScreen> {
               autocorrect: false,
               style: TextStyle(color: t.text, fontSize: 14),
               decoration: InputDecoration(
-                // The hint always explains the state, so a composer that
-                // cannot send never looks simply broken.
-                hintText: active == null
-                    ? 'Join a channel to talk — try /join #channel'
-                    : 'Message ${active.name}',
+                // Short: anyone on IRC knows /join, and the screen above
+                // already says nothing is open.
+                hintText: active == null ? 'Message' : 'Message ${active.name}',
                 hintStyle: TextStyle(color: t.faint, fontSize: 14),
                 isDense: true,
                 filled: true,

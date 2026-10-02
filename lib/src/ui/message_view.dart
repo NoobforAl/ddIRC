@@ -169,19 +169,40 @@ class _MessageViewState extends State<MessageView> {
   @override
   void initState() {
     super.initState();
-    _marker = widget.conversation.unreadMarker;
     _controller.addListener(_onScroll);
     widget.controller?._view = this;
+    _takeMarker();
+  }
+
+  /// Which placement of the "new messages" rule this view has taken.
+  /// See [Conversation.markerEpoch].
+  int _markerEpoch = 0;
+
+  /// Take the conversation's "new messages" rule, and decide afresh where to
+  /// open around it.
+  ///
+  /// Once when the view is built, and again if the session places a rule
+  /// after that — saved history arriving for the conversation already on
+  /// screen. Taken in place rather than by building a second view under a
+  /// new key: two views of one conversation, one fading out and one in,
+  /// carry the same per-message keys, and Flutter moves rows between them
+  /// mid-frame — which is what left a short unread tail pinned to the top
+  /// of an otherwise empty screen.
+  void _takeMarker() {
+    final conversation = widget.conversation;
+    _markerEpoch = conversation.markerEpoch;
+    _marker = conversation.unreadMarker;
+    _decided = false;
+    _split = false;
     final marker = _marker;
-    if (marker != null) {
-      final lines = widget.conversation.lines;
-      final from = lines.indexOf(marker);
-      if (from >= 0) {
-        _mentions.value = [
-          for (var i = from; i < lines.length; i++)
-            if (lines[i].isMention && !lines[i].isSelf) lines[i],
-        ];
-      }
+    if (marker == null) return;
+    final lines = conversation.lines;
+    final from = lines.indexOf(marker);
+    if (from >= 0) {
+      _mentions.value = [
+        for (var i = from; i < lines.length; i++)
+          if (lines[i].isMention && !lines[i].isSelf) lines[i],
+      ];
     }
   }
 
@@ -352,6 +373,7 @@ class _MessageViewState extends State<MessageView> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final settings = SettingsScope.of(context);
+    if (widget.conversation.markerEpoch != _markerEpoch) _takeMarker();
     final all = widget.conversation.lines;
     // Filtering before grouping, not during: a hidden join between two of
     // someone's messages should let them group, not split the run.
