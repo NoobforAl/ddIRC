@@ -163,6 +163,31 @@ A path that is set but missing is *not* quietly ignored: `validate` refuses it
 by name, because silently falling back to the platform roots looks exactly
 like the dev server being broken.
 
+**On an Android phone**, where an app cannot be given an environment
+variable, a debug build also looks for `dev-ca.pem` in its own files
+directory. Putting it there takes `run-as`, which only works on a debuggable
+build, and `adb reverse` makes the phone's `localhost:6697` the dev server on
+this machine — a name the certificate already carries:
+
+```bash
+adb push dev/ergo/fullchain.pem /data/local/tmp/dev-ca.pem
+adb shell run-as dev.ddirc.ddirc cp /data/local/tmp/dev-ca.pem files/dev-ca.pem
+adb reverse tcp:6697 tcp:6697
+```
+
+Then add a network with address `localhost`, port `6697`. Like
+`DDIRC_DEV_CA`, it adds a root and skips nothing, and it is compiled out of a
+release build. (In Git Bash on Windows, set `MSYS_NO_PATHCONV=1` first, or the
+phone paths are rewritten into Windows ones.)
+
+**A second client to talk to**, for anything that needs two people — a
+mention, WHOIS, a reply — is `ddirc-cli`, which takes the certificate as a
+flag:
+
+```bash
+cargo run --manifest-path irc-core/Cargo.toml -p ddirc-cli --   --server localhost --nick pc_tester --channel '#ddirc-test'   --ca-file dev/ergo/fullchain.pem
+```
+
 **3. Launch the app with `SSL_CERT_FILE` pointing at the certificate.** Works
 in a release build too. `rustls-native-certs` reads that variable in place of
 the platform's store, so the trust change lives and dies with the process —

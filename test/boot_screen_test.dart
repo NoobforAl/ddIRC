@@ -131,6 +131,32 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  testWidgets('its text has a style to inherit, not the underlined fallback', (
+    tester,
+  ) async {
+    // With no Material above it, every Text on the splash fell back to
+    // Flutter's missing-ancestor style — a yellow double underline under the
+    // app's own name, on the first screen anybody sees.
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    final gate = Completer<void>();
+    await _pumpBoot(tester, () => gate.future);
+    await tester.pump(_afterReveal);
+
+    for (final text in ['ddIRC', _starting]) {
+      final inherited = DefaultTextStyle.of(tester.element(find.text(text)));
+      expect(
+        inherited.style.decoration,
+        isNot(TextDecoration.underline),
+        reason: text,
+      );
+    }
+
+    gate.complete();
+    await tester.pump(_wellPast);
+    await tester.pumpAndSettle();
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('reports a failure instead of an empty window', (tester) async {
     await _pumpBoot(tester, () async => throw StateError('no such library'));
     await tester.pump(_wellPast);

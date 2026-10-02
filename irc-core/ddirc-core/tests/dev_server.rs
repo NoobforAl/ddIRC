@@ -277,6 +277,10 @@ async fn whois_answers_about_someone_online_and_someone_not() {
     let (subject, mut subject_rx) = connect("ddirc_seen").await;
     join(&subject, &mut subject_rx, CHANNEL).await;
     let (asker, mut asker_rx) = connect("ddirc_asks").await;
+    // Most servers make users invisible (+i) by default, which hides their
+    // channels from WHOIS except to someone sharing one with them — so the
+    // asker shares one, the way a profile sheet opened from a channel does.
+    join(&asker, &mut asker_rx, CHANNEL).await;
 
     asker
         .send(ClientCommand::Whois {

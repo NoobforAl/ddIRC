@@ -31,6 +31,7 @@ OPTIONS:
     --nick <NICK>          Nickname (required)
     --channel <CHANNEL>    Channel to join; repeatable
     --sasl-account <NAME>  SASL account name
+    --ca-file <PATH>       Also trust this certificate, e.g. dev/ergo/fullchain.pem
     --proxy <HOST:PORT>    Dial through a SOCKS5 proxy, e.g. 127.0.0.1:9050
     --proxy-user <NAME>    SOCKS5 username (needs DDIRC_PROXY_PASSWORD)
 
@@ -459,6 +460,9 @@ fn parse_args() -> Result<Option<ServerConfig>, String> {
             "--nick" => config.nickname = value()?,
             "--channel" => config.channels.push(value()?),
             "--sasl-account" => config.sasl_account = Some(value()?),
+            // Adds a trusted root for this connection; verification stays on.
+            // For the dev server's self-signed certificate — see dev/README.md.
+            "--ca-file" => config.extra_root_cert = Some(value()?),
             "--proxy" => config.proxy = Some(parse_proxy(&value()?)?),
             "--proxy-user" => proxy_user = Some(value()?),
             other => return Err(format!("unrecognised argument: {other}")),

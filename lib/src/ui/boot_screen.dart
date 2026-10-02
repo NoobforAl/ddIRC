@@ -131,16 +131,23 @@ class _BootScreenState extends State<BootScreen> {
       child = _Splash(key: const ValueKey('splash'), visible: _visible);
     }
 
-    return AnimatedSwitcher(
-      duration: context.motion.normal,
-      switchInCurve: Motion.curve,
-      switchOutCurve: Motion.exit,
-      // The default centres its children under loose constraints, which is
-      // fine for a logo and wrong for the app: everything here should fill the
-      // window, including the outgoing splash while it fades.
-      layoutBuilder: (current, previous) =>
-          Stack(fit: StackFit.expand, children: [...previous, ?current]),
-      child: child,
+    // Transparent Material so the splash and the failure screen have a text
+    // style to inherit. Without one, every Text here falls back to Flutter's
+    // missing-ancestor style: the yellow double underline under the app's own
+    // name on the first thing anybody sees.
+    return Material(
+      type: MaterialType.transparency,
+      child: AnimatedSwitcher(
+        duration: context.motion.normal,
+        switchInCurve: Motion.curve,
+        switchOutCurve: Motion.exit,
+        // The default centres its children under loose constraints, which is
+        // fine for a logo and wrong for the app: everything here should fill the
+        // window, including the outgoing splash while it fades.
+        layoutBuilder: (current, previous) =>
+            Stack(fit: StackFit.expand, children: [...previous, ?current]),
+        child: child,
+      ),
     );
   }
 }

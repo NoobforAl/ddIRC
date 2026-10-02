@@ -160,6 +160,22 @@ class Conversation {
   /// so a second attempt cannot show yesterday twice.
   bool restored = false;
 
+  /// Whether where reading stopped last time has been taken into account yet.
+  ///
+  /// False from the moment saved history is asked for until it has been put
+  /// back and counted. Until then nothing may record a new read position:
+  /// the first conversation of a connection is opened the moment it is
+  /// joined — before the disk has answered — and recording "read up to now"
+  /// at that point overwrote the very position the restore was about to
+  /// count from, so the conversation you land in never showed what you had
+  /// missed.
+  bool readSettled = true;
+
+  /// Bumped when a "new messages" rule is placed after the scrollback is
+  /// already on screen, so the view — which reads the rule once, when it is
+  /// built — is built again and shows it.
+  int markerEpoch = 0;
+
   /// Put older lines in front of whatever is already here.
   ///
   /// Only ever called with lines that predate everything in [lines]: the load
@@ -664,6 +680,7 @@ class SessionModel extends ChangeNotifier {
   void _restoreHistory(Conversation conversation) {
     if (conversation.restored || !MessageHistory.instance.enabled) return;
     conversation.restored = true;
+    conversation.readSettled = false;
     unawaited(
       MessageHistory.instance
           .load(
@@ -672,12 +689,22 @@ class SessionModel extends ChangeNotifier {
             isChannel: conversation.isChannel,
           )
           .then((older) {
-            if (_disposed || older.isEmpty) return;
-            conversation.restore(older);
-            _countRestoredUnread(conversation, older);
+            if (_disposed) return;
+            if (older.isNotEmpty) {
+              conversation.restore(older);
+              _countRestoredUnread(conversation, older);
+            }
+            _settleRead(conversation);
             _queueNotify();
           }),
     );
+  }
+
+  /// The restore has been counted: reading may be recorded again, and if the
+  /// conversation is the one on screen, it has now been read.
+  void _settleRead(Conversation conversation) {
+    conversation.readSettled = true;
+    if (_key(conversation.name) == _active) _rememberRead(conversation);
   }
 
   /// Count what arrived after the read position last time, now that it has
@@ -688,8 +715,12 @@ class SessionModel extends ChangeNotifier {
   /// not come back reporting its whole history as news. With that, closing
   /// the app no longer forgets what had not been read: the badge and the
   /// "new messages" rule come back where they were.
+  ///
+  /// The conversation on screen gets the rule and not the counts: it is being
+  /// read, so nothing in it is waiting, but where the unread part begins is
+  /// still worth drawing.
   void _countRestoredUnread(Conversation conversation, List<ChatLine> older) {
-    if (_key(conversation.name) == _active) return;
+    final active = _key(conversation.name) == _active;
     final states = ConversationStates.instance;
     final notify = settings.notifyFor(profileId, conversation.name);
     ChatLine? first;
@@ -697,6 +728,7 @@ class SessionModel extends ChangeNotifier {
       if (line.isSystem || line.isSelf) continue;
       if (!states.isAfterRead(profileId, conversation.name, line)) continue;
       first ??= line;
+      if (active) break;
       switch (notify) {
         case NotifyLevel.none:
           continue;
@@ -709,7 +741,10 @@ class SessionModel extends ChangeNotifier {
       if (line.isMention) conversation.unreadMentions++;
     }
     // Earlier than anything live, which arrived after these.
-    if (first != null) conversation.unreadMarker = first;
+    if (first != null) {
+      conversation.unreadMarker = first;
+      if (active) conversation.markerEpoch++;
+    }
   }
 
   /// What [_restoreHistory] does once the store has answered, for a test
@@ -718,7 +753,14 @@ class SessionModel extends ChangeNotifier {
   void restoreForTesting(Conversation conversation, List<ChatLine> older) {
     conversation.restore(older);
     _countRestoredUnread(conversation, older);
+    _settleRead(conversation);
   }
+
+  /// Mark [conversation] as waiting on its restore, as [_restoreHistory] does
+  /// when the store is open, for a test with no store.
+  @visibleForTesting
+  void pendRestoreForTesting(Conversation conversation) =>
+      conversation.readSettled = false;
 
   /// Load the page of history above the top of [conversation].
   ///
@@ -913,6 +955,7 @@ class SessionModel extends ChangeNotifier {
   /// Note that [conversation] has been read to its end, so the next launch
   /// knows where the unread part begins.
   void _rememberRead(Conversation conversation) {
+    if (!conversation.readSettled) return;
     final lines = conversation.lines;
     ConversationStates.instance.markRead(
       profileId,
@@ -964,7 +1007,9 @@ class SessionModel extends ChangeNotifier {
     _log(name, line);
     _save(name, line);
     if (isActive) {
-      ConversationStates.instance.markRead(profileId, name, line);
+      if (conversation.readSettled) {
+        ConversationStates.instance.markRead(profileId, name, line);
+      }
     } else if (line.isMention &&
         ConversationStates.instance.isArchived(profileId, name)) {
       // Put away is not the same as unreachable: somebody asking for you by

@@ -86,15 +86,38 @@ fn with_connection<T>(
 /// missing is left in place so `validate` refuses it by name, because a typo
 /// that silently reverted to the platform roots would look exactly like the
 /// dev server being broken.
+///
+/// Android has no way to hand an app an environment variable, so a debug
+/// build there also looks for `dev-ca.pem` in the app's own files directory —
+/// put there on purpose, with `adb` and `run-as`, which only works on a
+/// debuggable build in the first place. See `dev/README.md`.
 #[cfg(debug_assertions)]
 fn dev_root_cert() -> Option<String> {
     let path = std::env::var("DDIRC_DEV_CA")
         .ok()
-        .filter(|p| !p.is_empty())?;
+        .filter(|p| !p.is_empty())
+        .or_else(android_dev_ca)?;
     // On stderr rather than swallowed: weakened trust, however narrowly,
     // should never be something you have to go looking for.
     eprintln!("ddIRC [debug]: trusting extra root certificate from {path}");
     Some(path)
+}
+
+/// `files/dev-ca.pem` under this app's private data directory, when it is
+/// there. The package name comes from the process's own command line, which
+/// on Android is the package; nothing here is configurable from outside.
+#[cfg(all(debug_assertions, target_os = "android"))]
+fn android_dev_ca() -> Option<String> {
+    let cmdline = std::fs::read("/proc/self/cmdline").ok()?;
+    let package = cmdline.split(|b| *b == 0).next()?;
+    let package = std::str::from_utf8(package).ok()?.split(':').next()?;
+    let path = format!("/data/user/0/{package}/files/dev-ca.pem");
+    std::path::Path::new(&path).is_file().then_some(path)
+}
+
+#[cfg(all(debug_assertions, not(target_os = "android")))]
+fn android_dev_ca() -> Option<String> {
+    None
 }
 
 /// Open a connection and return its id.

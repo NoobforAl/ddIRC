@@ -155,6 +155,26 @@ class _SessionScreenState extends State<SessionScreen> {
     _dismissed = false;
     _highlighted = 0;
     _redrawSuggestions();
+    // Kept as it is typed, not only when the conversation changes: Android
+    // can end the process without warning, and a draft that only survived a
+    // deliberate switch was a draft that lived on luck. The write waits out a
+    // short pause, and nothing on screen is redrawn for it — the list shows
+    // drafts only for conversations that are not open.
+    final name = _draftFor;
+    if (name != null) {
+      final replying = _replying;
+      ConversationStates.instance.setDraft(
+        session.profileId,
+        name,
+        _composer.text,
+        // Only a reply begun here: mid-switch, the composer is refilled
+        // before the previous conversation's reply has been put away.
+        replyMsgid: replying != null && replying.conversation == name
+            ? replying.line.message?.msgid
+            : null,
+        notify: false,
+      );
+    }
   }
 
   /// Redraw the suggestion strip, and only it.
@@ -893,8 +913,10 @@ class _SessionScreenState extends State<SessionScreen> {
                       ),
                     )
                   : MessageView(
-                      // Rebuild the scroll state when switching conversations.
-                      key: ValueKey(active.name),
+                      // Rebuild the scroll state when switching conversations
+                      // — and once more if a "new messages" rule is placed
+                      // after it was built, which the view only reads then.
+                      key: ValueKey('${active.name}/${active.markerEpoch}'),
                       conversation: active,
                       profileId: session.profileId,
                       controller: _view,
@@ -1493,6 +1515,7 @@ class _SearchBar extends StatelessWidget {
         onChanged: onChanged,
         autocorrect: false,
         style: TextStyle(color: t.text, fontSize: 13.5),
+        textAlignVertical: TextAlignVertical.center,
         decoration: InputDecoration(
           hintText: 'Search this conversation',
           hintStyle: TextStyle(color: t.faint, fontSize: 13.5),

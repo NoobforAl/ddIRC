@@ -140,6 +140,49 @@ void main() {
     });
   });
 
+  test('the conversation you land in still shows what you missed', () async {
+    // Connecting opens the first channel before the disk has answered. That
+    // used to record "read up to now" first, so the restore that followed
+    // found nothing unread — in exactly the conversation on screen.
+    final s = await _session();
+    ConversationStates.instance.markRead(
+      'p1',
+      '#chat',
+      _said('a', 'x', DateTime(2026, 1, 1, 9)),
+    );
+    _joined(s, '#here');
+    _joined(s, '#chat');
+    final chat = _named(s, '#chat');
+    // What creating it does when history is on: the restore is on its way.
+    s.pendRestoreForTesting(chat);
+    s.select('#chat');
+    expect(
+      ConversationStates.instance.of('p1', '#chat')?.readAtMs,
+      DateTime(2026, 1, 1, 9).millisecondsSinceEpoch,
+      reason: 'not overwritten while the restore is on its way',
+    );
+
+    final missed = _said('b', 'while you were away', DateTime(2026, 1, 1, 10));
+    final epoch = chat.markerEpoch;
+    s.restoreForTesting(chat, [
+      _said('a', 'seen', DateTime(2026, 1, 1, 8)),
+      missed,
+    ]);
+
+    expect(chat.unreadMarker, same(missed), reason: 'the rule is drawn');
+    expect(
+      chat.markerEpoch,
+      greaterThan(epoch),
+      reason: 'and the view rebuilt',
+    );
+    expect(chat.unread, 0, reason: 'it is on screen, so it is being read');
+    expect(
+      ConversationStates.instance.of('p1', '#chat')!.readAtMs,
+      greaterThanOrEqualTo(missed.at.millisecondsSinceEpoch),
+      reason: 'and once counted, reading is recorded again',
+    );
+  });
+
   test('reading a conversation records where reading stopped', () async {
     final s = await _session();
     _joined(s, '#chat');
@@ -209,6 +252,8 @@ void main() {
 
     final composer = find.byType(TextField).last;
     await tester.enterText(composer, 'half a thought');
+    // Kept as it is typed, before any switch: the process can end at any time.
+    expect(ConversationStates.instance.draftOf('p1', '#one'), 'half a thought');
     s.select('#two');
     await tester.pumpAndSettle();
     expect(
