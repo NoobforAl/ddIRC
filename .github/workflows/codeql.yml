@@ -1,0 +1,60 @@
+# Static analysis with CodeQL, for the two languages it can say something about.
+#
+# - rust: the core, which is where the network parsing, the TLS and the
+#   credential handling live. `build-mode: none` reads the source directly, so
+#   this needs no toolchain and no cross-compile — unlike build.yml.
+# - actions: these workflow files themselves. release.yml holds the signing
+#   secrets and a write token, and CodeQL's Actions queries are what catch an
+#   untrusted `${{ }}` expanded into a shell or a permission wider than needed.
+#
+# Left out on purpose:
+#
+# - Dart, which CodeQL does not support at all. `make lint` (dart analyze) is
+#   what covers lib/.
+# - Kotlin and the C++ runner. Both would need a real Gradle and MSVC build
+#   for CodeQL to trace — the slow half of build.yml all over again — to
+#   analyse a few hundred lines that are mostly platform glue.
+#
+# Findings land in the repository's Security tab, not as a red tick: a new
+# alert on a pull request shows up there and as a review annotation.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly as well, because the queries change even when the code does not.
+  schedule:
+    - cron: "0 5 * * 1"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, actions]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          # The default suite plus the security-extended queries: more
+          # findings, still almost all of them worth reading.
+          queries: security-extended
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
