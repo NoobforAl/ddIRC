@@ -130,7 +130,7 @@ class _BootstrapBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(2),
+        borderRadius: BorderRadius.circular(Tokens.pill),
         child: LinearProgressIndicator(
           value: value.clamp(0.0, 1.0),
           minHeight: 3,

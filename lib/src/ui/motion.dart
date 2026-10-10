@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+import 'layout.dart';
+
 /// Motion tokens, and the few widgets that need more than a duration.
 ///
 /// Three durations and two curves, narrow for the same reason the palette
@@ -397,3 +400,105 @@ class _Arc extends CustomPainter {
   @override
   bool shouldRepaint(_Arc old) => old.color != color || old.stroke != stroke;
 }
+
+/// [showDialog], arriving the way everything else in the app arrives.
+///
+/// Material's own dialog transition is a bare fade on its own curve and its own
+/// timing — the one transition in the app that did not draw from [Motion]. This
+/// is the same route with that one thing replaced: a dialog settles into place
+/// from slightly smaller on a wide screen, and rises a few pixels on a phone,
+/// where the settings shell is a full-screen page and growing it from the
+/// middle would read as a zoom rather than a sheet arriving.
+///
+/// Takes only what the app's callers pass. Safe area and captured themes are
+/// exactly what [showDialog] would have given them; the barrier is lighter.
+Future<T?> showSoftDialog<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) {
+  final navigator = Navigator.of(context);
+  return navigator.push<T>(
+    _SoftDialogRoute<T>(
+      context: context,
+      builder: builder,
+      barrierDismissible: barrierDismissible,
+      // Dimmer than Material's 54% black, which turns everything behind a
+      // dialog into a hole. Enough to say "not now" about what is beneath,
+      // and no more — and lighter still on a light ground, where the same
+      // black reads twice as heavy.
+      barrierColor: Colors.black.withValues(
+        alpha: context.tokens.brightness == Brightness.dark ? 0.42 : 0.24,
+      ),
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      themes: InheritedTheme.capture(from: context, to: navigator.context),
+      duration: context.motion.slow,
+      rises: context.layout.isCompact,
+    ),
+  );
+}
+
+class _SoftDialogRoute<T> extends DialogRoute<T> {
+  _SoftDialogRoute({
+    required super.context,
+    required super.builder,
+    required super.barrierDismissible,
+    required super.barrierColor,
+    required super.barrierLabel,
+    required super.themes,
+    required this.duration,
+    required this.rises,
+  });
+
+  final Duration duration;
+
+  /// Rise from below rather than grow from the middle. See [showSoftDialog].
+  final bool rises;
+
+  @override
+  Duration get transitionDuration => duration;
+
+  /// Shorter on the way out: something dismissed should be gone by the time
+  /// the eye is back on what was beneath it.
+  @override
+  Duration get reverseTransitionDuration => duration * 0.7;
+
+  @override
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Motion.curve,
+      reverseCurve: Motion.exit,
+    );
+    return FadeTransition(
+      opacity: curved,
+      child: rises
+          ? SlideTransition(
+              position: Tween(
+                begin: const Offset(0, 0.035),
+                end: Offset.zero,
+              ).animate(curved),
+              child: child,
+            )
+          : ScaleTransition(
+              // Not from far. A dialog is answering the click that opened it,
+              // and a long zoom is a delay before the answer.
+              scale: Tween(begin: 0.95, end: 1.0).animate(curved),
+              child: child,
+            ),
+    );
+  }
+}
+
+/// Pulls a dragged thing back to rest along a spring rather than jumping.
+///
+/// For the swipe-to-reply bubble: let go short of the threshold, or past it,
+/// and the bubble has to go home either way. Snapping is what made the gesture
+/// feel like a switch; a spring with a little give is what makes it feel like
+/// something held.
+const snapBack = SpringDescription(mass: 1, stiffness: 520, damping: 30);

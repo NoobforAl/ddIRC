@@ -97,7 +97,7 @@ class AppSettingsDialog extends StatefulWidget {
   const AppSettingsDialog({super.key});
 
   static Future<void> show(BuildContext context) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => const AppSettingsDialog(),
     );

@@ -131,13 +131,23 @@ class Tokens extends ThemeExtension<Tokens> {
   /// keeps working inside `const` widget expressions.
   static const hairline = 0.5;
 
-  /// The corner scale. Small things (chips, badges), controls (fields,
-  /// buttons), message bubbles, and pills — in that order, and nothing in
-  /// between, so shapes read as one family.
-  static const radiusS = 8.0;
-  static const radiusM = 12.0;
-  static const radiusL = 16.0;
-  static const radiusXL = 22.0;
+  /// The corner scale. Inner corners and checkboxes, small things (chips,
+  /// badges), controls (fields, buttons), message bubbles, and sheets — in
+  /// that order, and nothing in between, so shapes read as one family.
+  ///
+  /// Each a step rounder than it first was: the same scale, softened, with
+  /// [radiusXS] added below it for the corners that used to be one-off
+  /// numbers because nothing on the scale was small enough.
+  static const radiusXS = 6.0;
+  static const radiusS = 10.0;
+  static const radiusM = 14.0;
+  static const radiusL = 18.0;
+  static const radiusXL = 24.0;
+
+  /// Fully round ends, whatever the height: a badge, a tag, a progress track,
+  /// a round button. Better than a radius worked out from a height, which
+  /// stops being round the moment the height changes.
+  static const pill = 999.0;
 
   final Brightness brightness;
 

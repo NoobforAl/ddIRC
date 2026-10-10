@@ -7,6 +7,7 @@ import '../model/settings.dart';
 import '../rust/api/store.dart' as store;
 import '../theme.dart';
 import 'settings/settings_chrome.dart';
+import 'motion.dart';
 
 /// Every message the user saved, on every network, most recently saved first.
 ///
@@ -34,7 +35,7 @@ class SavedMessagesDialog extends StatelessWidget {
     required String profileId,
     required ValueChanged<store.Mark> onOpen,
   }) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => SavedMessagesDialog(profileId: profileId, onOpen: onOpen),
     );

@@ -11,6 +11,7 @@ import '../model/workspace.dart';
 import '../theme.dart';
 import 'menu.dart';
 import 'settings/settings_chrome.dart';
+import 'motion.dart';
 
 /// What the context menu on a network offers.
 enum NetworkMenuAction { edit, delete }
@@ -92,7 +93,7 @@ class ForgetNetworkDialog extends StatelessWidget {
 
   /// Returns true if the user went through with it.
   static Future<bool> show(BuildContext context, Profile profile) async {
-    final answer = await showDialog<bool>(
+    final answer = await showSoftDialog<bool>(
       context: context,
       builder: (_) => ForgetNetworkDialog(profile: profile),
     );

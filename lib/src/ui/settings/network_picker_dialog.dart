@@ -33,7 +33,7 @@ class NetworkPickerDialog extends StatefulWidget {
   const NetworkPickerDialog({super.key});
 
   static Future<NetworkPick?> show(BuildContext context) {
-    return showDialog<NetworkPick>(
+    return showSoftDialog<NetworkPick>(
       context: context,
       builder: (_) => const NetworkPickerDialog(),
     );
@@ -345,7 +345,7 @@ class _ChannelRow extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: selected ? t.accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(Tokens.radiusXS),
                 border: Border.all(
                   color: selected ? t.accent : t.rule,
                   width: selected ? 1 : Tokens.hairline,
@@ -436,9 +436,9 @@ class _Tag extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = context.tokens;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(Tokens.pill),
         border: Border.all(color: t.rule, width: Tokens.hairline),
       ),
       child: Text(

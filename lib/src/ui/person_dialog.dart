@@ -8,6 +8,7 @@ import 'avatar.dart';
 import 'nick_color.dart';
 import 'settings/settings_chrome.dart';
 import 'touchable.dart';
+import 'motion.dart';
 
 /// What the user wants to remember about one person: a name for them, a
 /// note, a colour, a picture. Opened from the member list and from a name
@@ -28,7 +29,7 @@ class PersonDialog extends StatefulWidget {
     required String profileId,
     required String nick,
   }) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => PersonDialog(profileId: profileId, nick: nick),
     );

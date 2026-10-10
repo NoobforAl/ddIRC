@@ -170,14 +170,14 @@ class _CloseButton extends StatelessWidget {
     return Center(
       child: Touchable(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(Tokens.pill),
         builder: (context, touch) => AnimatedContainer(
           duration: context.motion.fast,
           curve: Motion.curve,
           padding: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             color: t.rule.withValues(alpha: touch.wash),
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(Tokens.pill),
           ),
           child: Icon(
             Icons.close,

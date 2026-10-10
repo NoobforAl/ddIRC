@@ -48,7 +48,7 @@ class ProfileEditorDialog extends StatefulWidget {
     Profile? profile,
     NetworkPick? preset,
   }) {
-    return showDialog<ProfileEditorResult>(
+    return showSoftDialog<ProfileEditorResult>(
       context: context,
       builder: (_) => ProfileEditorDialog(profile: profile, preset: preset),
     );

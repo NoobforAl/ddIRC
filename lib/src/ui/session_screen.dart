@@ -1089,7 +1089,7 @@ class _ReplyStrip extends StatelessWidget {
             height: 32,
             decoration: BoxDecoration(
               color: t.accent,
-              borderRadius: BorderRadius.circular(2),
+              borderRadius: BorderRadius.circular(Tokens.pill),
             ),
           ),
           const SizedBox(width: 8),
@@ -1678,7 +1678,7 @@ class _PinnedBar extends StatelessWidget {
               height: 30,
               decoration: BoxDecoration(
                 color: t.accent,
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(Tokens.pill),
               ),
             ),
             const SizedBox(width: 10),
@@ -1729,7 +1729,7 @@ Future<void> _showPinnedList(
   ValueChanged<store.Mark> onOpen,
 ) {
   final first = pins.first;
-  return showDialog<void>(
+  return showSoftDialog<void>(
     context: context,
     builder: (_) => ListenableBuilder(
       listenable: Marks.instance,

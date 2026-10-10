@@ -41,7 +41,7 @@ class ImportConfigDialog extends StatefulWidget {
     BuildContext context,
     List<ImportedNetwork> networks,
   ) async {
-    final imported = await showDialog<int>(
+    final imported = await showSoftDialog<int>(
       context: context,
       builder: (_) => ImportConfigDialog(networks: networks),
     );
@@ -436,7 +436,7 @@ class _Check extends StatelessWidget {
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: selected ? t.accent : Colors.transparent,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(Tokens.radiusXS),
         border: Border.all(
           color: selected ? t.accent : t.rule,
           width: selected ? 1 : Tokens.hairline,

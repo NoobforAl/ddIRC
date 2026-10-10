@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/physics.dart' show SpringSimulation;
 import 'package:flutter/gestures.dart'
     show PointerDeviceKind, TapGestureRecognizer;
 import 'package:flutter/material.dart';
@@ -1010,7 +1011,7 @@ class _JumpToLatest extends StatelessWidget {
         children: [
           Touchable(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(21),
+            borderRadius: BorderRadius.circular(Tokens.pill),
             builder: (context, touch) => AnimatedContainer(
               duration: context.motion.fast,
               curve: Motion.curve,
@@ -1063,7 +1064,7 @@ class _JumpToMention extends StatelessWidget {
         children: [
           Touchable(
             onTap: onTap,
-            borderRadius: BorderRadius.circular(21),
+            borderRadius: BorderRadius.circular(Tokens.pill),
             builder: (context, touch) => AnimatedContainer(
               duration: context.motion.fast,
               curve: Motion.curve,
@@ -1264,9 +1265,39 @@ class _Bubble extends StatefulWidget {
   State<_Bubble> createState() => _BubbleState();
 }
 
-class _BubbleState extends State<_Bubble> {
+class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
   /// How far the bubble has been dragged towards a reply.
   double _drag = 0;
+
+  /// Carries the bubble home after a swipe, along [snapBack].
+  ///
+  /// Made on the first release and never before, for the reason [Arrive]
+  /// gives: a scrollback is thousands of bubbles, and almost none of them are
+  /// ever swiped.
+  AnimationController? _spring;
+
+  /// Let go: home along a spring, keeping the finger's speed.
+  ///
+  /// Unbounded, so the spring can carry the bubble a few pixels past rest and
+  /// settle back, which is the give that makes it feel soft.
+  void _release(double velocity) {
+    if (_drag == 0) return;
+    if (context.motion.disabled) {
+      setState(() => _drag = 0);
+      return;
+    }
+    final spring = _spring ??= AnimationController.unbounded(vsync: this)
+      ..addListener(() => setState(() => _drag = _spring!.value));
+    spring
+      ..value = _drag
+      ..animateWith(SpringSimulation(snapBack, _drag, 0, velocity));
+  }
+
+  @override
+  void dispose() {
+    _spring?.dispose();
+    super.dispose();
+  }
 
   /// Which line a swipe or the hover button is about.
   int _target = 0;
@@ -1471,7 +1502,7 @@ class _BubbleState extends State<_Bubble> {
     // Big corners outside, tucked-in corners where one bubble of a run meets
     // the next, and a small one at the foot of the run on the sender's side.
     const big = Radius.circular(Tokens.radiusL);
-    const tucked = Radius.circular(6);
+    const tucked = Radius.circular(Tokens.radiusXS);
     const tail = Radius.circular(4);
     final near = (
       top: widget.startsRun ? big : tucked,
@@ -1558,21 +1589,29 @@ class _BubbleState extends State<_Bubble> {
     if (widget.onReply != null) {
       bubble = GestureDetector(
         supportedDevices: _Bubble._swipeDevices,
-        onHorizontalDragStart: (d) => _target = _lineAt(d.globalPosition),
+        onHorizontalDragStart: (d) {
+          // Caught mid-spring: carry on from wherever it had got to.
+          _spring?.stop();
+          _target = _lineAt(d.globalPosition);
+        },
         onHorizontalDragUpdate: (d) {
-          final delta = mine ? -d.delta.dx : d.delta.dx;
+          var delta = mine ? -d.delta.dx : d.delta.dx;
           final before = _drag;
+          // Past the point of replying the bubble pulls back against the
+          // finger, so the threshold is felt rather than only heard.
+          if (_drag >= _Bubble._swipeToReply && delta > 0) delta *= 0.4;
           setState(() => _drag = (_drag + delta).clamp(0, _Bubble._swipeMax));
           if (before < _Bubble._swipeToReply &&
               _drag >= _Bubble._swipeToReply) {
             HapticFeedback.selectionClick();
           }
         },
-        onHorizontalDragEnd: (_) {
+        onHorizontalDragEnd: (d) {
           if (_drag >= _Bubble._swipeToReply) _reply(_target);
-          setState(() => _drag = 0);
+          final v = d.primaryVelocity ?? 0;
+          _release(mine ? -v : v);
         },
-        onHorizontalDragCancel: () => setState(() => _drag = 0),
+        onHorizontalDragCancel: () => _release(0),
         child: Transform.translate(
           offset: Offset(mine ? -_drag : _drag, 0),
           child: bubble,
@@ -1707,7 +1746,7 @@ class _BubbleState extends State<_Bubble> {
                 color: identical(flashing, line)
                     ? t.accent.withValues(alpha: 0.18)
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(Tokens.radiusXS),
               ),
               child: child,
             ),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'motion.dart';
+
 /// What the pointer is currently doing to a surface.
 enum Touch {
   none,
@@ -31,6 +33,11 @@ enum Touch {
 /// Feedback therefore has to be part of the row's own decoration, which means
 /// the row has to know. [InkWell] stays underneath for gestures, focus and
 /// semantics; only the painting moves out.
+///
+/// The surface also gives a little under a press, and springs back on
+/// release. That is the tactile half of what a ripple was for, without
+/// the ornament: on a phone, where there is no hover, it is the only sign the
+/// finger landed before the thing it pressed responds.
 class Touchable extends StatefulWidget {
   const Touchable({
     super.key,
@@ -80,6 +87,20 @@ class _TouchableState extends State<Touchable> {
     return _hovered ? Touch.hover : Touch.none;
   }
 
+  /// How far to sink, measured when the press lands.
+  ///
+  /// A few pixels at the edges whatever the size, rather than one fraction for
+  /// everything: 3% of a full-width row is a lurch, and 3% of a close button is
+  /// barely there. Clamped so neither end goes silly.
+  double _sink = 1;
+
+  void _press() {
+    final box = context.findRenderObject();
+    final width = box is RenderBox && box.hasSize ? box.size.width : 0.0;
+    _sink = width <= 0 ? 0.97 : (1 - 6 / width).clamp(0.96, 0.99);
+    setState(() => _pressed = true);
+  }
+
   /// The middle of this surface, in global coordinates.
   Offset get _centre {
     final box = context.findRenderObject();
@@ -90,7 +111,8 @@ class _TouchableState extends State<Touchable> {
   @override
   Widget build(BuildContext context) {
     final menu = widget.onContextMenu;
-    return InkWell(
+    final m = context.motion;
+    final inkWell = InkWell(
       onTap: widget.onTap,
       onSecondaryTap: menu == null ? widget.onSecondaryTap : null,
       // On the way up, which is where every desktop opens its context menu,
@@ -99,13 +121,22 @@ class _TouchableState extends State<Touchable> {
       onLongPress: menu == null ? null : () => menu(_centre),
       borderRadius: widget.borderRadius,
       onHover: (over) => setState(() => _hovered = over),
-      onTapDown: (_) => setState(() => _pressed = true),
+      onTapDown: (_) => _press(),
       onTapUp: (_) => setState(() => _pressed = false),
       // Sliding off the surface mid-press is a cancelled tap, and the surface
       // has to let go too — otherwise it stays lit under a pointer that is no
       // longer there.
       onTapCancel: () => setState(() => _pressed = false),
       child: widget.builder(context, _touch),
+    );
+    if (m.disabled) return inkWell;
+    return AnimatedScale(
+      scale: _touch == Touch.press ? _sink : 1,
+      // Sinks at the speed of a colour change and comes back a little slower,
+      // the way something springy does.
+      duration: _touch == Touch.press ? m.fast : m.normal,
+      curve: _touch == Touch.press ? Motion.curve : Curves.easeOutBack,
+      child: inkWell,
     );
   }
 }

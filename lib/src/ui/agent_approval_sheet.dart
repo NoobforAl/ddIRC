@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../model/mcp.dart';
 import '../theme.dart';
 import 'settings/settings_chrome.dart';
+import 'motion.dart';
 
 /// "An agent wants to send this." Shown for every message an agent asks to
 /// send, before anything leaves the app.
@@ -20,7 +21,7 @@ class AgentApprovalSheet extends StatelessWidget {
   static Future<McpDecision?> show(
     BuildContext context,
     McpSendRequest request,
-  ) => showDialog<McpDecision>(
+  ) => showSoftDialog<McpDecision>(
     context: context,
     barrierDismissible: false,
     builder: (_) => AgentApprovalSheet(request: request),

@@ -4,6 +4,7 @@ import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
+import '../motion.dart';
 
 /// Receiving files over DCC, as shown in App settings — beta.
 ///
@@ -100,7 +101,7 @@ class _RiskDialog extends StatelessWidget {
   const _RiskDialog();
 
   static Future<bool> show(BuildContext context) async {
-    final answer = await showDialog<bool>(
+    final answer = await showSoftDialog<bool>(
       context: context,
       builder: (_) => const _RiskDialog(),
     );

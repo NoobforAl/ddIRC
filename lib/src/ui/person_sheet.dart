@@ -9,6 +9,7 @@ import 'avatar.dart';
 import 'nick_color.dart';
 import 'person_dialog.dart';
 import 'settings/settings_chrome.dart';
+import 'motion.dart';
 
 /// Who someone is, in one place: what the server says about them, what you
 /// share with them, what you wrote about them, and what you can do about
@@ -29,7 +30,7 @@ class PersonSheet extends StatefulWidget {
     required SessionModel session,
     required String nick,
   }) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => PersonSheet(session: session, nick: nick),
     );

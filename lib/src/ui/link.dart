@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme.dart';
 import 'settings/settings_chrome.dart';
+import 'motion.dart';
 
 /// Open a link someone sent — after showing where it actually goes.
 ///
@@ -19,7 +20,7 @@ Future<void> openLink(BuildContext context, String address) async {
   final uri = Uri.tryParse(address);
   if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) return;
 
-  final go = await showDialog<bool>(
+  final go = await showSoftDialog<bool>(
     context: context,
     builder: (context) => _OpenLinkDialog(uri: uri),
   );

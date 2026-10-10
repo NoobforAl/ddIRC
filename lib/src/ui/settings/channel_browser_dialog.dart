@@ -29,7 +29,7 @@ class ChannelBrowserDialog extends StatefulWidget {
   final SessionModel session;
 
   static Future<void> show(BuildContext context, SessionModel session) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => ChannelBrowserDialog(session: session),
     );

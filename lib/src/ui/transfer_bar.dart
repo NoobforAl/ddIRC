@@ -123,7 +123,7 @@ class _TransferRow extends StatelessWidget {
                 if (!offered) ...[
                   const SizedBox(height: 6),
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(Tokens.pill),
                     child: LinearProgressIndicator(
                       // Null is indeterminate, which is the honest rendering
                       // for a sender who did not say how big the file is.

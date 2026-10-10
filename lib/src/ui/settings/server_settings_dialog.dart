@@ -7,6 +7,7 @@ import '../../model/workspace.dart';
 import '../../rust/api/types.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
+import '../motion.dart';
 
 /// Settings for the connection this session is running on.
 ///
@@ -23,7 +24,7 @@ class ServerSettingsDialog extends StatefulWidget {
     BuildContext context, {
     required SessionModel session,
   }) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => ServerSettingsDialog(session: session),
     );

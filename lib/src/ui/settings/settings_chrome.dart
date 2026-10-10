@@ -25,7 +25,7 @@ import '../touchable.dart';
 /// Adaptive here rather than a second route tree, because nine surfaces share
 /// this shell — app settings, the server and channel dialogs, the network
 /// editor and picker, the channel browser, the connection log — and every one
-/// of them is reached with `showDialog`. One shell that knows two shapes keeps
+/// of them is reached with `showSoftDialog`. One shell that knows two shapes keeps
 /// that true; two presentations would be two things to keep in step, and the
 /// one that was not being looked at is the one that would drift.
 class SettingsDialog extends StatelessWidget {
@@ -336,10 +336,10 @@ class BetaBadge extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
         decoration: BoxDecoration(
           color: t.warn.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(3),
+          borderRadius: BorderRadius.circular(Tokens.pill),
         ),
         child: Text(
           'BETA',

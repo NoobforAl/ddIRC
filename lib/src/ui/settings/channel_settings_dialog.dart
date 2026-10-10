@@ -4,6 +4,7 @@ import '../../model/session.dart';
 import '../../model/settings.dart';
 import '../channel_list.dart' show muteDurations;
 import 'settings_chrome.dart';
+import '../motion.dart';
 
 /// Settings for one channel: its topic, how loudly it may interrupt, and the
 /// way out of it.
@@ -22,7 +23,7 @@ class ChannelSettingsDialog extends StatefulWidget {
     required SessionModel session,
     required Conversation conversation,
   }) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) =>
           ChannelSettingsDialog(session: session, conversation: conversation),

@@ -3,6 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../theme.dart';
 import 'settings_chrome.dart';
+import '../motion.dart';
 
 /// Point the camera at a QR code and read back whatever it says.
 ///
@@ -22,7 +23,7 @@ class QrScanDialog extends StatefulWidget {
   /// Returns the decoded text, or null if the dialog was closed without a
   /// code being read.
   static Future<String?> show(BuildContext context) {
-    return showDialog<String>(
+    return showSoftDialog<String>(
       context: context,
       builder: (_) => const QrScanDialog(),
     );

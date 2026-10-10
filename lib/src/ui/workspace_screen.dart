@@ -202,7 +202,7 @@ class WorkspaceScreen extends StatelessWidget {
   }
 
   static Future<void> _importFailed(BuildContext context, Object error) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => SettingsDialog(
         title: 'Could not import',

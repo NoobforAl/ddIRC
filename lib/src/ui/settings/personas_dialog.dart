@@ -5,6 +5,7 @@ import '../../model/personas.dart';
 import '../../theme.dart';
 import '../touchable.dart';
 import 'settings_chrome.dart';
+import '../motion.dart';
 
 /// Where the user makes and keeps their identities.
 ///
@@ -15,7 +16,7 @@ import 'settings_chrome.dart';
 class PersonasDialog extends StatefulWidget {
   const PersonasDialog({super.key});
 
-  static Future<void> show(BuildContext context) => showDialog<void>(
+  static Future<void> show(BuildContext context) => showSoftDialog<void>(
     context: context,
     builder: (_) => const PersonasDialog(),
   );
@@ -242,7 +243,7 @@ Future<String?> askPersonaName(
   String? hint,
   String initial = '',
 }) {
-  return showDialog<String>(
+  return showSoftDialog<String>(
     context: context,
     builder: (_) => _NamePrompt(
       title: title,
@@ -307,7 +308,7 @@ class _NamePromptState extends State<_NamePrompt> {
 }
 
 Future<bool> _confirmDelete(BuildContext context, String label) async {
-  final answer = await showDialog<bool>(
+  final answer = await showSoftDialog<bool>(
     context: context,
     builder: (context) {
       final t = context.tokens;

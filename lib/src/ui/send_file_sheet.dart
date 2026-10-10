@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../model/media.dart';
 import '../model/transfer.dart';
 import '../theme.dart';
+import 'motion.dart';
 
 /// What the user is agreeing to before a file leaves the machine.
 ///
@@ -41,7 +42,7 @@ class SendFileSheet extends StatelessWidget {
     required CleanedFile cleaned,
     required int sizeBytes,
   }) async {
-    final agreed = await showDialog<bool>(
+    final agreed = await showSoftDialog<bool>(
       context: context,
       builder: (context) => SendFileSheet(
         filename: filename,

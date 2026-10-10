@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../model/session.dart';
 import '../theme.dart';
 import 'settings/settings_chrome.dart';
+import 'motion.dart';
 
 /// What the connection has been doing, in full.
 ///
@@ -25,7 +26,7 @@ class ConnectionLogDialog extends StatefulWidget {
     BuildContext context, {
     required SessionModel session,
   }) {
-    return showDialog<void>(
+    return showSoftDialog<void>(
       context: context,
       builder: (_) => ConnectionLogDialog(session: session),
     );
