@@ -87,6 +87,29 @@ object MessageNotifications {
     }
 
     /**
+     * Why a message notification would be dropped right now, or null if
+     * nothing on this side is stopping it.
+     *
+     * `"app"` is every notification from ddIRC switched off — which from
+     * Android 13 is also what a refused `POST_NOTIFICATIONS` looks like, so
+     * this covers that case too. `"channel"` is the Messages category alone
+     * switched off, which leaves the connection notice showing and makes the
+     * app look as if notifications work.
+     *
+     * Both are the user's own switches, flipped in system settings, and
+     * Android drops what they forbid without telling the app. Asking is the
+     * only way to know.
+     */
+    fun blockedReason(context: Context): String? {
+        val manager = manager(context)
+        if (!manager.areNotificationsEnabled()) return "app"
+        // Not created yet means never posted, not refused: the first message
+        // creates it at the default importance.
+        val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return null
+        return if (channel.importance == NotificationManager.IMPORTANCE_NONE) "channel" else null
+    }
+
+    /**
      * High importance, unlike the connection channel.
      *
      * This is an event addressed to the person holding the phone, which is the

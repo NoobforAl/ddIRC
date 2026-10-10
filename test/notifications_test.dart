@@ -649,5 +649,63 @@ void main() {
         await requestBatteryOptimizationExemption(channel: channel);
       });
     });
+
+    // A system switch above the app's own, which Android enforces silently:
+    // the settings page can only name it if the host says which one is off.
+    group('a system switch blocking notifications', () {
+      Future<NotificationBlock?> blockFor(Object? answer) async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          calls.add(call);
+          return call.method == 'messageNotificationsBlocked' ? answer : null;
+        });
+        return androidNotificationBlock(channel: channel);
+      }
+
+      test('the whole app switched off', () async {
+        expect(await blockFor('app'), NotificationBlock.app);
+        expect(calls.map((c) => c.method), ['messageNotificationsBlocked']);
+      });
+
+      test('only the Messages category switched off', () async {
+        expect(await blockFor('channel'), NotificationBlock.messages);
+      });
+
+      test('nothing switched off', () async {
+        expect(await blockFor(null), isNull);
+      });
+
+      test('an answer it does not know is not a block', () async {
+        expect(await blockFor('something-new'), isNull);
+      });
+
+      // Saying notifications are blocked when they are not would send the
+      // user hunting through settings for a switch that is already on.
+      test('a host that will not answer is not a block', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => throw PlatformException(code: 'boom'),
+        );
+        expect(await androidNotificationBlock(channel: channel), isNull);
+      });
+
+      test('opening the settings is one call, and never throws', () async {
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          calls.add(call);
+          return null;
+        });
+        await openAndroidNotificationSettings(channel: channel);
+        expect(calls.map((c) => c.method), ['openNotificationSettings']);
+
+        binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          (call) async => throw PlatformException(code: 'boom'),
+        );
+        await openAndroidNotificationSettings(channel: channel);
+      });
+    });
   });
 }

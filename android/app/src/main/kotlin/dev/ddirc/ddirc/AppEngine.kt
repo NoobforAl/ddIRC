@@ -229,6 +229,14 @@ object AppEngine {
                 result.success(null)
             }
 
+            "messageNotificationsBlocked" ->
+                result.success(MessageNotifications.blockedReason(context))
+
+            "openNotificationSettings" -> {
+                openNotificationSettings(context)
+                result.success(null)
+            }
+
             "notifyMessage" -> {
                 MessageNotifications.show(
                     context = context,
@@ -312,6 +320,25 @@ object AppEngine {
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             PERMISSION_REQUEST,
         )
+    }
+
+    /**
+     * This app's page in the system notification settings, where both of the
+     * switches [MessageNotifications.blockedReason] can find off are.
+     *
+     * Same shape as [requestBatteryOptimizationExemption]: a screen rather than
+     * a question, so nothing waits for an answer, and Dart asks again once the
+     * app is back in front.
+     */
+    private fun openNotificationSettings(context: Context) {
+        val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "no notification settings screen on this device", e)
+        }
     }
 
     /**

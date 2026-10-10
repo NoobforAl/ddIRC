@@ -10,7 +10,13 @@ import '../../version.dart';
 import '../background.dart';
 import '../background_android.dart';
 import '../motion.dart';
-import '../notifier.dart' show notificationHelpFor, notificationsSupportedOn;
+import '../notifier.dart'
+    show
+        NotificationBlock,
+        notificationBlock,
+        notificationHelpFor,
+        notificationsSupportedOn,
+        openSystemNotificationSettings;
 import 'app_lock_section.dart';
 import 'agents_section.dart';
 import 'file_transfer_section.dart';
@@ -464,10 +470,11 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
           label: 'Notifications',
           // The one thing this switch cannot do anything about, said where
           // somebody wondering why nothing appears will find it. The operating
-          // system has its own switch above this one, ddIRC cannot read it,
-          // and a notification refused there is refused silently — which
-          // leaves this page claiming notifications are on while nothing is
-          // ever drawn.
+          // system has its own switch above this one, and a notification
+          // refused there is refused silently — which leaves this page
+          // claiming notifications are on while nothing is ever drawn. Where
+          // the platform will say which switch is off, the note below names
+          // it; this covers the platforms that will not.
           help: notificationHelpFor(defaultTargetPlatform),
           children: [
             SettingsSwitch(
@@ -488,9 +495,62 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
               value: settings.notifyPreview,
               onChanged: (v) => settings.notifyPreview = v,
             ),
+            if (settings.notifications) _notificationBlockNote(),
+            // On Android a notification needs the app to be running when the
+            // message arrives, and without the service it is not for long:
+            // the phone pauses it soon after it leaves the screen, and a
+            // paused app hears nothing to tell anyone about. Nothing fails
+            // and nothing is reported, so it is said here, beside the switch
+            // that appears not to work.
+            if (defaultTargetPlatform == TargetPlatform.android &&
+                settings.notifications &&
+                !settings.runInBackground) ...[
+              const SettingsNote(
+                text:
+                    'Without Stay connected in the background, Android can '
+                    'pause ddIRC soon after you leave it, and a message that '
+                    'arrives while it is paused cannot notify you.',
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                child: SettingsSecondaryButton(
+                  label: 'Turn on staying connected',
+                  onPressed: () => settings.runInBackground = true,
+                ),
+              ),
+            ],
           ],
         ),
     ];
+  }
+
+  /// Names the system switch that is dropping notifications, and opens the
+  /// screen it is on — only while one actually is.
+  ///
+  /// Asked on every build, like [_batteryOptimizationNote], so coming back
+  /// from that screen (which rebuilds this page on resume) shows the answer
+  /// at once.
+  Widget _notificationBlockNote() {
+    return FutureBuilder<NotificationBlock?>(
+      future: notificationBlock(),
+      builder: (context, snapshot) {
+        final block = snapshot.data;
+        if (block == null) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SettingsNote(text: block.explanation, isError: true),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+              child: SettingsSecondaryButton(
+                label: 'Open notification settings…',
+                onPressed: openSystemNotificationSettings,
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   /// Says so, and offers the fix, only while the exemption is actually

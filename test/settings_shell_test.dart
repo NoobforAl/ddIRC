@@ -15,6 +15,7 @@
 // is what pays that back, and it has to say which way the switch is set even —
 // especially — when the answer is no.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -405,6 +406,29 @@ void main() {
       // once mentioned it, and onto the page about being away.
       expect(find.text('Stay connected in the background'), findsOneWidget);
       expect(find.text('Notify me about messages'), findsOneWidget);
+    });
+
+    // A notification needs the app running when the message arrives, and on
+    // Android that is not for long without the service. Said beside the
+    // switch that would otherwise look broken, with the fix one press away.
+    testWidgets('on Android, notifications without staying connected say so', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      sized(tester, _desktop);
+      final settings = await pump(tester);
+
+      await tester.tap(find.text('Notifications'));
+      await tester.pumpAndSettle();
+      expect(settings.runInBackground, isFalse);
+      expect(find.textContaining('cannot notify you'), findsOneWidget);
+
+      await tester.tap(find.text('Turn on staying connected'));
+      await tester.pumpAndSettle();
+      expect(settings.runInBackground, isTrue);
+      expect(find.textContaining('cannot notify you'), findsNothing);
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('and Connection goes on describing only the route', (

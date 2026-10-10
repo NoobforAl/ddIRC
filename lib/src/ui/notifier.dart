@@ -49,6 +49,69 @@ String notificationHelpFor(TargetPlatform platform) => switch (platform) {
   _ => 'This platform will not show notifications.',
 };
 
+/// A switch above this app's own that is dropping its notifications.
+///
+/// [notificationHelpFor] says where such switches live; this says which one is
+/// actually off, on the platforms that will answer. Both exist because the
+/// failure they describe is silent — the system drops what it forbids without
+/// a word to the app, and the settings page goes on saying notifications are
+/// on.
+enum NotificationBlock {
+  /// Windows' own "Get notifications from apps and other senders", which
+  /// silences every app at once.
+  allApps,
+
+  /// Every notification from ddIRC, switched off in the system settings. On
+  /// Android 13 and later this is also what a refused permission looks like.
+  app,
+
+  /// Android's *Messages* category alone. The connection notice still shows,
+  /// so from the outside this looks like notifications working.
+  messages;
+
+  /// What is off, and that it is not this app's switch — said plainly enough
+  /// that the button beside it is obviously the fix.
+  String get explanation => switch (this) {
+    NotificationBlock.allApps =>
+      'Windows has notifications from apps switched off, for every app, so '
+          'nothing this switch allows can appear.',
+    NotificationBlock.app =>
+      'Notifications for ddIRC are switched off in the system settings, so '
+          'nothing this switch allows can appear.',
+    NotificationBlock.messages =>
+      'The Messages notification category is switched off in the system '
+          'settings, so nothing this switch allows can appear.',
+  };
+}
+
+/// Which system switch is blocking notifications, or null for none that this
+/// platform will admit to.
+///
+/// Null is also the answer to a question that could not be asked. A note
+/// claiming notifications are blocked when they are not would be worse than
+/// the silence this exists to break.
+Future<NotificationBlock?> notificationBlock() async {
+  if (kIsWeb) return null;
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.android => androidNotificationBlock(),
+    TargetPlatform.windows => windowsNotificationBlock(),
+    _ => null,
+  };
+}
+
+/// Open the system screen where a [NotificationBlock] is undone.
+Future<void> openSystemNotificationSettings() async {
+  if (kIsWeb) return;
+  switch (defaultTargetPlatform) {
+    case TargetPlatform.android:
+      await openAndroidNotificationSettings();
+    case TargetPlatform.windows:
+      await openWindowsNotificationSettings();
+    default:
+      break;
+  }
+}
+
 /// Raises notifications, and takes them away again.
 ///
 /// Shaped like [BackgroundKeeper] on purpose — an interface, a factory that is

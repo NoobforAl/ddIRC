@@ -122,3 +122,37 @@ class AndroidNotifier implements Notifier {
     }
   }
 }
+
+/// Which of the user's system switches is dropping message notifications.
+///
+/// See `MessageNotifications.blockedReason` on the host, which is the only
+/// side that can read them.
+Future<NotificationBlock?> androidNotificationBlock({
+  MethodChannel channel = backgroundChannel,
+}) async {
+  try {
+    return switch (await channel.invokeMethod<String>(
+      'messageNotificationsBlocked',
+    )) {
+      'app' => NotificationBlock.app,
+      'channel' => NotificationBlock.messages,
+      _ => null,
+    };
+  } catch (e) {
+    debugPrint('notifications: messageNotificationsBlocked failed ($e)');
+    return null;
+  }
+}
+
+/// ddIRC's page in the system notification settings. Fire-and-forget, like
+/// `requestBatteryOptimizationExemption`: the settings page asks again on
+/// resume.
+Future<void> openAndroidNotificationSettings({
+  MethodChannel channel = backgroundChannel,
+}) async {
+  try {
+    await channel.invokeMethod<void>('openNotificationSettings');
+  } catch (e) {
+    debugPrint('notifications: openNotificationSettings failed ($e)');
+  }
+}
