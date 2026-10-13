@@ -606,7 +606,7 @@ class _MessageViewState extends State<MessageView> {
           i != markerIndex &&
           line.message!.replyTo == null &&
           _sameSpeaker(previous, line) &&
-          _sameMinute(previous.at, line.at);
+          (_sameMinute(previous.at, line.at) || _continues(previous, line));
       if (joins) {
         groups.last.end = i + 1;
       } else {
@@ -621,6 +621,16 @@ class _MessageViewState extends State<MessageView> {
       !b.isSystem &&
       a.message!.sender == b.message!.sender &&
       a.message!.isSelf == b.message!.isSelf;
+
+  /// Whether [line] is the next row of a table [previous] is part of. A table
+  /// is drawn whole only inside one bubble, and one pasted as the minute turns
+  /// over would otherwise be cut in two, each half a table of its own.
+  static bool _continues(ChatLine previous, ChatLine line) {
+    String plain(ChatLine l) => l.message!.spans.map((s) => s.text).join();
+    return line.at.difference(previous.at).inMinutes < 2 &&
+        looksLikeTableRow(plain(previous)) &&
+        looksLikeTableRow(plain(line));
+  }
 
   static bool _sameMinute(DateTime a, DateTime b) =>
       a.year == b.year &&
@@ -1334,6 +1344,23 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
 
   void _reply(int i) => widget.onReply?.call(widget.lines[i]);
 
+  static String _plainOf(ChatLine line) =>
+      line.message!.spans.map((s) => s.text).join();
+
+  /// The lines, split into what is drawn as one piece. Everything is a line
+  /// of its own with markdown off: a table is only a table when it is drawn
+  /// as one.
+  List<MdBlock> _blocks() {
+    final lines = widget.lines;
+    if (!widget.settings.markdown) {
+      return [
+        for (var i = 0; i < lines.length; i++)
+          MdBlock(BlockKind.line, i, i + 1),
+      ];
+    }
+    return blocksOf([for (final l in lines) _plainOf(l)]);
+  }
+
   /// What holding a message offers — or right-clicking it: reply to it,
   /// quote part of it, copy it, address its author, pin it, save it. The way
   /// messengers do it, and the way to reach all of it without aiming at a
@@ -1347,7 +1374,14 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     if (box == null || !box.hasSize) return;
     if (at == null) HapticFeedback.selectionClick();
     final where = at ?? box.localToGlobal(box.size.center(Offset.zero));
-    final text = message.spans.map((s) => s.text).join();
+    // A table or a code block is copied whole, the way it was written.
+    final block = _blocks().firstWhere(
+      (b) => b.start == i,
+      orElse: () => MdBlock(BlockKind.line, i, i + 1),
+    );
+    final text = [
+      for (var j = block.start; j < block.end; j++) _plainOf(widget.lines[j]),
+    ].join('\n');
 
     // Part of this line selected: that part is what a quote is of, and what
     // Copy copies. Selected text from somewhere else is not this line's.
@@ -1548,12 +1582,13 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         ),
       if (first.replyTo case final reply?)
         _Quote(reply: reply, original: widget.quoted, onTap: widget.onQuoteTap),
-      for (var i = 0; i < widget.lines.length; i++)
+      for (final block in _blocks())
         _line(
           context,
-          i,
-          time: i == widget.lines.length - 1 ? time : null,
+          block.start,
+          time: block.end == widget.lines.length ? time : null,
           timeStyle: timeStyle,
+          block: block,
         ),
     ];
 
@@ -1703,26 +1738,67 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
   /// One line of the bubble: its own selection container, so a copy across
   /// several comes out as several lines, and its own flash when a quote
   /// elsewhere points at it.
+  ///
+  /// A table or a code block is several lines drawn as one piece, and stands
+  /// here as its first line: that is where a swipe, a long press or a quote
+  /// lands on it.
   Widget _line(
     BuildContext context,
     int i, {
     required String? time,
     required TextStyle timeStyle,
+    MdBlock? block,
   }) {
     final t = context.tokens;
     final line = widget.lines[i];
     final index = widget.firstIndex + i;
+    final last = widget.lines[(block?.end ?? i + 1) - 1];
     final fresh =
-        index >= widget.freshFrom && line.at.isAfter(widget.arrivedAfter);
+        index + (block?.length ?? 1) - 1 >= widget.freshFrom &&
+        last.at.isAfter(widget.arrivedAfter);
 
-    final body = _MessageBody(
-      message: line.message!,
-      renderColors: widget.settings.renderColors,
-      markdown: widget.settings.markdown,
-      highlight: widget.highlight,
-      time: time,
-      timeStyle: timeStyle,
-    );
+    Widget body;
+    switch (block?.kind) {
+      case BlockKind.table:
+        body = _MarkdownTable(
+          messages: [
+            for (var j = block!.start; j < block.end; j++)
+              widget.lines[j].message!,
+          ],
+          renderColors: widget.settings.renderColors,
+          highlight: widget.highlight,
+        );
+      case BlockKind.code:
+        body = _CodeBlock(
+          lines: [
+            for (var j = block!.start; j < block.end; j++)
+              _plainOf(widget.lines[j]),
+          ],
+          language: block.language,
+        );
+      case BlockKind.line || null:
+        body = _MessageBody(
+          message: line.message!,
+          renderColors: widget.settings.renderColors,
+          markdown: widget.settings.markdown,
+          highlight: widget.highlight,
+          time: time,
+          timeStyle: timeStyle,
+        );
+    }
+    // A block has no last line of its own for the time to tuck into, so it
+    // goes underneath, at the right.
+    if (block != null && block.kind != BlockKind.line && time != null) {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          body,
+          const SizedBox(height: 2),
+          SelectionContainer.disabled(child: Text(time, style: timeStyle)),
+        ],
+      );
+    }
 
     // A right-click is the mouse's long press. It takes over from the
     // selection's own menu on a message, which only ever offered Copy and
@@ -1929,6 +2005,9 @@ class _MessageBody extends StatefulWidget {
   /// Between the end of the text and the time.
   static const _timeGap = 10.0;
 
+  /// `#` to `######`, against a body of 14.5.
+  static const _headingSizes = [20.0, 17.5, 16.0, 15.0, 14.5, 14.5];
+
   /// When false, bold and italics still apply but sender-chosen colours are
   /// dropped — the styling that carries meaning is kept, the decoration is not.
   final bool renderColors;
@@ -1996,27 +2075,50 @@ class _MessageBodyState extends State<_MessageBody> {
         : base;
 
     final decorated = _decorate();
-    final runStyle = decorated.quote ? style.copyWith(color: t.muted) : style;
     _disposeLinks();
-    final runs = <InlineSpan>[];
-    for (final run in decorated.runs) {
-      final link = run.link;
-      TapGestureRecognizer? tap;
-      if (link != null) {
-        tap = TapGestureRecognizer()..onTap = () => openLink(context, link);
-        _links.add(tap);
-      }
-      runs.addAll(
-        _span(
-          rust.TextSpan(text: run.text, style: run.style),
-          runStyle,
-          renderColors,
-          t,
-          link: tap,
-          highlight: widget.highlight,
-        ),
+
+    // A rule has no words: a hairline, and the time beside it.
+    if (decorated.kind == LineKind.rule) {
+      final rule = Container(
+        width: 160,
+        height: 1,
+        margin: const EdgeInsets.symmetric(vertical: 9),
+        color: t.rule,
+      );
+      final time = widget.time;
+      if (time == null) return rule;
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          rule,
+          const SizedBox(width: _MessageBody._timeGap),
+          SelectionContainer.disabled(child: Text(time, style: timeStyle)),
+        ],
       );
     }
+
+    final heading = decorated.kind == LineKind.heading;
+    final lineStyle = heading
+        ? style.copyWith(
+            fontSize: _MessageBody._headingSizes[decorated.level - 1],
+            fontWeight: FontWeight.w700,
+            height: 1.3,
+          )
+        : style;
+    // A quote, and a task already done, step back.
+    final runStyle =
+        decorated.quote ||
+            (decorated.kind == LineKind.task && decorated.checked)
+        ? lineStyle.copyWith(color: t.muted)
+        : lineStyle;
+    final runs = runSpans(
+      context,
+      decorated.runs,
+      runStyle,
+      renderColors: renderColors,
+      highlight: widget.highlight,
+      recognizers: _links,
+    );
 
     // `Text.rich` rather than the bare `RichText` this used to be: a `Text`
     // registers itself with whatever selection is in scope, and a hand-built
@@ -2034,14 +2136,82 @@ class _MessageBodyState extends State<_MessageBody> {
       ],
     );
     Widget text = Text.rich(span);
+    // How much narrower than the bubble the words are, for whatever stands
+    // in front of them.
+    var aside = 0.0;
     // A line that began `> ` is somebody quoting: drawn with a bar down its
     // side, the way the quote on a reply is, and the marker itself gone.
     if (decorated.quote) {
+      aside = 11;
       text = Container(
         padding: const EdgeInsets.only(left: 8),
         decoration: BoxDecoration(
           border: Border(left: BorderSide(color: t.faint, width: 3)),
         ),
+        child: text,
+      );
+    }
+    // A list item: its marker in a gutter of its own, so a wrapped line
+    // lines up under the words rather than under the bullet.
+    if (decorated.isList) {
+      final indent = decorated.indent * 16.0;
+      final marker = decorated.marker;
+      final gutter = switch (decorated.kind) {
+        LineKind.task => 24.0,
+        LineKind.ordered => 8.0 * marker!.length + 12,
+        _ => 18.0,
+      };
+      final Widget bullet = switch (decorated.kind) {
+        LineKind.task => Padding(
+          padding: const EdgeInsets.only(top: 2.5),
+          child: Icon(
+            decorated.checked
+                ? Icons.check_box_rounded
+                : Icons.check_box_outline_blank_rounded,
+            size: 16,
+            color: decorated.checked ? t.accent : t.muted,
+          ),
+        ),
+        // Numbers right-aligned, so 9. and 10. line up on their dots.
+        LineKind.ordered => Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: Text(
+            marker!,
+            textAlign: TextAlign.end,
+            style: style.copyWith(
+              color: t.muted,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        _ => Text(
+          decorated.indent.isEven ? '•' : '◦',
+          style: style.copyWith(
+            color: t.accent.withValues(alpha: 0.85),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      };
+      aside = indent + gutter;
+      text = Padding(
+        padding: EdgeInsets.only(left: indent),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: gutter,
+              // The marker is the app's drawing of `-` or `1.`, not words.
+              child: SelectionContainer.disabled(child: bullet),
+            ),
+            Flexible(child: text),
+          ],
+        ),
+      );
+    }
+    if (heading) {
+      text = Padding(
+        padding: const EdgeInsets.only(top: 6, bottom: 2),
         child: text,
       );
     }
@@ -2061,11 +2231,17 @@ class _MessageBodyState extends State<_MessageBody> {
         final inherited = DefaultTextStyle.of(context).style;
         final scaler = MediaQuery.textScalerOf(context);
         final direction = Directionality.of(context);
-        final paragraph = TextPainter(
-          text: TextSpan(style: inherited, children: [span]),
-          textDirection: direction,
-          textScaler: scaler,
-        )..layout(maxWidth: constraints.maxWidth);
+        final paragraph =
+            TextPainter(
+              text: TextSpan(style: inherited, children: [span]),
+              textDirection: direction,
+              textScaler: scaler,
+            )..layout(
+              maxWidth: (constraints.maxWidth - aside).clamp(
+                0,
+                double.infinity,
+              ),
+            );
         final clock = TextPainter(
           text: TextSpan(style: inherited.merge(timeStyle), text: time),
           textDirection: direction,
@@ -2073,13 +2249,9 @@ class _MessageBodyState extends State<_MessageBody> {
         )..layout();
         final lines = paragraph.computeLineMetrics();
         final lastLine = lines.isEmpty ? 0.0 : lines.last.width;
-        final needed =
-            lastLine +
-            _MessageBody._timeGap +
-            clock.width +
-            (decorated.quote ? 11 : 0);
+        final needed = lastLine + _MessageBody._timeGap + clock.width + aside;
         final single = lines.length <= 1;
-        final width = paragraph.width;
+        final width = paragraph.width + aside;
         paragraph.dispose();
         clock.dispose();
 
@@ -2143,7 +2315,10 @@ class _MessageBodyState extends State<_MessageBody> {
       color: (!colors || s.fg == null)
           ? base.color
           : MircPalette.resolve(s.fg, on: surface, fallback: base.color!),
-      backgroundColor: background,
+      // Inline code gets a tint of its own, or `this` reads as a typo in a
+      // different font rather than as code.
+      backgroundColor:
+          background ?? (s.monospace ? t.text.withValues(alpha: 0.09) : null),
       decoration: TextDecoration.combine([
         if (s.underline) TextDecoration.underline,
         if (s.strikethrough) TextDecoration.lineThrough,
@@ -2195,5 +2370,287 @@ class _MessageBodyState extends State<_MessageBody> {
     }
     if (at < span.text.length) out.add(piece(span.text.substring(at), style));
     return out;
+  }
+}
+
+/// Turn decorated runs into spans, links and all.
+///
+/// Each link gets a recogniser, added to [recognizers] for the caller to
+/// dispose: a recogniser is a gesture arena entrant, and one leaked per
+/// rebuild adds up in a scrollback of thousands.
+List<InlineSpan> runSpans(
+  BuildContext context,
+  List<Decorated> runs,
+  TextStyle style, {
+  required bool renderColors,
+  required List<TapGestureRecognizer> recognizers,
+  String? highlight,
+}) {
+  final t = context.tokens;
+  final out = <InlineSpan>[];
+  for (final run in runs) {
+    final link = run.link;
+    TapGestureRecognizer? tap;
+    if (link != null) {
+      tap = TapGestureRecognizer()
+        ..onTap = () => openLink(context, link, label: run.label);
+      recognizers.add(tap);
+    }
+    out.addAll(
+      _MessageBodyState._span(
+        rust.TextSpan(text: run.text, style: run.style),
+        style,
+        renderColors,
+        t,
+        link: tap,
+        highlight: highlight,
+      ),
+    );
+  }
+  return out;
+}
+
+/// A markdown table, drawn as one: a grid with its header set apart, every
+/// column as wide as its widest cell up to a limit, and a sideways scroll
+/// when the whole is wider than the bubble.
+///
+/// IRC has no tables, only lines, so a table arrives as one message per row;
+/// these are those messages.
+class _MarkdownTable extends StatefulWidget {
+  const _MarkdownTable({
+    required this.messages,
+    required this.renderColors,
+    this.highlight,
+  });
+
+  final List<rust.ChatMessage> messages;
+  final bool renderColors;
+  final String? highlight;
+
+  /// Past this a column wraps rather than widening.
+  static const _maxColumn = 280.0;
+
+  @override
+  State<_MarkdownTable> createState() => _MarkdownTableState();
+}
+
+class _MarkdownTableState extends State<_MarkdownTable> {
+  final _scroll = ScrollController();
+  final List<TapGestureRecognizer> _links = [];
+
+  MdTable? _table;
+  List<rust.ChatMessage>? _parsedFrom;
+
+  /// Parsed again only when a row is added or changed, not on every scroll.
+  MdTable _parsed() {
+    final from = _parsedFrom;
+    var same = from != null && from.length == widget.messages.length;
+    for (var i = 0; same && i < from!.length; i++) {
+      same = identical(from[i], widget.messages[i]);
+    }
+    if (!same) {
+      _parsedFrom = widget.messages;
+      _table = parseTable([for (final m in widget.messages) m.spans]);
+    }
+    return _table!;
+  }
+
+  void _disposeLinks() {
+    for (final link in _links) {
+      link.dispose();
+    }
+    _links.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeLinks();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final table = _parsed();
+    _disposeLinks();
+    final base = TextStyle(color: t.text, fontSize: 13.5, height: 1.35);
+
+    Widget cell(DecoratedLine line, int column, {bool header = false}) {
+      final style = header ? base.copyWith(fontWeight: FontWeight.w700) : base;
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        child: Text.rich(
+          TextSpan(
+            style: style,
+            children: runSpans(
+              context,
+              line.runs,
+              style,
+              renderColors: widget.renderColors,
+              highlight: widget.highlight,
+              recognizers: _links,
+            ),
+          ),
+          textAlign: switch (table.align[column]) {
+            CellAlign.start => TextAlign.start,
+            CellAlign.center => TextAlign.center,
+            CellAlign.end => TextAlign.end,
+          },
+        ),
+      );
+    }
+
+    final stripe = t.text.withValues(alpha: 0.035);
+    final grid = Table(
+      defaultColumnWidth: const MinColumnWidth(
+        IntrinsicColumnWidth(),
+        FixedColumnWidth(_MarkdownTable._maxColumn),
+      ),
+      defaultVerticalAlignment: TableCellVerticalAlignment.top,
+      border: TableBorder.symmetric(
+        inside: BorderSide(color: t.rule, width: 0.8),
+      ),
+      children: [
+        if (table.header case final header?)
+          TableRow(
+            decoration: BoxDecoration(color: t.surfaceHover),
+            children: [
+              for (var c = 0; c < table.columns; c++)
+                cell(header[c], c, header: true),
+            ],
+          ),
+        for (var r = 0; r < table.rows.length; r++)
+          TableRow(
+            decoration: r.isOdd ? BoxDecoration(color: stripe) : null,
+            children: [
+              for (var c = 0; c < table.columns; c++) cell(table.rows[r][c], c),
+            ],
+          ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: DecoratedBox(
+        position: DecorationPosition.foreground,
+        decoration: BoxDecoration(
+          border: Border.all(color: t.rule),
+          borderRadius: BorderRadius.circular(Tokens.radiusXS),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(Tokens.radiusXS),
+          child: Scrollbar(
+            controller: _scroll,
+            child: SingleChildScrollView(
+              controller: _scroll,
+              scrollDirection: Axis.horizontal,
+              child: grid,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A fenced code block: the lines between its fences, in a monospaced box of
+/// their own, the language it says it is in, and a button to copy it.
+class _CodeBlock extends StatefulWidget {
+  const _CodeBlock({required this.lines, this.language});
+
+  /// Every line of the block, fences included.
+  final List<String> lines;
+  final String? language;
+
+  @override
+  State<_CodeBlock> createState() => _CodeBlockState();
+}
+
+class _CodeBlockState extends State<_CodeBlock> {
+  bool _copied = false;
+
+  String get _code {
+    var lines = widget.lines.skip(1).toList();
+    if (lines.isNotEmpty && isFenceLine(lines.last)) {
+      lines = lines.sublist(0, lines.length - 1);
+    }
+    return lines.join('\n');
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: _code));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final code = _code;
+    final label = TextStyle(color: t.muted, fontSize: 11, height: 1.2);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Container(
+        decoration: BoxDecoration(
+          color: t.bg.withValues(alpha: 0.6),
+          border: Border.all(color: t.rule),
+          borderRadius: BorderRadius.circular(Tokens.radiusXS),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SelectionContainer.disabled(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 2, 2, 2),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: t.rule)),
+                ),
+                child: Row(
+                  children: [
+                    Text(widget.language ?? 'code', style: label),
+                    const Spacer(),
+                    Tooltip(
+                      message: _copied ? 'Copied' : 'Copy code',
+                      child: InkResponse(
+                        onTap: _copy,
+                        radius: 16,
+                        child: Padding(
+                          padding: const EdgeInsets.all(5),
+                          child: Icon(
+                            _copied ? Icons.check_rounded : Icons.copy_rounded,
+                            size: 14,
+                            color: _copied ? t.ok : t.muted,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Wrapped rather than scrolled sideways: on a phone, the end of a
+            // long line scrolled out of sight is a line nobody knows is there,
+            // and a sideways scroll fights the swipe that replies.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 7, 10, 8),
+              child: Text(
+                code.isEmpty ? ' ' : code,
+                style: TextStyle(
+                  color: t.text,
+                  fontSize: 13,
+                  height: 1.4,
+                  fontFamily: Fonts.mono,
+                  fontFamilyFallback: Fonts.monoFallback,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

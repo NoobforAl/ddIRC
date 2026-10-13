@@ -227,9 +227,21 @@ is drawn as a quote. Nothing inside a code span or an address is touched, an
 underscore inside a word is just an underscore, and `2 * 3 * 4` is arithmetic.
 **Markdown** in Appearance turns all of it off.
 
-Links in messages can be tapped. Before anything opens, the whole address is
-shown — the part cut off at the edge of a bubble is exactly where a lookalike
-domain hides — and only `http` and `https` are opened at all.
+Lines are drawn as what they start with: `#` headings, `-` / `*` bullets
+(nested by indenting), `1.` numbered items, `- [ ]` and `- [x]` tasks, and
+`---` as a rule. IRC carries one line per message, so a **table** or a fenced
+**code block** arrives as several messages; where they sit together in one
+person's bubble they are drawn as one again — a grid with its header and
+column alignment, or a monospaced box with its language and a copy button.
+Long-press → Copy on either copies all of it, as it was written.
+
+Links in messages can be tapped, and can be written with a label,
+`[the docs](https://…)`, or in angle brackets. Before anything opens, the link
+is shown taken apart — the site, whether it is encrypted, what it was shown as,
+its query — with the whole address underneath, and a one-line warning when the
+label names a different site, the name uses look-alike characters, it hides
+behind `user@`, or it goes to a bare IP. Only `http` and `https` are opened at
+all.
 
 ### Search
 
