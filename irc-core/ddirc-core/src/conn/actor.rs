@@ -20,7 +20,7 @@ use irc::client::Client;
 use irc::proto::message::Tag;
 use irc::proto::{ChannelMode, Command as Irc, Message, Mode, Response};
 use tokio::sync::mpsc;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use zeroize::Zeroizing;
 
 use crate::api::events::IrcEvent;
@@ -99,6 +99,13 @@ pub enum ClientCommand {
     },
     Part {
         channel: String,
+        reason: Option<String>,
+    },
+    /// Remove someone from a channel. The server decides whether we may; a
+    /// refusal comes back as an [`IrcEvent::Error`].
+    Kick {
+        channel: String,
+        nick: String,
         reason: Option<String>,
     },
     SendMessage {
@@ -182,6 +189,24 @@ pub enum ClientCommand {
     CancelTransfer {
         id: u64,
     },
+}
+
+/// How long to keep a connection open after saying `QUIT`.
+const QUIT_LINGER: Duration = Duration::from_millis(750);
+
+/// Give a `QUIT` the chance to leave.
+///
+/// `Sender::send` only queues. It is the stream that writes the queue out, so
+/// returning straight after it drops the connection with the line still
+/// unwritten: the reason someone typed never arrives, and everyone else in the
+/// room is told the connection dropped. A server closes the link itself once
+/// it has read the `QUIT`, which ends this at once; the bound is for the one
+/// that does not.
+async fn linger<S: futures_util::Stream + Unpin>(stream: &mut S) {
+    let _ = timeout(QUIT_LINGER, async {
+        while stream.next().await.is_some() {}
+    })
+    .await;
 }
 
 /// Errors that end a connection attempt.
@@ -609,12 +634,14 @@ impl Actor {
                     let Some(command) = command else {
                         // The handle was dropped; shut down cleanly.
                         let _ = sender.send(Irc::QUIT(None));
+                        linger(&mut stream).await;
                         return Ok(Disposition::UserQuit);
                     };
                     if let ClientCommand::Disconnect { reason } = command {
                         let _ = sender.send(Irc::QUIT(Some(
                             reason.unwrap_or_else(|| "ddIRC".to_owned()),
                         )));
+                        linger(&mut stream).await;
                         return Ok(Disposition::UserQuit);
                     }
                     // The file commands are handled here rather than in
@@ -744,6 +771,23 @@ impl Actor {
             }
             ClientCommand::Part { channel, reason } => {
                 outgoing.push_back(Message::from(Irc::PART(channel, reason)));
+            }
+            ClientCommand::Kick {
+                channel,
+                nick,
+                reason,
+            } => {
+                // Two single words. Anything else in either is a second
+                // argument or a second command, and neither is what was asked.
+                let word = |s: &str| {
+                    !s.is_empty() && !s.contains(|c: char| c.is_whitespace() || c.is_control())
+                };
+                if word(&channel) && word(&nick) {
+                    let reason = reason
+                        .map(|r| r.chars().filter(|c| !c.is_control()).collect::<String>())
+                        .filter(|r| !r.is_empty());
+                    outgoing.push_back(Message::from(Irc::KICK(channel, nick, reason)));
+                }
             }
             ClientCommand::SendMessage { target, text } => {
                 for line in sanitize_outgoing(&text) {
@@ -1058,6 +1102,35 @@ impl Actor {
                     });
                     // Our own part closes the conversation, roster and all, so
                     // there is nobody left to tell about it.
+                    if !is_self {
+                        self.emit_member_changed(channel, &filed_as, &filed_as);
+                    }
+                }
+            }
+            // Reported as the departure it is. A kick has no event of its own
+            // because the UI's work is the same as for a `PART` — drop the row,
+            // or close the conversation if it was us — and a second event
+            // would be a second way for a client to be removed from a room and
+            // not know it. Who did it and why ride in the reason, which is
+            // where a person reading the room wants them anyway.
+            Irc::KICK(channel, victim, reason) => {
+                let is_self = self.session.is_self(victim);
+                let filed_as = self
+                    .session
+                    .known_nick(victim)
+                    .unwrap_or_else(|| victim.clone());
+                if self.session.on_part(channel, victim) {
+                    let by = source.as_deref().unwrap_or("the server");
+                    let why = match reason.as_deref().map(format::strip) {
+                        Some(why) if !why.is_empty() => format!("kicked by {by}: {why}"),
+                        _ => format!("kicked by {by}"),
+                    };
+                    self.emit(IrcEvent::Parted {
+                        channel: channel.clone(),
+                        nick: victim.clone(),
+                        is_self,
+                        reason: Some(why),
+                    });
                     if !is_self {
                         self.emit_member_changed(channel, &filed_as, &filed_as);
                     }
@@ -2349,6 +2422,44 @@ mod tests {
         assert!(changed
             .iter()
             .all(|(prev, m)| prev == "alice" && m.is_none()));
+    }
+
+    #[test]
+    fn a_kick_is_a_departure_that_says_who_and_why() {
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        joined_channel(&mut actor, &mut outgoing);
+        drain(&mut rx);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h KICK #test bob :too loud",
+        );
+
+        let events = drain(&mut rx);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                IrcEvent::Parted { channel, nick, is_self: false, reason }
+                    if channel == "#test"
+                        && nick == "bob"
+                        && reason.as_deref() == Some("kicked by alice: too loud")
+            )),
+            "{events:?}"
+        );
+        assert_eq!(changes(&events), vec![("bob".to_owned(), None)]);
+
+        // Being kicked is leaving, for us too: the room is no longer ours.
+        feed(&mut actor, &mut outgoing, ":alice!u@h KICK #test ddirc");
+        let events = drain(&mut rx);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                IrcEvent::Parted { is_self: true, reason, .. }
+                    if reason.as_deref() == Some("kicked by alice")
+            )),
+            "{events:?}"
+        );
     }
 
     #[test]
