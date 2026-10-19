@@ -900,17 +900,13 @@ class _SessionScreenState extends State<SessionScreen> {
               // is unreadable for as long as the transition lasts.
               duration: context.motion.fast,
               child: active == null
-                  ? Center(
+                  ? _NoChannel(
                       key: const ValueKey('no-channel'),
-                      child: Text(
-                        'No channel open',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: t.faint,
-                          fontSize: 13,
-                          height: 1.6,
-                        ),
-                      ),
+                      // Not `_browseChannels`, which closes a drawer first:
+                      // there is no drawer open behind this, and popping with
+                      // nothing to pop would leave the app.
+                      onBrowse: () =>
+                          ChannelBrowserDialog.show(context, session),
                     )
                   : MessageView(
                       // Rebuild the scroll state when switching conversations.
@@ -1055,6 +1051,54 @@ class _SessionScreenState extends State<SessionScreen> {
         borderRadius: BorderRadius.circular(Tokens.radiusXL),
         borderSide: BorderSide(color: color, width: width),
       );
+}
+
+/// What the conversation pane says when nothing is open.
+///
+/// A way forward rather than a verdict. The composer below stays live, since
+/// `/join` is typed into it, so the two routes are both named here: the button
+/// for people who do not know a channel to type, the command for those who do.
+class _NoChannel extends StatelessWidget {
+  const _NoChannel({super.key, required this.onBrowse});
+
+  final VoidCallback onBrowse;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'No channel open',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: t.muted, fontSize: 14, height: 1.6),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.tonalIcon(
+              onPressed: onBrowse,
+              icon: const Icon(Icons.travel_explore, size: 17),
+              label: const Text('Browse channels'),
+              style: FilledButton.styleFrom(
+                backgroundColor: t.surfaceHover,
+                foregroundColor: t.accent,
+                textStyle: const TextStyle(fontSize: 13.5),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'or type /join #channel below',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: t.muted, fontSize: 12.5, height: 1.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// What the next message will answer, above the composer, with a way out.
@@ -1318,19 +1362,19 @@ class _SettingsMenu extends StatelessWidget {
           child: MenuRow(
             icon: Icons.search_rounded,
             label: 'Search in conversation',
+            note: 'Open a channel first',
             enabled: hasChannel,
           ),
         ),
         PopupMenuItem(
           value: _SettingsTarget.saved,
           // Disabled rather than hidden, like the channel entry below, with
-          // the reason in the label.
+          // the reason on a line of its own.
           enabled: MessageHistory.instance.enabled,
           child: MenuRow(
             icon: Icons.bookmarks_outlined,
-            label: MessageHistory.instance.enabled
-                ? 'Saved messages'
-                : 'Saved messages — needs message history',
+            label: 'Saved messages',
+            note: 'Turn on message history in Privacy',
             enabled: MessageHistory.instance.enabled,
           ),
         ),
@@ -1345,6 +1389,7 @@ class _SettingsMenu extends StatelessWidget {
             label: channelName == null
                 ? 'Channel settings'
                 : 'Channel settings — $channelName',
+            note: 'Open a channel first',
             enabled: hasChannel,
           ),
         ),

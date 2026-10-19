@@ -78,7 +78,10 @@ class NetworkRail extends StatelessWidget {
           ),
           const Divider(height: Tokens.hairline),
           _RailButton(
-            icon: Icons.travel_explore,
+            // Not the icon the channel list uses for browsing channels: this
+            // opens a different directory, and two buttons that look alike
+            // and do different things are a wrong guess waiting to happen.
+            icon: Icons.public,
             tooltip: 'Browse networks',
             onTap: onBrowse,
           ),

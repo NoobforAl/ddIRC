@@ -371,7 +371,9 @@ class _Empty extends StatelessWidget {
               // already know a server address by heart.
               TextButton.icon(
                 onPressed: onBrowse,
-                icon: const Icon(Icons.travel_explore, size: 17),
+                // The same globe the rail uses for this, and not the one the
+                // channel list uses for browsing channels.
+                icon: const Icon(Icons.public, size: 17),
                 label: const Text('Browse networks'),
                 style: TextButton.styleFrom(
                   foregroundColor: t.accent,

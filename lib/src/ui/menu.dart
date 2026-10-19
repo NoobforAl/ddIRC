@@ -16,18 +16,25 @@ ShapeBorder menuShape(Tokens t) => RoundedRectangleBorder(
   side: BorderSide(color: t.rule, width: Tokens.hairline),
 );
 
-/// One row in a popup menu: an icon, a label, and nothing else.
+/// One row in a popup menu: an icon, a label, and — for a disabled row — the
+/// reason it is disabled.
 class MenuRow extends StatelessWidget {
   const MenuRow({
     super.key,
     required this.icon,
     required this.label,
+    this.note,
     this.enabled = true,
     this.danger = false,
   });
 
   final IconData icon;
   final String label;
+
+  /// A second line under the label, for saying why a row cannot be used. Kept
+  /// off the label itself, where a long reason is cut short by the menu's
+  /// width and the part that matters is the part that goes.
+  final String? note;
 
   /// Disabled rows stay in the menu rather than disappearing from it, so the
   /// menu never changes shape between openings.
@@ -40,25 +47,42 @@ class MenuRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    // Disabled is `muted` turned down rather than `faint`: `faint` is for
+    // things that are decoration, and a disabled entry still has to be read
+    // to learn why it is disabled.
+    final dimmed = t.muted.withValues(alpha: 0.65);
     final color = !enabled
-        ? t.faint
+        ? dimmed
         : danger
         ? t.bad
         : t.text;
     final iconColor = !enabled
-        ? t.faint
+        ? dimmed
         : danger
         ? t.bad
         : t.muted;
+    final shownNote = enabled ? null : note;
     return Row(
       children: [
         Icon(icon, size: 15, color: iconColor),
         const SizedBox(width: 10),
         Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: color, fontSize: 13),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: color, fontSize: 13),
+              ),
+              if (shownNote != null)
+                Text(
+                  shownNote,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: t.muted, fontSize: 11.5),
+                ),
+            ],
           ),
         ),
       ],
