@@ -348,10 +348,15 @@ class _MessageViewState extends State<MessageView> {
 
   Future<void> _jumpToLatest() async {
     if (!_controller.hasClients) return;
+    final position = _controller.position;
     await _controller.animateTo(
-      _controller.position.maxScrollExtent,
-      duration: context.motion.slow,
-      curve: Motion.curve,
+      position.maxScrollExtent,
+      // By distance: one fixed time is a drift over two screens and a blur
+      // over two hundred.
+      duration: context.motion.travel(
+        position.maxScrollExtent - position.pixels,
+      ),
+      curve: Motion.glide,
     );
     if (!mounted) return;
     // The extent was an estimate until the rows on the way down were built;

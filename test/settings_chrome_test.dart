@@ -351,4 +351,29 @@ void main() {
       expect((await field(tester)).obscureText, isTrue);
     });
   });
+
+  group('the switch track', () {
+    for (final (name, t) in [('dark', Tokens.dark), ('light', Tokens.light)]) {
+      testWidgets('has no ring when on and a hairline when off ($name)', (
+        tester,
+      ) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: Tokens.themeFor(t),
+            home: Scaffold(
+              body: SettingsSwitch(label: 'x', value: true, onChanged: (_) {}),
+            ),
+          ),
+        );
+        final track = tester
+            .widget<Switch>(find.byType(Switch))
+            .trackOutlineColor!;
+
+        // On, the track is the accent and a grey ring round it is a smudge.
+        expect(track.resolve({WidgetState.selected}), Colors.transparent);
+        // Off, the pale track needs the line to stand apart from the card.
+        expect(track.resolve({}), t.rule);
+      });
+    }
+  });
 }

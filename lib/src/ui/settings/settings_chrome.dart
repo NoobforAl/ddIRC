@@ -66,6 +66,9 @@ class SettingsDialog extends StatelessWidget {
     final t = context.tokens;
     final viewport = MediaQuery.of(context).size;
     final full = Layout.of(context).isCompact;
+    // Full-bleed and opaque: arrive as a page, not as a dialog fading in over
+    // what it covers. See `showSoftDialog`.
+    if (full) claimFullBleed(context);
 
     final frame = Dialog(
       backgroundColor: t.surface,
@@ -716,7 +719,15 @@ class _SettingsSwitchState extends State<SettingsSwitch> {
                   activeTrackColor: t.accent,
                   inactiveThumbColor: t.muted,
                   inactiveTrackColor: t.surfaceHover,
-                  trackOutlineColor: WidgetStatePropertyAll(t.rule),
+                  // The hairline only while it is off, where the pale track needs
+                  // it to stand apart from the card. When it is on, the track is
+                  // the accent and a grey ring around it is a smudge — which on
+                  // a white card in the light theme is what it looked like.
+                  trackOutlineColor: WidgetStateProperty.resolveWith(
+                    (states) => states.contains(WidgetState.selected)
+                        ? Colors.transparent
+                        : t.rule,
+                  ),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ],

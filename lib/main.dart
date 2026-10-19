@@ -30,6 +30,7 @@ import 'src/ui/app_lock_gate.dart';
 import 'src/ui/background.dart';
 import 'src/ui/boot_screen.dart';
 import 'src/ui/notification_router.dart';
+import 'src/ui/system_bars.dart';
 import 'src/ui/window_chrome.dart';
 import 'src/ui/workspace_screen.dart';
 import 'src/ui/agent_approval_sheet.dart';
@@ -356,8 +357,10 @@ class _DdIrcAppState extends State<DdIrcApp> {
                         // Wrapping here rather than per screen means every route —
                         // and every dialog on the root navigator — sits under one
                         // frame.
-                        builder: (context, child) => WindowFrame(
-                          child: child ?? const SizedBox.shrink(),
+                        builder: (context, child) => SystemBars(
+                          child: WindowFrame(
+                            child: child ?? const SizedBox.shrink(),
+                          ),
                         ),
                         // Inside MaterialApp rather than around it, so the splash
                         // is themed and cross-fades into the app. The scopes stay

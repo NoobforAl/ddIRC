@@ -132,10 +132,11 @@ class _TouchableState extends State<Touchable> {
     if (m.disabled) return inkWell;
     return AnimatedScale(
       scale: _touch == Touch.press ? _sink : 1,
-      // Sinks at the speed of a colour change and comes back a little slower,
-      // the way something springy does.
+      // Sinks at the speed of a colour change and comes back a little slower.
+      // No overshoot on the way back: a surface that wobbles after every tap
+      // makes every tap feel like a mistake.
       duration: _touch == Touch.press ? m.fast : m.normal,
-      curve: _touch == Touch.press ? Motion.curve : Curves.easeOutBack,
+      curve: Motion.curve,
       child: inkWell,
     );
   }

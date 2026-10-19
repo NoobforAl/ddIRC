@@ -228,9 +228,9 @@ class Tokens extends ThemeExtension<Tokens> {
     mentionRule: Color(0xFF3563C0),
     own: Color(0x1F3563C0),
     bubble: Color(0xFFFFFFFF),
-    ok: Color(0xFF1E7F45),
-    warn: Color(0xFF8A6100),
-    bad: Color(0xFFC0392F),
+    ok: Color(0xFF19703B),
+    warn: Color(0xFF845D00),
+    bad: Color(0xFFB1362C),
     // Pale rather than solid, so an unread count still carries [text] and only
     // a mention gets the loud accent chip. The dark palette gets the same
     // effect the other way round, from a mid blue under near-white text.
