@@ -43,17 +43,24 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::unbounded_channel;
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 use tokio::task::JoinHandle;
 
+pub mod admin;
 pub mod identity;
 mod session;
 pub mod state;
 
-use session::Event;
+pub use admin::{
+    AdminCommand, ChannelInfo, EventKind, MemberInfo, ServerEvent, ServerHandle, Snapshot, UserInfo,
+};
+
+use admin::Request;
+use session::{Event, Keepalive};
 use state::{ClientId, Network, DEFAULT_NETWORK_NAME, DEFAULT_SERVER_NAME};
 
 #[derive(Debug, thiserror::Error)]
@@ -83,6 +90,11 @@ pub struct Config {
     pub network_name: String,
     /// Where the CA lives. The app's own private data directory.
     pub data_dir: PathBuf,
+    /// How long a registered connection may say nothing before it is sent a
+    /// `PING`. See [`session::Keepalive`] for why this exists at all.
+    pub ping_after: Duration,
+    /// How long after that `PING` before the connection is dropped.
+    pub ping_timeout: Duration,
 }
 
 impl Config {
@@ -92,6 +104,8 @@ impl Config {
             server_name: DEFAULT_SERVER_NAME.to_owned(),
             network_name: DEFAULT_NETWORK_NAME.to_owned(),
             data_dir: data_dir.into(),
+            ping_after: Keepalive::default().after,
+            ping_timeout: Keepalive::default().timeout,
         }
     }
 }
@@ -100,6 +114,7 @@ impl Config {
 pub struct LocalServer {
     port: u16,
     anchor_path: PathBuf,
+    handle: ServerHandle,
     shutdown: Option<oneshot::Sender<()>>,
     tasks: Vec<JoinHandle<()>>,
 }
@@ -134,16 +149,46 @@ impl LocalServer {
             }
         };
 
+        let keepalive = Keepalive {
+            after: config.ping_after,
+            timeout: config.ping_timeout,
+        };
         let (events_tx, mut events_rx) = unbounded_channel::<Event>();
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
+        let (admin_tx, mut admin_rx) = unbounded_channel::<Request>();
+        let (observer, _) = broadcast::channel(admin::EVENT_BACKLOG);
+        let handle = ServerHandle::new(admin_tx, observer.clone());
+
         let mut network = Network::new(config.server_name, config.network_name);
+        network.observe(observer);
         let state = tokio::spawn(async move {
-            while let Some(event) = events_rx.recv().await {
-                match event {
-                    Event::Connected { id, tx } => network.connect(id, tx),
-                    Event::Line { id, message } => network.handle(id, *message),
-                    Event::Disconnected { id, reason } => network.disconnect(id, &reason),
+            loop {
+                tokio::select! {
+                    event = events_rx.recv() => {
+                        // The end of the client traffic is the end of the
+                        // server. Operator requests alone do not keep it up:
+                        // a handle someone forgot to drop must not be able to
+                        // stop `LocalServer::stop` from returning.
+                        let Some(event) = event else { break };
+                        match event {
+                            Event::Connected { id, tx } => network.connect(id, tx),
+                            Event::Line { id, message } => network.handle(id, *message),
+                            Event::Disconnected { id, reason } => network.disconnect(id, &reason),
+                            Event::Quiet { id } => network.ping(id),
+                        }
+                    }
+                    Some(request) = admin_rx.recv() => match request {
+                        Request::Command { command, reply } => {
+                            let outcome = network.run_admin(command);
+                            if let Some(reply) = reply {
+                                let _ = reply.send(outcome);
+                            }
+                        }
+                        Request::Snapshot(reply) => {
+                            let _ = reply.send(network.snapshot());
+                        }
+                    },
                 }
             }
         });
@@ -169,6 +214,7 @@ impl LocalServer {
                             socket,
                             acceptor.clone(),
                             events_tx.clone(),
+                            keepalive,
                         ));
                     }
                     // One connection failing to arrive says nothing about the
@@ -182,6 +228,7 @@ impl LocalServer {
         Ok(Self {
             port,
             anchor_path,
+            handle,
             shutdown: Some(shutdown_tx),
             tasks: vec![accept, state],
         })
@@ -198,6 +245,11 @@ impl LocalServer {
     /// and it is a certificate the app issued to itself — see [`identity`].
     pub fn anchor_path(&self) -> &Path {
         &self.anchor_path
+    }
+
+    /// A way to watch and steer the server: see [`admin`].
+    pub fn handle(&self) -> ServerHandle {
+        self.handle.clone()
     }
 
     /// Stop accepting, and wait until it has.

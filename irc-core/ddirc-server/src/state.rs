@@ -21,7 +21,12 @@ use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use irc_proto::{CapSubCommand, Command, Message, Prefix, Response};
+use tokio::sync::broadcast;
 use tokio::sync::mpsc::UnboundedSender;
+
+use crate::admin::{EventKind, ServerEvent};
+
+mod admin;
 
 /// Identifies one connection, for as long as it lasts.
 pub type ClientId = u64;
@@ -66,6 +71,8 @@ struct Client {
     /// Normalised names of the channels this client is in, so a disconnect does
     /// not have to search every channel on the server.
     channels: HashSet<String>,
+    /// For the operator's view of how long someone has been here.
+    connected_at: u64,
 }
 
 impl Client {
@@ -111,6 +118,28 @@ pub struct Network {
     /// cannot disagree — every write goes through [`Self::claim_nick`].
     nicks: HashMap<String, ClientId>,
     channels: HashMap<String, Channel>,
+    /// The message of the day. Never empty: an operator who clears it gets the
+    /// default back rather than a server that greets people with nothing.
+    motd: Vec<String>,
+    /// Folded nicks that may not be claimed.
+    banned: HashSet<String>,
+    /// Where the operator's log view hears about things. `None` costs nothing,
+    /// which is what the protocol tests below use.
+    observer: Option<broadcast::Sender<ServerEvent>>,
+    started_at: u64,
+    connections_total: u64,
+    messages_total: u64,
+}
+
+/// What the server says after the greeting, until an operator says otherwise.
+fn default_motd() -> Vec<String> {
+    [
+        "This network runs inside ddIRC, on this machine only.",
+        "It is a beta feature: expect gaps, and do not rely on it.",
+        "Nothing here is reachable from any other machine.",
+    ]
+    .map(str::to_owned)
+    .to_vec()
 }
 
 /// Fold case the way `CASEMAPPING=ascii` says to.
@@ -188,6 +217,25 @@ impl Network {
             clients: HashMap::new(),
             nicks: HashMap::new(),
             channels: HashMap::new(),
+            motd: default_motd(),
+            banned: HashSet::new(),
+            observer: None,
+            started_at: now(),
+            connections_total: 0,
+            messages_total: 0,
+        }
+    }
+
+    /// Report what happens here to `observer`.
+    pub fn observe(&mut self, observer: broadcast::Sender<ServerEvent>) {
+        self.observer = Some(observer);
+    }
+
+    /// Tell the operator's view, if there is one. A send with nobody listening
+    /// is not an error and is not treated as one.
+    fn emit(&self, kind: EventKind) {
+        if let Some(observer) = &self.observer {
+            let _ = observer.send(ServerEvent::new(kind));
         }
     }
 
@@ -198,6 +246,8 @@ impl Network {
 
     /// A connection has been accepted. Nothing is known about it yet.
     pub fn connect(&mut self, id: ClientId, tx: UnboundedSender<Message>) {
+        self.connections_total += 1;
+        self.emit(EventKind::Connected { id });
         self.clients.insert(
             id,
             Client {
@@ -209,6 +259,7 @@ impl Network {
                 negotiating: false,
                 quit_reason: None,
                 channels: HashSet::new(),
+                connected_at: now(),
             },
         );
     }
@@ -227,11 +278,24 @@ impl Network {
             self.nicks.remove(&fold(nick));
         }
 
-        let said = client.quit_reason.clone();
+        let said = client
+            .quit_reason
+            .clone()
+            .unwrap_or_else(|| reason.to_owned());
+        match &client.nick {
+            Some(nick) if client.registered => self.emit(EventKind::Quit {
+                nick: nick.clone(),
+                reason: said.clone(),
+            }),
+            _ => self.emit(EventKind::Dropped {
+                id,
+                reason: said.clone(),
+            }),
+        }
         let quit = Message {
             tags: None,
             prefix: Some(client.prefix()),
-            command: Command::QUIT(Some(said.unwrap_or_else(|| reason.to_owned()))),
+            command: Command::QUIT(Some(said)),
         };
 
         // Once, not once per shared channel: someone who shares three channels
@@ -271,15 +335,16 @@ impl Network {
             Command::PING(token, _) => self.on_ping(id, token),
             Command::PONG(..) => {}
             Command::QUIT(reason) => {
-                // The session task sees the socket close and calls `disconnect`
-                // itself, so the connection is not ended here — only what to
-                // say about it is recorded. Bounded like a topic, because it is
-                // a string from the wire that is about to be sent to everyone
-                // else on the server.
-                if let Some(client) = self.clients.get_mut(&id) {
-                    client.quit_reason =
-                        Some(reason.map_or_else(|| "Quit".to_owned(), |r| truncate(&r, TOPIC_LEN)));
-                }
+                // Bounded like a topic, because it is a string from the wire
+                // that is about to be sent to everyone else on the server.
+                //
+                // And the link ends here, as it does on every other server: the
+                // client has said it is leaving, and holding the connection open
+                // until it chooses to hang up leaves a half-dead one around for
+                // however long that takes, and a client that is waiting for the
+                // server to close first waiting for nothing.
+                let said = reason.map_or_else(|| "Quit".to_owned(), |r| truncate(&r, TOPIC_LEN));
+                self.close(id, &said);
             }
             command => {
                 if !self.is_registered(id) {
@@ -310,12 +375,40 @@ impl Network {
             Command::PRIVMSG(target, text) => self.on_message(id, &target, &text, false),
             Command::NOTICE(target, text) => self.on_message(id, &target, &text, true),
             Command::TOPIC(channel, topic) => self.on_topic(id, &channel, topic),
+            Command::KICK(channels, nicks, reason) => {
+                let channels: Vec<&str> = channels.split(',').map(str::trim).collect();
+                for (i, nick) in nicks.split(',').map(str::trim).enumerate() {
+                    // One channel and several nicks kicks them all from it;
+                    // otherwise the two lists pair off, as the protocol says.
+                    let channel = match channels.as_slice() {
+                        [only] => *only,
+                        many => match many.get(i) {
+                            Some(channel) => channel,
+                            None => break,
+                        },
+                    };
+                    self.on_kick(id, channel, nick, reason.as_deref());
+                }
+            }
             Command::NAMES(Some(channels), _) => {
                 for name in channels.split(',') {
                     self.send_names(id, name.trim());
                 }
             }
             Command::MOTD(_) => self.send_motd(id),
+            Command::LIST(channels, _) => self.on_list(id, channels.as_deref()),
+            // `WHOIS nick` and `WHOIS server nick` are both in use; the nick is
+            // the last word either way.
+            Command::WHOIS(target, masks) => {
+                let asked = if masks.is_empty() {
+                    target.unwrap_or_default()
+                } else {
+                    masks
+                };
+                for nick in asked.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                    self.on_whois(id, nick);
+                }
+            }
             // Answered rather than left to time out. No modes are settable on
             // this server, so a query is the only form that can be honoured,
             // and 324 with an empty mode string is the true answer.
@@ -381,6 +474,14 @@ impl Network {
             return;
         }
         let key = fold(nick);
+        if self.banned.contains(&key) {
+            self.numeric_args(
+                id,
+                Response::ERR_ERRONEOUSNICKNAME,
+                &[nick, "Nickname is banned from this server"],
+            );
+            return;
+        }
         if let Some(&holder) = self.nicks.get(&key) {
             if holder != id {
                 self.numeric_args(
@@ -400,6 +501,10 @@ impl Network {
             // A rename mid-session. Everyone who can see this client has to be
             // told, or their member lists silently go stale.
             (true, Some(old)) if old != nick => {
+                self.emit(EventKind::NickChanged {
+                    old: old.clone(),
+                    new: nick.to_owned(),
+                });
                 let change = Message {
                     tags: None,
                     prefix: Some(Prefix::Nickname(
@@ -446,6 +551,8 @@ impl Network {
             client.registered = true;
         }
         self.send_welcome(id);
+        let nick = self.nick_of(id);
+        self.emit(EventKind::Registered { id, nick });
     }
 
     fn send_welcome(&mut self, id: ClientId) {
@@ -511,13 +618,10 @@ impl Network {
         // The beta label belongs here as well as in the settings switch that
         // turned this on. A MOTD is the one thing every client shows on
         // arrival, and it is read by whoever connected — who may not be the
-        // person who started the server.
-        for line in [
-            "- This network runs inside ddIRC, on this machine only.",
-            "- It is a beta feature: expect gaps, and do not rely on it.",
-            "- Nothing here is reachable from any other machine.",
-        ] {
-            self.numeric(id, Response::RPL_MOTD, &[line]);
+        // person who started the server. An operator can replace it, but never
+        // with nothing: see [`Self::motd`].
+        for line in self.motd.clone() {
+            self.numeric(id, Response::RPL_MOTD, &[&format!("- {line}")]);
         }
         self.numeric(id, Response::RPL_ENDOFMOTD, &["End of /MOTD command"]);
     }
@@ -565,6 +669,10 @@ impl Network {
         // whether it is in.
         self.send(id, join.clone());
         self.broadcast(&key, join, Some(id));
+        self.emit(EventKind::Joined {
+            nick: self.nick_of(id),
+            channel: shown.clone(),
+        });
 
         self.send_topic(id, &key, false);
         self.send_names(id, &shown);
@@ -593,6 +701,11 @@ impl Network {
         // Sent while still a member, so the leaver sees their own PART too —
         // that is the acknowledgement the command has taken effect.
         self.broadcast(&key, part.clone(), None);
+        self.emit(EventKind::Parted {
+            nick: self.nick_of(id),
+            channel: self.channels[&key].name.clone(),
+            reason: reason.map(str::to_owned),
+        });
 
         if let Some(channel) = self.channels.get_mut(&key) {
             channel.members.remove(&id);
@@ -639,6 +752,11 @@ impl Network {
                 })
             };
         }
+        self.emit(EventKind::Topic {
+            channel: shown.clone(),
+            by: self.nick_of(id),
+            topic: text.clone(),
+        });
         let change = Message {
             tags: None,
             prefix: Some(self.prefix_of(id)),
@@ -733,6 +851,26 @@ impl Network {
             prefix: Some(self.prefix_of(id)),
             command,
         };
+        self.messages_total += 1;
+        // Only a message that was actually going somewhere is worth reporting;
+        // the refusals below are the sender's problem and say so to the sender.
+        let reportable = if is_channel(target) {
+            self.channels
+                .get(&fold(target))
+                .is_some_and(|c| c.members.contains(&id))
+        } else {
+            self.nicks.contains_key(&fold(target))
+        };
+        if reportable {
+            self.emit(EventKind::Message {
+                from: self.nick_of(id),
+                target: target.to_owned(),
+                // A room's conversation is the operator's to see; a private
+                // one is not. See `EventKind`.
+                text: is_channel(target).then(|| text.to_owned()),
+                notice,
+            });
+        }
 
         if is_channel(target) {
             let key = fold(target);
@@ -770,6 +908,195 @@ impl Network {
             }
             None => {}
         }
+    }
+
+    /// `KICK`, from a client. Only a channel operator may.
+    fn on_kick(&mut self, id: ClientId, name: &str, nick: &str, reason: Option<&str>) {
+        let key = fold(name);
+        let Some(channel) = self.channels.get(&key) else {
+            self.numeric_args(id, Response::ERR_NOSUCHCHANNEL, &[name, "No such channel"]);
+            return;
+        };
+        let shown = channel.name.clone();
+        if !channel.members.contains(&id) {
+            self.numeric_args(
+                id,
+                Response::ERR_NOTONCHANNEL,
+                &[name, "You're not on that channel"],
+            );
+            return;
+        }
+        if !channel.operators.contains(&id) {
+            self.numeric_args(
+                id,
+                Response::ERR_CHANOPRIVSNEEDED,
+                &[&shown, "You're not channel operator"],
+            );
+            return;
+        }
+        let victim = self
+            .nicks
+            .get(&fold(nick))
+            .copied()
+            .filter(|v| channel.members.contains(v));
+        let Some(victim) = victim else {
+            self.numeric_args(
+                id,
+                Response::ERR_USERNOTINCHANNEL,
+                &[nick, &shown, "They aren't on that channel"],
+            );
+            return;
+        };
+        let by = self.prefix_of(id);
+        let reason = reason.map(|r| truncate(r, TOPIC_LEN));
+        self.kick_member(&key, victim, by, reason.as_deref());
+    }
+
+    /// Remove `victim` from a channel, telling everyone in it — the victim
+    /// included, and first, so the person removed hears why.
+    ///
+    /// The one place a kick happens, whether a channel operator asked or the
+    /// server's own operator did, so the two cannot come to differ.
+    fn kick_member(&mut self, key: &str, victim: ClientId, by: Prefix, reason: Option<&str>) {
+        let Some(channel) = self.channels.get(key) else {
+            return;
+        };
+        let shown = channel.name.clone();
+        let victim_nick = self.nick_of(victim);
+        let by_name = match &by {
+            Prefix::Nickname(nick, ..) => nick.clone(),
+            Prefix::ServerName(name) => name.clone(),
+        };
+        let kick = Message {
+            tags: None,
+            prefix: Some(by),
+            command: Command::KICK(
+                shown.clone(),
+                victim_nick.clone(),
+                Some(reason.unwrap_or(&by_name).to_owned()),
+            ),
+        };
+        self.broadcast(key, kick, None);
+        self.emit(EventKind::Kicked {
+            nick: victim_nick,
+            channel: shown,
+            by: by_name,
+            reason: reason.map(str::to_owned),
+        });
+
+        if let Some(channel) = self.channels.get_mut(key) {
+            channel.members.remove(&victim);
+            channel.operators.remove(&victim);
+            if channel.members.is_empty() {
+                self.channels.remove(key);
+            }
+        }
+        if let Some(client) = self.clients.get_mut(&victim) {
+            client.channels.remove(key);
+        }
+    }
+
+    /// `LIST`: every channel, or the ones named.
+    ///
+    /// Sorted, so the answer is the same answer twice: the client's browser
+    /// re-sorts by size, but a stable order underneath keeps equal-sized rooms
+    /// from swapping places between refreshes.
+    fn on_list(&mut self, id: ClientId, only: Option<&str>) {
+        let wanted: Option<Vec<String>> =
+            only.map(|names| names.split(',').map(|n| fold(n.trim())).collect());
+        let mut rooms: Vec<(String, usize, String)> = self
+            .channels
+            .iter()
+            .filter(|(key, _)| wanted.as_ref().is_none_or(|w| w.contains(key)))
+            .map(|(key, c)| {
+                (
+                    key.clone(),
+                    c.members.len(),
+                    c.topic.as_ref().map(|t| t.text.clone()).unwrap_or_default(),
+                )
+            })
+            .collect();
+        rooms.sort();
+
+        self.numeric_args(id, Response::RPL_LISTSTART, &["Channel", "Users  Name"]);
+        for (key, users, topic) in rooms {
+            let name = self.channels[&key].name.clone();
+            self.numeric_args(id, Response::RPL_LIST, &[&name, &users.to_string(), &topic]);
+        }
+        self.numeric(id, Response::RPL_LISTEND, &["End of /LIST"]);
+    }
+
+    /// `WHOIS`: who is this, and where are they.
+    fn on_whois(&mut self, id: ClientId, nick: &str) {
+        let known = self
+            .nicks
+            .get(&fold(nick))
+            .copied()
+            .filter(|t| self.is_registered(*t));
+        let Some(target) = known else {
+            // Told so, and the query is still closed off: the client waits for
+            // the end to know it has its answer.
+            self.numeric_args(
+                id,
+                Response::ERR_NOSUCHNICK,
+                &[nick, "No such nick/channel"],
+            );
+            self.numeric_args(id, Response::RPL_ENDOFWHOIS, &[nick, "End of /WHOIS list"]);
+            return;
+        };
+        let Some(client) = self.clients.get(&target) else {
+            return;
+        };
+        let name = client.nick().to_owned();
+        let user = client.user.clone().unwrap_or_else(|| name.clone());
+        let real = client.real.clone().unwrap_or_default();
+        let mut rooms: Vec<String> = client
+            .channels
+            .iter()
+            .filter_map(|key| {
+                let c = self.channels.get(key)?;
+                Some(if c.operators.contains(&target) {
+                    format!("@{}", c.name)
+                } else {
+                    c.name.clone()
+                })
+            })
+            .collect();
+        rooms.sort();
+        let server = self.server_name.clone();
+        let network = self.network_name.clone();
+
+        self.numeric_args(
+            id,
+            Response::RPL_WHOISUSER,
+            &[&name, &user, HOST, "*", &real],
+        );
+        self.numeric_args(id, Response::RPL_WHOISSERVER, &[&name, &server, &network]);
+        if !rooms.is_empty() {
+            self.numeric_args(id, Response::RPL_WHOISCHANNELS, &[&name, &rooms.join(" ")]);
+        }
+        self.numeric_args(id, Response::RPL_ENDOFWHOIS, &[&name, "End of /WHOIS list"]);
+    }
+
+    /// Ask a client whether it is still there.
+    ///
+    /// The reply is an ordinary `PONG`, which is handled — as nothing — like any
+    /// other line; what matters is that the connection *produced* one, which the
+    /// session task notices for itself. Nobody is asked before they are
+    /// registered: the registration deadline already covers them.
+    pub fn ping(&mut self, id: ClientId) {
+        if !self.is_registered(id) {
+            return;
+        }
+        let server = self.server_name.clone();
+        self.send(
+            id,
+            Message {
+                tags: None,
+                prefix: None,
+                command: Command::PING(server, None),
+            },
+        );
     }
 
     fn on_ping(&mut self, id: ClientId, token: String) {
@@ -1269,5 +1596,74 @@ mod tests {
             4,
             "{lines:?}"
         );
+    }
+    #[test]
+    fn list_answers_with_every_room_its_size_and_its_topic() {
+        let (mut net, mut rxs) = network(2);
+        register(&mut net, 0, "alice");
+        register(&mut net, 1, "bob");
+        net.handle(0, Message::new(None, "JOIN", vec!["#busy"]).unwrap());
+        net.handle(1, Message::new(None, "JOIN", vec!["#busy"]).unwrap());
+        net.handle(1, Message::new(None, "JOIN", vec!["#quiet"]).unwrap());
+        net.handle(
+            0,
+            Message::new(None, "TOPIC", vec!["#busy", "talk here"]).unwrap(),
+        );
+        drain(&mut rxs[0]);
+
+        net.handle(0, Message::new(None, "LIST", Vec::<&str>::new()).unwrap());
+        let lines = drain(&mut rxs[0]);
+        assert!(has(&lines, " 321 alice "), "{lines:?}");
+        assert!(has(&lines, " 322 alice #busy 2 :talk here"), "{lines:?}");
+        assert!(has(&lines, " 322 alice #quiet 1 :"), "{lines:?}");
+        assert!(has(&lines, " 323 alice "), "{lines:?}");
+
+        // A named room, in any case, and only that one.
+        net.handle(0, Message::new(None, "LIST", vec!["#QUIET"]).unwrap());
+        let lines = drain(&mut rxs[0]);
+        assert!(has(&lines, " 322 alice #quiet 1 "), "{lines:?}");
+        assert!(!has(&lines, "#busy"), "{lines:?}");
+    }
+
+    #[test]
+    fn whois_says_who_they_are_and_where_and_that_is_all() {
+        let (mut net, mut rxs) = network(2);
+        register(&mut net, 0, "alice");
+        register(&mut net, 1, "bob");
+        net.handle(1, Message::new(None, "JOIN", vec!["#room"]).unwrap());
+        drain(&mut rxs[0]);
+
+        net.handle(0, Message::new(None, "WHOIS", vec!["BOB"]).unwrap());
+        let lines = drain(&mut rxs[0]);
+        assert!(
+            has(&lines, " 311 alice bob bob localhost * :Real Name"),
+            "{lines:?}"
+        );
+        assert!(has(&lines, " 312 alice bob ddirc.local "), "{lines:?}");
+        assert!(has(&lines, " 319 alice bob @#room"), "{lines:?}");
+        assert!(has(&lines, " 318 alice bob "), "{lines:?}");
+
+        net.handle(0, Message::new(None, "WHOIS", vec!["ghost"]).unwrap());
+        let lines = drain(&mut rxs[0]);
+        assert!(has(&lines, " 401 alice ghost "), "{lines:?}");
+        assert!(has(&lines, " 318 alice ghost "), "{lines:?}");
+    }
+
+    #[test]
+    fn a_ping_is_for_registered_clients_and_names_the_server() {
+        let (mut net, mut rxs) = network(2);
+        register(&mut net, 0, "alice");
+        drain(&mut rxs[0]);
+
+        net.ping(0);
+        let lines = drain(&mut rxs[0]);
+        assert_eq!(lines, vec!["PING ddirc.local".to_owned()]);
+
+        // Someone still registering has the registration deadline already, and
+        // nothing to answer with until they have a name.
+        net.ping(1);
+        assert!(drain(&mut rxs[1]).is_empty());
+        // And a client that has gone is not an error.
+        net.ping(99);
     }
 }
