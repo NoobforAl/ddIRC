@@ -115,16 +115,20 @@ impl std::fmt::Debug for Identity {
 ///
 /// * A **symbolic link** is refused. It is a way to have the key written
 ///   somewhere other than where the operator was told it is.
-/// * A directory **writable by everyone** is refused. Anyone could replace the
-///   certificate or the key beside it, and a client that trusts this CA would
-///   then trust whatever they put there.
+/// * A directory **someone else owns** is refused, and so is one that **group
+///   or others can write to**. Either way they could replace the certificate or
+///   the key beside it, and a client that trusts this CA would then trust
+///   whatever they put there.
 /// * A directory that did not exist is created readable by its owner only.
 ///   Left to the process's umask it would be 0755 on most systems, which is
 ///   not a secret place.
 ///
-/// Group-writable is allowed: a per-user group is the default on common
-/// systems, so refusing it would refuse an ordinary home directory. Windows has
-/// no mode bits; the per-user data directory is private there already.
+/// The checks are made on the directory as opened (without following a link,
+/// and as a directory), not on the path before it: a path can be swapped between
+/// being looked at and being used, a handle cannot. Once the directory is ours
+/// and closed to everyone else, nobody else can win a race inside it either.
+/// Windows has no mode bits; the per-user data directory is private there
+/// already.
 fn prepare_dir(dir: &Path) -> Result<(), IdentityError> {
     let to_io = |source: io::Error| IdentityError::Io {
         path: dir.to_path_buf(),
@@ -147,18 +151,85 @@ fn prepare_dir(dir: &Path) -> Result<(), IdentityError> {
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        if !existed {
-            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(to_io)?;
-        } else if fs::metadata(dir).map_err(to_io)?.permissions().mode() & 0o002 != 0 {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+        let handle = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(dir)
+            .map_err(to_io)?;
+        let meta = handle.metadata().map_err(to_io)?;
+        if meta.uid() != euid() {
             return Err(to_io(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                "the directory is writable by everyone, so anyone could replace \
-                 the certificate authority's key",
+                "the directory belongs to someone else, who could replace the \
+                 certificate authority's key",
+            )));
+        }
+        if !existed {
+            // fchmod on the handle just checked, not a chmod on the path again.
+            handle
+                .set_permissions(fs::Permissions::from_mode(0o700))
+                .map_err(to_io)?;
+        } else if meta.mode() & 0o022 != 0 {
+            return Err(to_io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the directory can be written to by others, so they could replace \
+                 the certificate authority's key (chmod go-w it, or pass another \
+                 --data-dir)",
             )));
         }
     }
     Ok(())
+}
+
+/// The user this process is running as.
+#[cfg(unix)]
+fn euid() -> u32 {
+    // SAFETY: geteuid takes no arguments, touches no memory and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+/// Read the CA's private key.
+///
+/// On Unix the file is opened without following a link and checked as it was
+/// opened: it must be a plain file this user owns that nobody else can read. A
+/// key anyone else could have written is not one to sign certificates with, and
+/// one anyone else can read is already compromised, so both are refused rather
+/// than quietly used.
+fn read_private(path: &Path) -> Result<Option<String>, IdentityError> {
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+        let to_io = |source: io::Error| IdentityError::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        let mut file = match fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(to_io(e)),
+        };
+        let meta = file.metadata().map_err(to_io)?;
+        if !meta.is_file() || meta.uid() != euid() || meta.mode() & 0o077 != 0 {
+            return Err(to_io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the private key is not a plain file owned by this user and \
+                 closed to everyone else; remove it to have a new one issued",
+            )));
+        }
+        let mut text = String::new();
+        file.read_to_string(&mut text).map_err(to_io)?;
+        Ok(Some(text))
+    }
+    #[cfg(not(unix))]
+    {
+        read(path)
+    }
 }
 
 /// Load the CA from `dir`, issuing one first if there is not one already, and
@@ -169,7 +240,7 @@ pub fn load_or_create(dir: &Path) -> Result<Identity, IdentityError> {
 
     prepare_dir(dir)?;
 
-    let (ca_pem, ca_key_pem) = match (read(&cert_path)?, read(&key_path)?) {
+    let (ca_pem, ca_key_pem) = match (read(&cert_path)?, read_private(&key_path)?) {
         (Some(cert), Some(key)) => (cert, key),
         // One without the other cannot be repaired, only replaced: a
         // certificate whose key is gone can sign nothing, and a key whose
@@ -268,7 +339,8 @@ fn write_private(path: &Path, contents: &str) -> Result<(), IdentityError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        // And never through a link someone left where the key goes.
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
 
     use std::io::Write;
@@ -429,5 +501,52 @@ mod tests {
 
         assert!(matches!(refused, Err(IdentityError::Io { .. })));
         assert!(!real.0.join(CA_KEY).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_others_can_write_to_is_refused_even_if_only_the_group() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("group-writable");
+        fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o775)).unwrap();
+
+        assert!(matches!(
+            load_or_create(&dir.0),
+            Err(IdentityError::Io { .. })
+        ));
+        assert!(!dir.0.join(CA_KEY).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_key_others_can_read_is_not_used() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("loose-key");
+        load_or_create(&dir.0).unwrap();
+        let key = dir.0.join(CA_KEY);
+        fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
+
+        // Refused outright: not silently reissued, which would hide that the
+        // old key had been exposed.
+        assert!(matches!(
+            load_or_create(&dir.0),
+            Err(IdentityError::Io { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_key_that_is_a_link_is_neither_read_nor_written_through() {
+        let dir = TempDir::new("key-link");
+        let elsewhere = TempDir::new("key-link-target");
+        let target = elsewhere.0.join("stolen");
+        fs::write(&target, "untouched").unwrap();
+        std::os::unix::fs::symlink(&target, dir.0.join(CA_KEY)).unwrap();
+
+        assert!(matches!(
+            load_or_create(&dir.0),
+            Err(IdentityError::Io { .. })
+        ));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "untouched");
     }
 }

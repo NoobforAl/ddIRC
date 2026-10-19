@@ -120,8 +120,10 @@ Its private key is the one secret, so the directory is treated accordingly. If
 there is no per-user place to put it (`LOCALAPPDATA`, `XDG_DATA_HOME` and `HOME`
 all unset) the server stops and asks for `--data-dir` rather than falling back to
 the shared temporary directory. On Unix a directory it creates is private to its
-owner, and one that is a symbolic link or writable by everyone is refused,
-since either would let someone else swap the certificate a client trusts.
+owner, and one that is a symbolic link, belongs to someone else, or can be
+written to by group or others is refused, as is a key file that is a link or is
+readable by others. Any of those would let someone else swap the certificate a
+client trusts.
 
 ### The manager
 

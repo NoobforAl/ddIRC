@@ -27,6 +27,11 @@ futures-util = { workspace = true, features = ["sink"] }
 thiserror.workspace = true
 tracing.workspace = true
 
+# The effective user id, to tell whose a directory is. Already in the tree
+# under tokio; std has no way to ask.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "test-util"] }
 # The real client, so the round-trip tests prove the thing that actually

@@ -1062,6 +1062,7 @@ dependencies = [
  "ddirc-core",
  "futures-util",
  "irc-proto",
+ "libc",
  "rcgen",
  "rustls",
  "thiserror 2.0.21",
