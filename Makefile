@@ -79,12 +79,25 @@ COMPOSE ?= docker compose -f dev/compose.yaml
 # profiled container and leaves it running.
 PROFILES ?= --profile proxy --profile tor
 
+# The terminal client and server (`ddirc-cli`), run against each other. No
+# Docker: the server is the Rust one, so this is the quickest way to see either
+# screen with someone to talk to. The port is not 6697 because that is where
+# `make dev-server` puts ergo, and the two should be runnable side by side.
+TUI_PORT  ?= 6698
+TUI_DIR   ?= dev/tui
+TUI_NICK  ?= tester
+# Passed to whichever one is being run: `make dev-tui-server TUI_FLAGS=--no-tui`
+# for the headless log, `make dev-tui TUI_FLAGS=--no-tui` for plain lines.
+TUI_FLAGS ?=
+CLI       := $(CARGO) run $(MANIFEST) -p ddirc-cli --
+
 .DEFAULT_GOAL := help
 .PHONY: help outdated fix fmt lint test test-integration dev build build-release installer check-iscc \
         build-android build-android-release keystore keystore-secrets \
         build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
-        dev-proxy dev-tor dev-tor-logs dev-onion-cert
+        dev-proxy dev-tor dev-tor-logs dev-onion-cert \
+        dev-tui dev-tui-server dev-tui-clean
 
 help:
 	@echo "ddIRC"
@@ -117,6 +130,11 @@ help:
 	@echo "  make dev-tor           real Tor on 127.0.0.1:9050, for public nets"
 	@echo "  make dev-tor-logs      follow Tor's bootstrap"
 	@echo "  make dev-onion-cert    reissue the server cert for its onion name"
+	@echo ""
+	@echo "  make dev-tui-server    the terminal server manager, on 127.0.0.1:6698"
+	@echo "  make dev-tui           the terminal client, in a second terminal"
+	@echo "                         (TUI_NICK=name, TUI_PORT=n, TUI_FLAGS=--no-tui)"
+	@echo "  make dev-tui-clean     forget the terminal server's certificate"
 	@echo ""
 	@echo "Override a tool path if it is not on PATH, e.g."
 	@echo "  make fix FLUTTER=/c/src/flutter/bin/flutter"
@@ -411,3 +429,29 @@ dev-onion-cert:
 
 dev-server-logs:
 	$(COMPOSE) logs -f
+
+## The terminal server manager: who is connected, channels, kick and ban.
+#
+# Needs a terminal of its own; leave it running and start `make dev-tui` in
+# another. The certificate authority it issues is kept in $(TUI_DIR) so that a
+# client which trusted it once goes on trusting it across restarts.
+dev-tui-server:
+	$(CLI) server --port $(TUI_PORT) --data-dir $(TUI_DIR) $(TUI_FLAGS)
+
+## The terminal client, joined to #ddirc-test on that server.
+#
+# A second person to test with is `make dev-tui TUI_NICK=other` in a third
+# terminal. Checks for the certificate first, because without it the failure is
+# a client sitting in "reconnecting" for a reason that is not on screen.
+dev-tui:
+	@test -f $(TUI_DIR)/local-server-ca.pem || { \
+	  echo "No certificate yet: start the server first, in another terminal:"; \
+	  echo "  make dev-tui-server"; exit 1; }
+	$(CLI) client --server 127.0.0.1 --port $(TUI_PORT) \
+	  --ca-file $(TUI_DIR)/local-server-ca.pem \
+	  --nick $(TUI_NICK) --channel '#ddirc-test' $(TUI_FLAGS)
+
+## Drops the terminal server's certificate authority. Clients will need telling
+## to trust the new one, which `make dev-tui` does by itself.
+dev-tui-clean:
+	rm -rf $(TUI_DIR)

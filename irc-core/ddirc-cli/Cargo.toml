@@ -4,11 +4,34 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "CLI test harness that exercises ddirc-core without Flutter."
+description = "A terminal IRC client and server built on ddirc-core, with a full-screen interface for each."
 
 [dependencies]
 ddirc-core = { path = "../ddirc-core" }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util"] }
+ddirc-server = { path = "../ddirc-server" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util", "sync", "time"] }
 zeroize.workspace = true
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# The full-screen interfaces. Terminal-only: nothing here is linked into the
+# app, because `ddirc-bridge` does not depend on this crate.
+#
+# `ratatui` for drawing, with only its crossterm backend. Its widget set and
+# layout engine are the part worth not rewriting; its default features add a
+# macro crate and a calendar widget this does not use.
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color"] }
+# A single-line text field with a cursor, word movement and horizontal
+# scrolling — the input line of the client and the command bar of the server.
+# Getting grapheme-correct editing right is the kind of thing that is not worth
+# doing twice.
+#
+# Through its own `crossterm` feature rather than its default one. The default
+# goes by way of `ratatui`, and a dependency's `ratatui` comes with ratatui's
+# default features regardless of what this file says about them: a macro crate
+# and a calendar widget, neither of which this uses.
+tui-input = { version = "0.15", default-features = false, features = ["crossterm"] }
+# A centred popup that sizes itself to its content: the help screens and the
+# "really remove them?" question.
+tui-popup = "0.7"
+unicode-width = "0.2"

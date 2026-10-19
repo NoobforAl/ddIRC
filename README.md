@@ -54,6 +54,7 @@ is per-user and never asks for administrator rights. To build from source, see
 | [Features](docs/features.md) | Networks, DMs, browsing, `.irc` import/export, the window and background running, notifications, settings, file transfers, agents (MCP) |
 | [Privacy](docs/privacy.md) | What is sent about you, the proxy and Tor, onion addresses, logs, message history |
 | [The local server](docs/local-server.md) | The loopback-only IRC server inside the app |
+| [The terminal client and server](docs/cli.md) | `ddirc-cli`: a full-screen IRC client, a full-screen server manager, and a headless server |
 | [Architecture and design](docs/architecture.md) | Repository layout, core modules, why Rust, design notes, dependency choices, the icon |
 | [Testing and CI](docs/testing.md) | Test suites, the dev server, CI and release workflows |
 | [The `.irc` file format](docs/irc-file-format.md) | Writing a network config by hand |

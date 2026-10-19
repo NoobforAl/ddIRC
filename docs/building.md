@@ -24,6 +24,10 @@ cargo run -p ddirc-cli -- \
 Once connected: `/join #channel`, `/part [reason]`, `/nick <new>`, `/me <action>`,
 `/msg <target> <text>`, `/quit`. Anything else is sent to the current channel.
 
+On a terminal this is a full-screen client; add `--no-tui` for plain lines. The
+same binary also runs a server: `cargo run -p ddirc-cli -- server`. See
+[the CLI](cli.md).
+
 ## Building the Android app
 
 **The minimum is Android 10, API 29.** It is pinned in

@@ -17,7 +17,7 @@ ddIRC/
 ├─ rust_builder/      # cargokit glue that builds Rust during a Flutter build
 ├─ irc-core/          # the Cargo workspace
 │  ├─ ddirc-core/     # the reusable core — no Flutter awareness
-│  ├─ ddirc-cli/      # terminal harness: the core with no Flutter in the way
+│  ├─ ddirc-cli/      # terminal client and server, each full-screen or plain lines
 │  ├─ ddirc-server/   # the local IRC server: loopback only, TLS only
 │  ├─ ddirc-tor/      # the bundled Tor: arti behind a loopback SOCKS5 port
 │  └─ ddirc-bridge/   # ddirc_bridge — the frb binding crate
@@ -42,7 +42,7 @@ flowchart TB
         core["ddirc-core<br/>no Flutter awareness"]
         tor["ddirc-tor<br/>arti → loopback SOCKS5"]
         server["ddirc-server<br/>loopback, TLS only"]
-        cli["ddirc-cli<br/>terminal harness"]
+        cli["ddirc-cli<br/>terminal client + server"]
     end
 
     ui --> gen
@@ -274,6 +274,20 @@ calculus differs: a container written slightly wrong shows up as a file that
 will not open, whereas a certificate written slightly wrong is fed to a
 verifier that has to accept it *and* has to go on refusing what it should
 refuse. That is not the place to save a dependency.
+
+The terminal interfaces added **four direct dependencies**, all in `ddirc-cli` and
+none of them in the app (`ddirc-bridge` does not depend on it): `ratatui` to
+draw, `tui-input` for a single-line text field with a cursor, `tui-popup` for the
+help and confirmation boxes, and `unicode-width` for measuring columns. Together
+they compile 27 crates that were not already being built; `Cargo.lock` records
+about 50 more that Cargo resolves but does not compile (other terminal backends
+and their parsers, behind features nothing turns on). `ratatui` is taken with
+only its crossterm backend. The
+terminal is read on a thread of its own rather than through crossterm's async
+event stream, which would have needed another feature and another crate to save
+twenty lines. `tui-textarea`, the obvious choice for an input line, is not used:
+its published release is built against ratatui 0.29, and two ratatui versions in
+one tree is two sets of widget types that cannot be passed to each other.
 
 The Android foreground service added **nothing**. A notification, a channel and
 a permission are three framework APIs behind version guards, which is less code
