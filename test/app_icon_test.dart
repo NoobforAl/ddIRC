@@ -23,9 +23,8 @@ void main() {
   });
 
   test('the Windows icon is the current mark, at every size', () {
-    final committed = File(
-      'windows/runner/resources/app_icon.ico',
-    ).readAsBytesSync();
+    final committed = File('windows/runner/resources/app_icon.ico')
+        .readAsBytesSync();
     expect(committed.isNotEmpty, isTrue);
     // Rebuilt end to end rather than compared entry by entry: the directory
     // offsets are part of what can go wrong.

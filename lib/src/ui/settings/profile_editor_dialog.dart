@@ -612,9 +612,8 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
-    final connected = WorkspaceScope.of(
-      context,
-    ).isConnected(widget.profile?.id ?? '');
+    final connected = WorkspaceScope.of(context)
+        .isConnected(widget.profile?.id ?? '');
     final compact = context.layout.isCompact;
 
     return SettingsDialog(

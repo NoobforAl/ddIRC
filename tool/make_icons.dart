@@ -256,9 +256,9 @@ void appleIcons(
   void Function(String path, List<int> bytes) write,
   Uint8List Function(int size) draw,
 ) {
-  final catalogue =
-      jsonDecode(File('$dir/Contents.json').readAsStringSync())
-          as Map<String, dynamic>;
+  final catalogue = jsonDecode(
+    File('$dir/Contents.json').readAsStringSync(),
+  ) as Map<String, dynamic>;
 
   final wanted = <String, int>{};
   for (final entry

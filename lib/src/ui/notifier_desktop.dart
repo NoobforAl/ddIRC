@@ -172,9 +172,8 @@ Future<int?> _regDword(String key, String value) async {
   try {
     final result = await Process.run('reg', ['query', key, '/v', value]);
     if (result.exitCode != 0) return null;
-    final match = RegExp(
-      r'REG_DWORD\s+0x([0-9a-fA-F]+)',
-    ).firstMatch('${result.stdout}');
+    final match = RegExp(r'REG_DWORD\s+0x([0-9a-fA-F]+)')
+        .firstMatch('${result.stdout}');
     return match == null ? null : int.parse(match.group(1)!, radix: 16);
   } catch (e) {
     debugPrint('could not read $key\$value: $e');

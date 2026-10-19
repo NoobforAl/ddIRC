@@ -5,7 +5,7 @@ members = ["ddirc-core", "ddirc-cli", "ddirc-bridge", "ddirc-server", "ddirc-tor
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.91"
+rust-version = "1.92"
 license = "GPL-3.0-or-later"
 
 [workspace.dependencies]
@@ -57,14 +57,14 @@ rcgen = "0.14"
 #
 # `flowctl-cc` (congestion control) was a feature flag through 0.45; 0.46
 # stabilised it and dropped the flag, so it is on now without being named.
-arti-client = { version = "0.46.0", default-features = false, features = [
+arti-client = { version = "0.47.0", default-features = false, features = [
     "tokio",
     "rustls",
     "static-sqlite",
     "compression",
     "onion-service-client",
 ] }
-tor-rtcompat = { version = "0.46.0", default-features = false, features = ["tokio", "rustls"] }
+tor-rtcompat = { version = "0.47.0", default-features = false, features = ["tokio", "rustls"] }
 tracing = "0.1"
 # The message store, when the user opts into one.
 #
@@ -81,16 +81,16 @@ tracing = "0.1"
 # set we do not use); `backup`, `serialize` and the rest stay off deliberately —
 # a message log needs INSERT, SELECT and DELETE, and nothing here should be
 # able to attach a second database or load an extension.
-# Held to 0.39 rather than the latest 0.40: embedded Tor's `tor-dirmgr` also
-# links SQLite through rusqlite and caps it below 0.40, and only one crate in
-# the graph may link `sqlite3`. Bump this in step with arti, not ahead of it.
-rusqlite = { version = "0.39", features = ["bundled"] }
+# Kept inside embedded Tor's range: `tor-dirmgr` also links SQLite through
+# rusqlite (0.47 accepts `>=0.36, <0.41`), and only one crate in the graph may
+# link `sqlite3`. Bump this in step with arti, not ahead of it.
+rusqlite = { version = "0.40", features = ["bundled"] }
 flutter_rust_bridge = "=2.13.0"
 zeroize = { version = "1", features = ["derive"] }
 
 # A one-condition fix to `saturating-time`, until upstream carries it.
 #
-# 0.4.0's search for the minimum representable `SystemTime` never terminates on
+# 0.4.0's and 0.5.0's search for the minimum representable `SystemTime` never terminates on
 # Windows: the clock counts 100-nanosecond intervals, so a finer probe succeeds
 # without moving, the step never halves again, and the loop spins on one core
 # forever. `tor-netdoc` reaches it while date-checking a consensus, which is

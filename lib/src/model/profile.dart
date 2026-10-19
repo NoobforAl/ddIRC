@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'secrets.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart';

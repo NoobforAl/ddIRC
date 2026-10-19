@@ -127,9 +127,8 @@ void main() {
     });
 
     test('normalizes an empty string to null for both', () {
-      final config = _profile(
-        'a',
-      ).toConfig(serverPassword: '', nickservPassword: '');
+      final config = _profile('a')
+          .toConfig(serverPassword: '', nickservPassword: '');
       expect(config.serverPassword, isNull);
       expect(config.nickservPassword, isNull);
     });

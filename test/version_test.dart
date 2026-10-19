@@ -17,9 +17,9 @@ import 'package:ddirc/src/version.dart';
 
 /// The `version:` line from the manifest, without its build number.
 String _manifestVersion() {
-  final line = File(
-    'pubspec.yaml',
-  ).readAsLinesSync().firstWhere((l) => l.startsWith('version:'));
+  final line = File('pubspec.yaml')
+      .readAsLinesSync()
+      .firstWhere((l) => l.startsWith('version:'));
   return line.substring('version:'.length).trim().split('+').first;
 }
 

@@ -73,7 +73,8 @@ impl SaturatingTime for SystemTime {
 
 impl SaturatingTime for Instant {
     fn anchor() -> Self {
-        Self::now()
+        use web_time_compat::InstantExt;
+        Self::get()
     }
 
     fn max_value() -> Self {
@@ -129,9 +130,9 @@ fn find_min<T: SaturatingTime + PartialEq>() -> T {
 ///
 /// # ddIRC: why 2.1 tests for movement
 ///
-/// Upstream 0.4.0 treats any [`Some`] as progress. That is only true where the
-/// clock's resolution is finer than the step, and on Windows it is not:
-/// [`SystemTime`] is a `FILETIME` counted in 100-nanosecond intervals, so
+/// Upstream 0.4.0 and 0.5.0 treat any [`Some`] as progress. That is only true
+/// where the clock's resolution is finer than the step, and on Windows it is
+/// not: [`SystemTime`] is a `FILETIME` counted in 100-nanosecond intervals, so
 /// `checked_sub` of anything smaller returns [`Some`] with the value
 /// *unchanged*. The step then never halves — it only halves on [`None`] — and
 /// `res` never moves, so the loop has no exit. In practice `min_value()`
@@ -182,6 +183,21 @@ where
 
 #[cfg(test)]
 mod tests {
+    // @@ begin test lint list maintained by maint/add_warning @@
+    #![allow(clippy::bool_assert_comparison)]
+    #![allow(clippy::clone_on_copy)]
+    #![allow(clippy::dbg_macro)]
+    #![allow(clippy::mixed_attributes_style)]
+    #![allow(clippy::print_stderr)]
+    #![allow(clippy::print_stdout)]
+    #![allow(clippy::single_char_pattern)]
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unchecked_time_subtraction)]
+    #![allow(clippy::useless_vec)]
+    #![allow(clippy::needless_pass_by_value)]
+    #![allow(clippy::string_slice)] // See arti#2571
+    //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
+
     use std::{
         fmt::Debug,
         ops::{Add, Sub},
