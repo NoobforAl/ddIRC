@@ -41,7 +41,7 @@ dependencies:
 
   # First-party, and the only thing settings need: a small key/value store on
   # every platform we target. Pinned like every other dependency.
-  shared_preferences: 2.5.5
+  shared_preferences: 2.5.6
 
   # Hides the native title bar so the app can draw its own window controls.
   # Pinned like every other dependency.
@@ -106,7 +106,7 @@ dependencies:
   # Opens a link from a message in the browser, after the app has shown the
   # whole address and been told to — see `lib/src/ui/link.dart`. http and
   # https only. Pinned like every other dependency.
-  url_launcher: 6.3.2
+  url_launcher: 6.3.3
 
 dev_dependencies:
   flutter_test:
