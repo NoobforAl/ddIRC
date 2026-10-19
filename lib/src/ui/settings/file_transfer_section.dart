@@ -59,10 +59,10 @@ class _FileTransferSectionState extends State<FileTransferSection> {
           onChanged: (v) => _set(settings, v),
         ),
         if (on) ...[
-          // Said plainly rather than left to be discovered by looking for a
-          // button that is not there. What this switch decides today is
-          // whether an offer is *displayed*; the rest of what it will mean is
-          // in the dialog that turned it on.
+          // Said plainly rather than left to be discovered. What this
+          // switch decides is whether offers are shown, can be accepted, and
+          // can be sent at all; the rest of what that means is in the dialog
+          // that turned it on.
           const SettingsReadout(
             label: 'Received files',
             value: 'Saved inside ddIRC, not in your Downloads folder',
@@ -84,7 +84,9 @@ class _FileTransferSectionState extends State<FileTransferSection> {
                   'an offer dials the sender through the proxy, so it is your '
                   'exit that reaches them and not you. Sending is refused '
                   'while a proxy is on, because an offer has to name an '
-                  'address and there is no honest one to give.',
+                  'address and there is no honest one to give. An offer that '
+                  'asks you to listen for the sender is refused too, because '
+                  'listening would tell them where you are.',
             ),
         ],
       ],
@@ -179,9 +181,10 @@ class _RiskDialog extends StatelessWidget {
         const SizedBox(height: 6),
         const SettingsNote(
           text:
-              'Today this only decides whether an offer is shown. There is no '
-              'way to accept one yet, and nothing is ever accepted for you. '
-              'The facts above are what accepting will mean when it is built.',
+              'You can accept what is offered and send files of your own, and '
+              'nothing is ever accepted for you. While a proxy or Tor is on, '
+              'sending is refused, and so is an offer that asks you to listen '
+              'for the sender.',
         ),
         SettingsActions(
           children: [
