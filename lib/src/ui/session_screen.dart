@@ -20,6 +20,7 @@ import '../rust/api/types.dart' hide TextSpan;
 import '../theme.dart';
 import 'channel_list.dart';
 import 'connection_log_dialog.dart';
+import 'composer.dart';
 import 'conversation_tabs.dart';
 import 'layout.dart';
 import 'member_list.dart';
@@ -967,7 +968,6 @@ class _SessionScreenState extends State<SessionScreen> {
   }
 
   Widget _composerBar(Tokens t, Conversation? active) {
-    final g = context.layout.gutter;
     // A request is answered, not replied to. Until it is accepted the composer
     // is not a composer, because sending anything — even a refusal — tells
     // whoever sent it that somebody is here, which is most of what an
@@ -979,78 +979,20 @@ class _SessionScreenState extends State<SessionScreen> {
         onDecline: () => session.declineDirect(active.name),
       );
     }
-    return Container(
-      padding: EdgeInsets.fromLTRB(g - 4, 8, g - 8, 10),
-      decoration: BoxDecoration(
-        color: t.surface,
-        border: Border(
-          top: BorderSide(color: t.rule, width: Tokens.hairline),
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _composer,
-              focusNode: _composerFocus,
-              onSubmitted: (_) => _submit(),
-              textInputAction: TextInputAction.send,
-              maxLines: 4,
-              minLines: 1,
-              autocorrect: false,
-              style: TextStyle(color: t.text, fontSize: 14),
-              decoration: InputDecoration(
-                // Short: anyone on IRC knows /join, and the screen above
-                // already says nothing is open.
-                hintText: active == null ? 'Message' : 'Message ${active.name}',
-                hintStyle: TextStyle(color: t.faint, fontSize: 14),
-                isDense: true,
-                filled: true,
-                fillColor: t.bubble,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                enabledBorder: _border(t.rule, Tokens.hairline),
-                focusedBorder: _border(t.accent.withValues(alpha: 0.7), 1),
-              ),
-            ),
-          ),
-          // Only where there is somewhere to send it, and only when the
-          // setting is on. A button that opens a picker and then explains that
-          // the feature is off is a button that wasted the user's time.
-          if (active != null && SettingsScope.of(context).fileTransfers)
-            IconButton(
-              onPressed: _attachFile,
-              icon: const Icon(Icons.attach_file, size: 19),
-              color: t.muted,
-              tooltip: 'Send a file',
-            ),
-          const SizedBox(width: 6),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 1),
-            child: IconButton.filled(
-              onPressed: _submit,
-              icon: const Icon(Icons.arrow_upward_rounded, size: 20),
-              style: IconButton.styleFrom(
-                backgroundColor: t.accent,
-                foregroundColor: t.onAccent,
-                fixedSize: const Size(42, 42),
-              ),
-              tooltip: 'Send',
-            ),
-          ),
-        ],
-      ),
+    return Composer(
+      controller: _composer,
+      focusNode: _composerFocus,
+      // Short: anyone on IRC knows /join, and the screen above already says
+      // nothing is open.
+      hint: active == null ? 'Message' : 'Message ${active.name}',
+      onSubmit: _submit,
+      // Only where there is somewhere to send it, and only when the setting is
+      // on.
+      onAttach: active != null && SettingsScope.of(context).fileTransfers
+          ? _attachFile
+          : null,
     );
   }
-
-  static OutlineInputBorder _border(Color color, double width) =>
-      OutlineInputBorder(
-        borderRadius: BorderRadius.circular(Tokens.radiusXL),
-        borderSide: BorderSide(color: color, width: width),
-      );
 }
 
 /// What the conversation pane says when nothing is open.
