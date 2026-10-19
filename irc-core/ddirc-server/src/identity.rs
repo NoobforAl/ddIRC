@@ -107,16 +107,67 @@ impl std::fmt::Debug for Identity {
     }
 }
 
+/// Make sure `dir` exists and is somewhere a private key can safely live.
+///
+/// The CA's key is the one secret here, and the file it is written to is
+/// already readable by its owner alone; what this covers is the directory
+/// around it. Three things are refused or arranged:
+///
+/// * A **symbolic link** is refused. It is a way to have the key written
+///   somewhere other than where the operator was told it is.
+/// * A directory **writable by everyone** is refused. Anyone could replace the
+///   certificate or the key beside it, and a client that trusts this CA would
+///   then trust whatever they put there.
+/// * A directory that did not exist is created readable by its owner only.
+///   Left to the process's umask it would be 0755 on most systems, which is
+///   not a secret place.
+///
+/// Group-writable is allowed: a per-user group is the default on common
+/// systems, so refusing it would refuse an ordinary home directory. Windows has
+/// no mode bits; the per-user data directory is private there already.
+fn prepare_dir(dir: &Path) -> Result<(), IdentityError> {
+    let to_io = |source: io::Error| IdentityError::Io {
+        path: dir.to_path_buf(),
+        source,
+    };
+
+    if let Ok(meta) = fs::symlink_metadata(dir) {
+        if meta.file_type().is_symlink() {
+            return Err(to_io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the directory is a symbolic link, and the certificate \
+                 authority's private key will not be put behind one",
+            )));
+        }
+    }
+
+    #[cfg_attr(not(unix), allow(unused_variables))]
+    let existed = dir.exists();
+    fs::create_dir_all(dir).map_err(to_io)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if !existed {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(to_io)?;
+        } else if fs::metadata(dir).map_err(to_io)?.permissions().mode() & 0o002 != 0 {
+            return Err(to_io(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the directory is writable by everyone, so anyone could replace \
+                 the certificate authority's key",
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Load the CA from `dir`, issuing one first if there is not one already, and
 /// mint a leaf for this run.
 pub fn load_or_create(dir: &Path) -> Result<Identity, IdentityError> {
     let cert_path = dir.join(CA_CERT);
     let key_path = dir.join(CA_KEY);
 
-    fs::create_dir_all(dir).map_err(|source| IdentityError::Io {
-        path: dir.to_path_buf(),
-        source,
-    })?;
+    prepare_dir(dir)?;
 
     let (ca_pem, ca_key_pem) = match (read(&cert_path)?, read(&key_path)?) {
         (Some(cert), Some(key)) => (cert, key),
@@ -338,5 +389,45 @@ mod tests {
         let id = load_or_create(&dir.0).unwrap();
         let pem = fs::read_to_string(&id.anchor_path).unwrap();
         assert_eq!(pem_to_der(&pem).unwrap(), id.chain[1].as_ref());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_made_for_the_key_is_private_to_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = TempDir::new("private");
+        let fresh = parent.0.join("fresh");
+
+        load_or_create(&fresh).unwrap();
+
+        let mode = fs::metadata(&fresh).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700, "not readable by anyone else");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_anyone_can_write_to_is_refused_and_no_key_is_left_in_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("world-writable");
+        fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o777)).unwrap();
+
+        let refused = load_or_create(&dir.0);
+
+        assert!(matches!(refused, Err(IdentityError::Io { .. })));
+        assert!(!dir.0.join(CA_KEY).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_is_refused_and_nothing_is_written_through_it() {
+        let real = TempDir::new("link-target");
+        let holder = TempDir::new("link-holder");
+        let link = holder.0.join("ca");
+        std::os::unix::fs::symlink(&real.0, &link).unwrap();
+
+        let refused = load_or_create(&link);
+
+        assert!(matches!(refused, Err(IdentityError::Io { .. })));
+        assert!(!real.0.join(CA_KEY).exists());
     }
 }

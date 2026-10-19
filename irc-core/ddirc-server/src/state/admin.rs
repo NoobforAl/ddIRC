@@ -10,7 +10,7 @@
 //! "bob is not in #room" are the two outcomes the operator needs told apart.
 
 use super::*;
-use crate::admin::{AdminCommand, ChannelInfo, MemberInfo, Snapshot, UserInfo};
+use crate::admin::{clean, AdminCommand, ChannelInfo, MemberInfo, Snapshot, UserInfo};
 
 /// Longest MOTD line kept. A line is sent as one `372` and has to fit in 512
 /// bytes with its prefix; this is comfortably inside that.
@@ -192,9 +192,11 @@ impl Network {
             .iter()
             .map(|(&id, c)| UserInfo {
                 id,
-                nick: c.nick.clone(),
-                user: c.user.clone(),
-                realname: c.real.clone(),
+                nick: c.nick.as_deref().map(clean),
+                // What the client said about itself, and shown on the
+                // operator's screen: made safe on the way out.
+                user: c.user.as_deref().map(clean),
+                realname: c.real.as_deref().map(clean),
                 registered: c.registered,
                 channels: shown(&c.channels),
                 connected_at: c.connected_at,
@@ -234,8 +236,8 @@ impl Network {
                 });
                 ChannelInfo {
                     name: c.name.clone(),
-                    topic: c.topic.as_ref().map(|t| t.text.clone()),
-                    topic_set_by: c.topic.as_ref().map(|t| t.set_by.clone()),
+                    topic: c.topic.as_ref().map(|t| clean(&t.text)),
+                    topic_set_by: c.topic.as_ref().map(|t| clean(&t.set_by)),
                     members,
                 }
             })

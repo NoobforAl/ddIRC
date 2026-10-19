@@ -199,3 +199,48 @@ fn a_tiny_terminal_does_not_panic() {
         let _ = render(&app, w, h);
     }
 }
+
+/// Every cell on the screen, as text.
+fn cells(app: &App, width: u16, height: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|frame| draw(frame, app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let mut out = Vec::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            out.push(buffer[(x, y)].symbol().to_owned());
+        }
+    }
+    out
+}
+
+#[test]
+fn nothing_a_client_said_can_reach_the_terminal_as_a_control_sequence() {
+    // The library makes these safe where an event is made; this is the second
+    // line, for anything that reaches the screen some other way. An event built
+    // by hand carries the raw text, as a bug or a future producer might.
+    let mut app = app();
+    app.apply_event(&ServerEvent {
+        at: 1,
+        kind: EventKind::Message {
+            from: "alice\u{1b}[31m".into(),
+            target: "#room".into(),
+            text: Some("\u{1b}]52;c;aGk=\u{7}\u{9b}2J\u{1b}c clipboard and screen".into()),
+            notice: false,
+        },
+    });
+    let mut snapshot = app.snapshot.clone();
+    snapshot.channels[0].topic = Some("\u{1b}[2Jtopic\u{7}".into());
+    snapshot.users[0].user = Some("\u{1b}[31mu".into());
+    app.set_snapshot(snapshot);
+
+    for tab in ['1', '2', '3'] {
+        app.key(KeyEvent::new(KeyCode::Char(tab), KeyModifiers::NONE));
+        for cell in cells(&app, 120, 40) {
+            assert!(
+                !cell.chars().any(char::is_control),
+                "tab {tab}: a control character was drawn: {cell:?}"
+            );
+        }
+    }
+}

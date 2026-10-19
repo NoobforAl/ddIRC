@@ -202,9 +202,10 @@ fn parse_server(args: Vec<String>) -> Result<Parsed, String> {
         name: DEFAULT_SERVER_NAME.to_owned(),
         network: DEFAULT_NETWORK_NAME.to_owned(),
         motd: Vec::new(),
-        data_dir: default_data_dir(),
+        data_dir: PathBuf::new(),
         tui: true,
     };
+    let mut data_dir = None;
 
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -218,11 +219,13 @@ fn parse_server(args: Vec<String>) -> Result<Parsed, String> {
             "--name" => out.name = word(&arg, value()?)?,
             "--network" => out.network = word(&arg, value()?)?,
             "--motd" => out.motd.push(value()?),
-            "--data-dir" => out.data_dir = PathBuf::from(value()?),
+            "--data-dir" => data_dir = Some(PathBuf::from(value()?)),
             "--no-tui" => out.tui = false,
             other => return Err(format!("unrecognised argument: {other}")),
         }
     }
+    // After the loop, so `--help` works on a machine with no such directory.
+    out.data_dir = resolve_data_dir(data_dir, default_data_dir())?;
     Ok(Parsed::Server(out))
 }
 
@@ -265,19 +268,30 @@ fn secret(name: &str) -> Option<Zeroizing<String>> {
     (!value.is_empty()).then(|| Zeroizing::new(value))
 }
 
-/// Where the server keeps its certificate authority when not told.
+/// Where the server keeps its certificate authority when not told, if there is
+/// somewhere that belongs to this user.
 ///
 /// Per-user and out of the way, because the CA's private key is in it: a
 /// current-directory default would drop that key into whatever repository
 /// someone happened to be standing in. No crate for this — three platforms'
 /// conventions are three lines, and a dependency to avoid them would be the
 /// larger thing.
-fn default_data_dir() -> PathBuf {
-    let var = |name: &str| {
+///
+/// `None` when the environment gives no such place, and that is deliberately not
+/// papered over with the temporary directory: that is shared, and a CA key left
+/// in a shared place is one another user could read the directory of, replace,
+/// or pre-create. See [`resolve_data_dir`].
+fn default_data_dir() -> Option<PathBuf> {
+    default_data_dir_from(|name| {
         std::env::var_os(name)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
-    };
+    })
+}
+
+/// [`default_data_dir`] over any source of environment variables, so the
+/// absence of one can be tested without unsetting a real one.
+fn default_data_dir_from(var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
     let base = if cfg!(windows) {
         var("LOCALAPPDATA")
     } else if cfg!(target_os = "macos") {
@@ -285,9 +299,21 @@ fn default_data_dir() -> PathBuf {
     } else {
         var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("share")))
     };
-    base.unwrap_or_else(std::env::temp_dir)
-        .join("ddirc")
-        .join("server")
+    base.map(|b| b.join("ddirc").join("server"))
+}
+
+/// The directory to use: what was asked for, else the per-user default, else an
+/// error that says how to fix it.
+fn resolve_data_dir(
+    explicit: Option<PathBuf>,
+    default: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    explicit.or(default).ok_or_else(|| {
+        "no per-user data directory could be found (LOCALAPPDATA, XDG_DATA_HOME or HOME is \
+         not set), and the server's private key will not be kept in a shared one; pass \
+         --data-dir"
+            .to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -378,5 +404,39 @@ mod tests {
         assert!(matches!(parse_str("--help"), Ok(Parsed::Help(u)) if u == USAGE));
         assert!(matches!(parse_str("client -h"), Ok(Parsed::Help(u)) if u == CLIENT_USAGE));
         assert!(matches!(parse_str("server --help"), Ok(Parsed::Help(u)) if u == SERVER_USAGE));
+    }
+
+    #[test]
+    fn without_a_per_user_directory_there_is_no_default() {
+        assert_eq!(default_data_dir_from(|_| None), None);
+    }
+
+    #[test]
+    fn the_default_is_beneath_the_users_own_directory() {
+        let dir = default_data_dir_from(|_| Some(PathBuf::from("/home/someone"))).unwrap();
+        assert!(dir.starts_with("/home/someone"), "{dir:?}");
+        assert!(dir.ends_with(std::path::Path::new("ddirc").join("server")));
+    }
+
+    #[test]
+    fn the_shared_temp_directory_is_never_a_fallback() {
+        // With nothing to go on the server refuses, and says what to do.
+        let error = resolve_data_dir(None, None).unwrap_err();
+        assert!(error.contains("--data-dir"), "{error}");
+
+        let asked = PathBuf::from("mine");
+        assert_eq!(
+            resolve_data_dir(Some(asked.clone()), None),
+            Ok(asked.clone())
+        );
+        // And being asked beats the default.
+        assert_eq!(
+            resolve_data_dir(Some(asked.clone()), Some(PathBuf::from("theirs"))),
+            Ok(asked)
+        );
+        assert_eq!(
+            resolve_data_dir(None, Some(PathBuf::from("theirs"))),
+            Ok(PathBuf::from("theirs"))
+        );
     }
 }

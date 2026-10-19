@@ -335,3 +335,90 @@ fn what_happens_is_reported_and_private_messages_stay_private() {
     assert!(all.contains("alice sent a private message to bob"), "{all}");
     assert!(!all.contains("a secret"), "{all}");
 }
+
+#[test]
+fn what_a_client_types_cannot_drive_the_operators_terminal() {
+    let (mut net, _rxs) = network(2);
+    let (observer, mut events) = broadcast::channel(64);
+    net.observe(observer);
+    register(&mut net, 0, "alice");
+    register(&mut net, 1, "bob");
+    say(&mut net, 0, "JOIN", vec!["#room"]);
+    say(
+        &mut net,
+        0,
+        "PRIVMSG",
+        vec!["#room", "hi \u{1b}]52;c;aGk=\u{7} \u{9b}2J there"],
+    );
+    say(
+        &mut net,
+        0,
+        "TOPIC",
+        vec!["#room", "\u{1b}[2Jtopic \u{202e}evil"],
+    );
+    // A real name is the client's own word about itself, and shows in the table.
+    say(
+        &mut net,
+        1,
+        "USER",
+        vec!["u", "0", "*", "ignored: already registered"],
+    );
+    say(&mut net, 0, "QUIT", vec!["\u{1b}c bye"]);
+
+    let mut lines = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        let line = event.describe();
+        assert!(
+            !line.chars().any(|c| c.is_control() || c == '\u{202e}'),
+            "a control character reached the log: {line:?}"
+        );
+        // The structured form is safe too, for anything that reads it directly.
+        if let EventKind::Message {
+            text: Some(text), ..
+        } = &event.kind
+        {
+            assert!(!text.chars().any(char::is_control), "{text:?}");
+        }
+        lines.push(line);
+    }
+    let all = lines.join("\n");
+
+    // Escaped, not dropped: the operator can still see what was attempted.
+    assert!(
+        all.contains("hi \\x1b]52;c;aGk=\\x07 \\x9b2J there"),
+        "{all}"
+    );
+    assert!(all.contains("\\x1b[2Jtopic \\u{202e}evil"), "{all}");
+    assert!(all.contains("quit (\\x1bc bye)"), "{all}");
+}
+
+#[test]
+fn the_snapshot_is_safe_to_show_too() {
+    let (mut net, _rxs) = network(1);
+    net.handle(0, Message::new(None, "NICK", vec!["alice"]).unwrap());
+    net.handle(
+        0,
+        Message::new(
+            None,
+            "USER",
+            vec!["\u{1b}[31mu", "0", "*", "\u{1b}]0;title\u{7}Real"],
+        )
+        .unwrap(),
+    );
+    say(&mut net, 0, "JOIN", vec!["#room"]);
+    say(&mut net, 0, "TOPIC", vec!["#room", "\u{1b}[2Jtopic"]);
+
+    let snapshot = net.snapshot();
+    let user = &snapshot.users[0];
+    for field in [
+        user.user.as_deref(),
+        user.realname.as_deref(),
+        snapshot.channels[0].topic.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert!(!field.chars().any(char::is_control), "{field:?}");
+    }
+    assert_eq!(snapshot.channels[0].topic.as_deref(), Some("\\x1b[2Jtopic"));
+}

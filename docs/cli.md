@@ -116,6 +116,13 @@ The certificate authority lives in `--data-dir` (per-user, out of the way, by
 default) and survives restarts, so a client that trusts it once keeps trusting
 it. `--port 0` picks a free port.
 
+Its private key is the one secret, so the directory is treated accordingly. If
+there is no per-user place to put it (`LOCALAPPDATA`, `XDG_DATA_HOME` and `HOME`
+all unset) the server stops and asks for `--data-dir` rather than falling back to
+the shared temporary directory. On Unix a directory it creates is private to its
+owner, and one that is a symbolic link or writable by everyone is refused,
+since either would let someone else swap the certificate a client trusts.
+
 ### The manager
 
 Three tabs — **Users**, **Channels** and **Log** — under a header with the
@@ -168,6 +175,14 @@ Two decisions worth knowing about:
 One event per line, flushed as it happens, in UTC. Ctrl-C stops it. It reads
 nothing from stdin on purpose: a daemon that reads its stdin is a daemon that
 exits when the terminal it was started from closes.
+
+**What clients typed cannot drive your terminal.** A message, a topic or a quit
+reason can contain escape sequences, and a terminal acts on them — clearing the
+screen, setting the title, even writing to the clipboard. Everything a client
+chose is escaped to visible text (`\x1b]52;…`) before it is logged, so a message
+that tried it shows that it did, rather than doing it. The full-screen
+interfaces draw through a layer that drops control characters, and tests hold
+that for both.
 
 **Direct messages are logged as the fact, not the contents** —
 `alice sent a private message to bob`. A channel is a room the operator is

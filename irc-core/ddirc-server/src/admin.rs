@@ -163,12 +163,25 @@ pub struct ServerEvent {
 
 impl ServerEvent {
     pub(crate) fn new(kind: EventKind) -> Self {
-        Self { at: now(), kind }
+        Self {
+            at: now(),
+            kind: kind.sanitized(),
+        }
     }
 
     /// One line of plain text, without a timestamp. What the headless log
     /// prints and what the log pane shows.
+    ///
+    /// Safe to print to a terminal whatever clients sent. Everything in here
+    /// that a client chose — a message, a topic, a reason for leaving — is
+    /// escaped to visible text first (see [`clean`]), because a terminal acts on
+    /// escape sequences and a log line is exactly where a client's text lands on
+    /// the operator's screen.
     pub fn describe(&self) -> String {
+        clean(&self.describe_unchecked())
+    }
+
+    fn describe_unchecked(&self) -> String {
         fn why(reason: &Option<String>) -> String {
             match reason.as_deref() {
                 Some(r) if !r.is_empty() => format!(" ({r})"),
@@ -231,6 +244,118 @@ impl ServerEvent {
             } => format!("{from} sent a private message to {target}"),
             EventKind::Admin { ok: true, text } => format!("ok: {text}"),
             EventKind::Admin { ok: false, text } => format!("refused: {text}"),
+        }
+    }
+}
+
+/// Make `text` safe to put in front of a person's terminal.
+///
+/// Control characters — ESC and the rest of C0, DEL, and the C1 range a
+/// terminal may act on — are written out as visible escapes (`\x1b`), and so
+/// are the characters that reorder how a line reads (bidirectional overrides),
+/// which can make one log line pose as another. Everything else, including every
+/// script, passes through untouched.
+///
+/// Escaped rather than dropped, so what happened is still visible to whoever is
+/// reading: a message that tried to clear the screen should show that it did,
+/// not vanish into a line that looks ordinary.
+pub(crate) fn clean(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() || is_bidi(c) {
+            let n = c as u32;
+            if n <= 0xff {
+                out.push_str(&format!("\\x{n:02x}"));
+            } else {
+                out.push_str(&format!("\\u{{{n:x}}}"));
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Characters that change the direction text is laid out in.
+fn is_bidi(c: char) -> bool {
+    matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+}
+
+impl EventKind {
+    /// The same event with every string a client could have chosen made safe.
+    ///
+    /// Done where an event is made, once, so nothing that reads one — the log
+    /// pane, the headless log, anything added later — has to remember to.
+    fn sanitized(self) -> Self {
+        let c = |s: String| clean(&s);
+        let co = |s: Option<String>| s.map(|s| clean(&s));
+        match self {
+            Self::Connected { id } => Self::Connected { id },
+            Self::Dropped { id, reason } => Self::Dropped {
+                id,
+                reason: c(reason),
+            },
+            Self::Registered { id, nick } => Self::Registered { id, nick: c(nick) },
+            Self::NickChanged { old, new } => Self::NickChanged {
+                old: c(old),
+                new: c(new),
+            },
+            Self::Joined { nick, channel } => Self::Joined {
+                nick: c(nick),
+                channel: c(channel),
+            },
+            Self::Parted {
+                nick,
+                channel,
+                reason,
+            } => Self::Parted {
+                nick: c(nick),
+                channel: c(channel),
+                reason: co(reason),
+            },
+            Self::Kicked {
+                nick,
+                channel,
+                by,
+                reason,
+            } => Self::Kicked {
+                nick: c(nick),
+                channel: c(channel),
+                by: c(by),
+                reason: co(reason),
+            },
+            Self::Quit { nick, reason } => Self::Quit {
+                nick: c(nick),
+                reason: c(reason),
+            },
+            Self::Mode {
+                channel,
+                by,
+                nick,
+                op,
+            } => Self::Mode {
+                channel: c(channel),
+                by: c(by),
+                nick: c(nick),
+                op,
+            },
+            Self::Topic { channel, by, topic } => Self::Topic {
+                channel: c(channel),
+                by: c(by),
+                topic: c(topic),
+            },
+            Self::Message {
+                from,
+                target,
+                text,
+                notice,
+            } => Self::Message {
+                from: c(from),
+                target: c(target),
+                text: co(text),
+                notice,
+            },
+            Self::Admin { ok, text } => Self::Admin { ok, text: c(text) },
         }
     }
 }

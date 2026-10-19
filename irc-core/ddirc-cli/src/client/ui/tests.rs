@@ -238,3 +238,52 @@ fn a_tiny_terminal_does_not_panic() {
 fn colours_are_stable_per_nick_and_ignore_case() {
     assert_eq!(nick_color("Alice"), nick_color("alice"));
 }
+
+#[test]
+fn nothing_a_server_sent_can_reach_the_terminal_as_a_control_sequence() {
+    // The core strips formatting codes from message text. Names — a nick, a
+    // channel — are not run through that, and a hostile server chooses them.
+    let mut app = App::new("me", "irc.test");
+    app.apply(IrcEvent::Joined {
+        channel: "#rust".to_owned(),
+        nick: "me".to_owned(),
+        is_self: true,
+    });
+    let mut hostile = ChatMessage {
+        target: Target::Channel("#rust".to_owned()),
+        sender: "mallory\u{1b}]52;c;aGk=\u{7}".to_owned(),
+        sender_prefix: Some("\u{1b}[31m".to_owned()),
+        spans: vec![TextSpan {
+            text: "\u{1b}[2J\u{9b}2J\u{7}hello".to_owned(),
+            style: SpanStyle::default(),
+        }],
+        is_self: false,
+        is_mention: false,
+        is_action: false,
+        is_notice: false,
+        msgid: None,
+        server_time_ms: None,
+        reply_to: None,
+    };
+    app.apply(IrcEvent::Message(Box::new(hostile.clone())));
+    hostile.target = Target::Direct("evil\u{1b}[2J".to_owned());
+    app.apply(IrcEvent::Message(Box::new(hostile)));
+    app.apply(IrcEvent::MemberList {
+        channel: "#rust".to_owned(),
+        members: vec![MemberView {
+            nick: "mallory\u{1b}[2J".to_owned(),
+            prefix: Some("@".to_owned()),
+            away: false,
+            sort_key: "0".to_owned(),
+        }],
+    });
+
+    for window in 0..app.buffers.len() {
+        app.switch(window);
+        let screen = render(&app, 120, 30);
+        assert!(
+            !screen.chars().any(|c| c.is_control() && c != '\n'),
+            "window {window}: a control character was drawn"
+        );
+    }
+}
