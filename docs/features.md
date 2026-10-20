@@ -452,12 +452,26 @@ never stops being true:
 > The offer carries your address. Whoever accepts it connects to this machine,
 > so they learn it — and offered to a channel, everyone in it does.
 
-**Receiving.** An offer appears as a row with **Accept** and **Decline**.
+**Receiving.** An offer is a message in the conversation, drawn as a file card:
+a round download button, the name, and what the sender says the size is. Press
+the button to accept; **Decline** is beside the time. While it comes down the
+button becomes a ring with a cross in it that cancels; when it is here the card
+shows where it went, and on a computer pressing it shows the file in your file
+manager. The card is the one thing that changes — the message box stays a
+message box.
+
 Declining is silent: nothing is sent back, so a stranger fishing for a live
-client learns nothing from being refused. Accepting saves into ddIRC's own
-directory beside the logs, deliberately **not** the system Downloads folder — a
-file somebody else chose does not belong among the ones you fetched yourself,
-and on Android shared storage is readable by anything holding the permission.
+client learns nothing from being refused. An offer from somebody who has not
+been let in yet — a message request still waiting — cannot be downloaded until
+the request is accepted.
+
+Where it is saved depends on the device. **On a computer** it is a folder called
+`ddIRC` inside your Downloads, a place of its own so a file somebody else chose
+is not loose among the ones you fetched yourself. ddIRC never opens a received
+file; the card only *shows* it in the file manager, so a tap on a message is not
+how something runs. **On a phone** it is the app's private storage, which
+nothing else can read: Android's shared storage is open to anything holding the
+storage permission, and iOS has no shared Downloads to put a file in.
 
 Nothing overwrites. A name already taken is an error, and the file is written
 under a `.part` name and renamed only once it is whole, so a transfer that dies

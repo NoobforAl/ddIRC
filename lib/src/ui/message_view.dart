@@ -12,11 +12,13 @@ import '../model/marks.dart';
 import '../model/people.dart';
 import '../model/session.dart';
 import '../model/settings.dart';
+import '../model/transfer.dart';
 import '../rust/api/types.dart' as rust;
 import '../text/markdown.dart';
 import '../theme.dart';
 import 'avatar.dart';
 import 'count_badge.dart';
+import 'file_message.dart';
 import 'layout.dart';
 import 'link.dart';
 import 'menu.dart';
@@ -52,9 +54,28 @@ class MessageView extends StatefulWidget {
     this.onLoadOlder,
     this.controller,
     this.highlight,
+    this.onAcceptFile,
+    this.onCancelFile,
+    this.onRevealFile,
+    this.proxyBlocksReverseOffers = false,
   });
 
   final Conversation conversation;
+
+  /// Take up the offer on a file card — the card's download button.
+  final ValueChanged<FileTransfer>? onAcceptFile;
+
+  /// Turn an offer down, or stop one that is coming down.
+  final ValueChanged<FileTransfer>? onCancelFile;
+
+  /// Show a received file in the system's file manager. Null where there is
+  /// none, which leaves the finished card without a tap.
+  final ValueChanged<FileTransfer>? onRevealFile;
+
+  /// Whether this connection is proxied, which makes a reverse offer — one that
+  /// asks us to listen — impossible to accept without telling the sender where
+  /// we are. Such a card says so instead of offering a button.
+  final bool proxyBlocksReverseOffers;
 
   /// Reply to a line quoting only part of it — the part selected.
   final void Function(ChatLine line, String excerpt)? onQuote;
@@ -692,7 +713,24 @@ class _MessageViewState extends State<MessageView> {
     final ruled = newDay || unreadStart;
 
     Widget body;
-    if (first.isSystem) {
+    final transfer = first.transfer;
+    if (transfer != null) {
+      body = FileMessage(
+        // Keyed by the transfer, so the card keeps its place — and its
+        // animation — as the list around it changes.
+        key: ValueKey(transfer.id),
+        transfer: transfer,
+        at: first.at,
+        settings: settings,
+        showSender: widget.conversation.isChannel,
+        blockedReason: _blockedReason(transfer),
+        onAccept: () => widget.onAcceptFile?.call(transfer),
+        onCancel: () => widget.onCancelFile?.call(transfer),
+        onReveal: widget.onRevealFile == null || transfer.path == null
+            ? null
+            : () => widget.onRevealFile!.call(transfer),
+      );
+    } else if (first.isSystem) {
       body = _SelectableLine(
         index: group.start,
         scrollback: _selection,
@@ -753,6 +791,24 @@ class _MessageViewState extends State<MessageView> {
       );
     }
     return body;
+  }
+
+  /// Why [transfer], an offer, cannot be taken up right now — or null when it
+  /// can. Said on the card, because it is a fact about the offer that is known
+  /// the moment it arrives, not a failure to report afterwards.
+  String? _blockedReason(FileTransfer transfer) {
+    // Somebody who has not been let in yet is a stranger, and a file is a
+    // bigger thing to take from a stranger than a line of text. The request
+    // is answered first.
+    if (widget.conversation.pending) {
+      return 'Accept their message request to download this';
+    }
+    // A reverse offer asks us to listen, and listening tells the sender where
+    // we are — which a proxy exists to prevent.
+    if (transfer.isReverse && widget.proxyBlocksReverseOffers) {
+      return 'Cannot accept through a proxy — it would reveal your address';
+    }
+    return null;
   }
 
   /// The line [reply] answers, if it is still in the scrollback: by id when

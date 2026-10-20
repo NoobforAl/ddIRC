@@ -9,6 +9,7 @@
 // dialog a person reads before turning it on describes what the feature does
 // rather than what it did two versions ago.
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -25,7 +26,8 @@ import 'package:ddirc/src/rust/api/types.dart' as rust;
 import 'package:ddirc/src/theme.dart';
 import 'package:ddirc/src/ui/send_file_sheet.dart';
 import 'package:ddirc/src/ui/settings/file_transfer_section.dart';
-import 'package:ddirc/src/ui/transfer_bar.dart';
+import 'package:ddirc/src/ui/file_message.dart';
+import 'package:ddirc/src/ui/message_view.dart';
 
 Future<SessionModel> _session({
   bool transfers = true,
@@ -102,6 +104,10 @@ rust.IrcEvent _ended({int id = 1, String? path, String? error}) =>
       error: error,
     );
 
+/// The files in a conversation: every message that is a card, in order.
+List<FileTransfer> _files(Conversation c) =>
+    c.lines.map((l) => l.transfer).whereType<FileTransfer>().toList();
+
 /// The system lines in a conversation, as text.
 List<String> _said(Conversation c) =>
     c.lines.map((l) => l.system).whereType<String>().toList();
@@ -148,17 +154,100 @@ void main() {
       expect(liar.fraction, 1.0);
     });
 
+    FileTransfer offer({int? total = 2048}) => FileTransfer.offered(
+      id: BigInt.one,
+      filename: 'report.pdf',
+      from: 'alice',
+      total: total == null ? null : BigInt.from(total),
+      isReverse: false,
+    );
+
     test('an offer is incoming, and has not been answered', () {
-      final offer = FileTransfer.offered(
-        id: BigInt.one,
-        filename: 'f',
-        from: 'alice',
-        total: null,
-        isReverse: false,
+      final o = offer(total: null);
+      expect(o.incoming, isTrue);
+      expect(o.stage, TransferStage.offered);
+      expect(o.transferred, BigInt.zero);
+      expect(o.isOver, isFalse);
+    });
+
+    test('an offer, once connected, is the same transfer one step on', () {
+      final o = offer();
+      var heard = 0;
+      o.addListener(() => heard++);
+
+      o.begin(size: BigInt.from(4096));
+      expect(o.stage, TransferStage.running);
+      expect(o.total, BigInt.from(4096), reason: 'the core knows better');
+      expect(o.from, 'alice', reason: 'still the same offer, still hers');
+      expect(heard, 1);
+    });
+
+    test('every way it can end is its own stage, and ends it', () {
+      final done = offer()..begin();
+      done.finish(path: '/x/report.pdf');
+      expect(done.stage, TransferStage.done);
+      expect(done.path, '/x/report.pdf');
+      expect(done.isOver, isTrue);
+
+      final failed = offer()..begin();
+      failed.finish(error: 'connection reset');
+      expect(failed.stage, TransferStage.failed);
+      expect(failed.error, 'connection reset');
+
+      // Stopping it yourself is not a failure, and is not drawn as one.
+      final cancelled = offer()..begin();
+      cancelled.finish(error: FileTransfer.cancelledError);
+      expect(cancelled.stage, TransferStage.cancelled);
+
+      final declined = offer()..decline();
+      expect(declined.stage, TransferStage.declined);
+      expect(declined.isOver, isTrue);
+    });
+
+    test(
+      'a received file with no claimed size takes the size that arrived',
+      () {
+        final o = offer(total: null)..begin();
+        o.transferred = BigInt.from(1500);
+        o.finish(path: '/x/a');
+        expect(o.total, BigInt.from(1500));
+      },
+    );
+
+    test('listeners hear a change, and only a real one', () {
+      final o = offer()..begin();
+      var heard = 0;
+      o.addListener(() => heard++);
+
+      o.transferred = BigInt.from(10);
+      o.transferred = BigInt.from(10);
+      o.transferred = BigInt.from(20);
+      expect(heard, 2, reason: 'the repeat said nothing new');
+    });
+
+    test('says in plain words how it stands, for anything that reads text', () {
+      final o = offer();
+      expect(o.summary, 'alice offered you "report.pdf", says it is 2 KB');
+      o.begin();
+      expect(o.summary, 'receiving "report.pdf" (2 KB)');
+      o.finish(path: '/x/report.pdf');
+      expect(o.summary, 'saved "report.pdf" to /x/report.pdf');
+
+      expect((offer()..decline()).summary, 'you declined "report.pdf"');
+      expect(
+        (offer()
+              ..begin()
+              ..finish(error: 'cancelled'))
+            .summary,
+        'cancelled "report.pdf"',
       );
-      expect(offer.incoming, isTrue);
-      expect(offer.stage, TransferStage.offered);
-      expect(offer.transferred, BigInt.zero);
+      expect(
+        (offer()
+              ..begin()
+              ..finish(error: 'connection reset'))
+            .summary,
+        'transfer of "report.pdf" failed: connection reset',
+      );
     });
 
     test('what is said once it is over names where the file went', () {
@@ -188,7 +277,7 @@ void main() {
       s.receiveForTesting(_offer());
 
       final chat = _named(s, '#chat');
-      expect(chat.transfers, isEmpty, reason: 'no row to answer');
+      expect(_files(chat), isEmpty, reason: 'no card to answer');
       expect(
         _said(chat).where((l) => l.contains('offered')),
         isEmpty,
@@ -196,71 +285,74 @@ void main() {
       );
     });
 
-    test('becomes a row to answer and a line to remember, once on', () async {
+    test('becomes one file message in the conversation, once on', () async {
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
 
       final chat = _named(s, '#chat');
-      expect(chat.transfers, hasLength(1));
-      final row = chat.transfers.single;
-      expect(row.stage, TransferStage.offered);
-      expect(row.filename, 'report.pdf');
-      expect(row.from, 'alice');
-      expect(row.total, BigInt.from(2048));
-      expect(row.isReverse, isFalse);
+      final file = _files(chat).single;
+      expect(file.stage, TransferStage.offered);
+      expect(file.filename, 'report.pdf');
+      expect(file.from, 'alice');
+      expect(file.total, BigInt.from(2048));
+      expect(file.isReverse, isFalse);
 
-      // The size is the sender's claim and is written as one.
-      final line = _said(chat).singleWhere((l) => l.contains('offered you'));
-      expect(line, contains('"report.pdf"'));
-      expect(line, contains('says it is 2 KB'));
+      // It is a line of the scrollback, so it has a place in it and a time —
+      // and as text, for search and anything else that cannot draw a card, the
+      // size is the sender's claim and is written as one.
+      final line = chat.lines.lastWhere((l) => l.transfer != null);
+      expect(line.isSystem, isTrue);
+      expect(line.system, contains('"report.pdf"'));
+      expect(line.system, contains('says it is 2 KB'));
     });
 
     test('an offer with no address to dial is a reverse one', () async {
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer(port: null));
-      expect(_named(s, '#chat').transfers.single.isReverse, isTrue);
+      expect(_files(_named(s, '#chat')).single.isReverse, isTrue);
     });
 
     test('is never answered by the session on its own', () async {
       // Nothing here could answer: an offer arriving changes what is on
-      // screen and nothing else, and the row stays until a person acts on it.
+      // screen and nothing else, and it waits until a person acts on it.
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
       s.receiveForTesting(_offer(id: 2, filename: 'second.zip'));
 
-      final transfers = _named(s, '#chat').transfers;
-      expect(
-        transfers.map((t) => t.stage),
-        everyElement(TransferStage.offered),
-      );
-      expect(transfers.map((t) => t.filename), ['report.pdf', 'second.zip']);
+      final files = _files(_named(s, '#chat'));
+      expect(files.map((t) => t.stage), everyElement(TransferStage.offered));
+      expect(files.map((t) => t.filename), ['report.pdf', 'second.zip']);
     });
 
     test('a private offer is filed under the person who made it', () async {
       final s = await _session();
       s.receiveForTesting(_offer(channel: 'alice'));
-      expect(_named(s, 'alice').transfers, hasLength(1));
+      expect(_files(_named(s, 'alice')), hasLength(1));
     });
   });
 
   group('the session, on a transfer', () {
-    test('an accepted offer becomes the transfer, not a second row', () async {
+    test('an accepted offer is the same message, one step on', () async {
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
+      final before = _files(_named(s, '#chat')).single;
+      final lines = _named(s, '#chat').lines.length;
+
       s.receiveForTesting(_started());
 
-      final transfers = _named(s, '#chat').transfers;
-      expect(transfers, hasLength(1));
-      expect(transfers.single.stage, TransferStage.running);
-      expect(transfers.single.incoming, isTrue);
-      expect(transfers.single.from, isNull, reason: 'it is about the file now');
+      final chat = _named(s, '#chat');
+      expect(_files(chat), hasLength(1), reason: 'not a second message');
+      expect(chat.lines.length, lines, reason: 'nothing was added');
+      expect(_files(chat).single, same(before));
+      expect(before.stage, TransferStage.running);
+      expect(before.incoming, isTrue);
     });
 
-    test('progress moves the row it belongs to and no other', () async {
+    test('progress moves the card it belongs to and no other', () async {
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
@@ -268,7 +360,7 @@ void main() {
       s.receiveForTesting(_started(id: 2, incoming: false));
       s.receiveForTesting(_progress(1024, id: 1));
 
-      final byId = {for (final t in _named(s, '#chat').transfers) t.id: t};
+      final byId = {for (final t in _files(_named(s, '#chat'))) t.id: t};
       expect(byId[BigInt.one]!.transferred, BigInt.from(1024));
       expect(byId[BigInt.two]!.transferred, BigInt.zero);
 
@@ -276,253 +368,679 @@ void main() {
       s.receiveForTesting(_progress(5, id: 99));
     });
 
+    test('progress repaints the card and not the whole conversation', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      s.receiveForTesting(_started());
+      final card = _files(_named(s, '#chat')).single;
+
+      var sessionHeard = 0;
+      var cardHeard = 0;
+      s.addListener(() => sessionHeard++);
+      card.addListener(() => cardHeard++);
+
+      s.receiveForTesting(_progress(512));
+      s.receiveForTesting(_progress(1024));
+
+      expect(cardHeard, 2);
+      expect(sessionHeard, 0, reason: 'a percentage is not news to the list');
+    });
+
+    test('finishing turns the same message into the received file', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      s.receiveForTesting(_started());
+      final lines = _named(s, '#chat').lines.length;
+      s.receiveForTesting(_ended(path: '/data/received/report.pdf'));
+
+      final chat = _named(s, '#chat');
+      final file = _files(chat).single;
+      expect(file.stage, TransferStage.done);
+      expect(file.path, '/data/received/report.pdf');
+      expect(chat.lines.length, lines, reason: 'the card is the record');
+      expect(
+        chat.lines.last.system,
+        'saved "report.pdf" to /data/received/report.pdf',
+      );
+      expect(s.notice, isNull, reason: 'a good outcome needs no second alert');
+    });
+
     test(
-      'finishing removes the row, says where the file went, and tells you',
+      'a transfer that fails is a failure, and still raises its alert',
       () async {
         final s = await _session();
         _joined(s, '#chat');
         s.receiveForTesting(_offer());
         s.receiveForTesting(_started());
-        s.receiveForTesting(_ended(path: '/data/received/report.pdf'));
+        s.receiveForTesting(_ended(error: 'connection reset'));
 
-        final chat = _named(s, '#chat');
-        expect(chat.transfers, isEmpty);
-        expect(
-          _said(chat),
-          contains('saved "report.pdf" to /data/received/report.pdf'),
-        );
-        expect(s.notice?.level, NoticeLevel.info);
-        expect(s.notice?.message, 'Saved "report.pdf"');
-        expect(s.notice?.detail, '/data/received/report.pdf');
+        final file = _files(_named(s, '#chat')).single;
+        expect(file.stage, TransferStage.failed);
+        expect(file.error, 'connection reset');
+        expect(s.notice, isNotNull);
+        expect(s.notice!.level, isNot(NoticeLevel.info));
       },
     );
 
-    test('a transfer that fails is a failure, not a muted line', () async {
+    test('stopping one yourself is not reported as a failure', () async {
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
       s.receiveForTesting(_started());
-      s.receiveForTesting(_ended(error: 'connection reset'));
+      s.receiveForTesting(_ended(error: FileTransfer.cancelledError));
 
-      final chat = _named(s, '#chat');
-      expect(chat.transfers, isEmpty);
-      expect(
-        _said(chat),
-        contains('transfer of "report.pdf" failed: connection reset'),
-      );
-      expect(s.notice, isNotNull);
-      expect(s.notice!.level, isNot(NoticeLevel.info));
+      expect(_files(_named(s, '#chat')).single.stage, TransferStage.cancelled);
+      expect(s.notice, isNull);
     });
 
-    test(
-      'a file we sent is "sent", with nothing about where it went',
-      () async {
-        final s = await _session();
-        _joined(s, '#chat');
-        s.receiveForTesting(_started(incoming: false));
-        s.receiveForTesting(_ended());
+    test('a file we sent first appears when the other side connects', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_started(incoming: false));
 
-        expect(_said(_named(s, '#chat')), contains('sent "report.pdf"'));
-        expect(s.notice?.message, 'Sent "report.pdf"');
-      },
-    );
+      final file = _files(_named(s, '#chat')).single;
+      expect(file.incoming, isFalse);
+      expect(file.stage, TransferStage.running);
 
-    test('declining takes the row away at once', () async {
+      s.receiveForTesting(_ended());
+      expect(file.stage, TransferStage.done);
+      expect(file.summary, 'sent "report.pdf"');
+      expect(s.notice, isNull);
+    });
+
+    test('an end with no beginning we saw still leaves a line', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_ended(path: '/x/report.pdf'));
+
+      expect(_files(_named(s, '#chat')), isEmpty);
+      expect(
+        _said(_named(s, '#chat')),
+        contains('saved "report.pdf" to /x/report.pdf'),
+      );
+    });
+
+    test('declining answers the offer at once', () async {
       final s = await _session();
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
 
-      // Not awaited before looking: the row goes when the user says no, not
+      // Not awaited before looking: the card says so when the user says no, not
       // when the core has finished hearing about it.
       final answered = s.cancelTransfer(BigInt.one);
-      expect(_named(s, '#chat').transfers, isEmpty);
+      expect(_files(_named(s, '#chat')).single.stage, TransferStage.declined);
+      await answered;
+    });
+
+    test('stopping a running one waits for the core to say it has', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      s.receiveForTesting(_started());
+
+      final answered = s.cancelTransfer(BigInt.one);
+      expect(
+        _files(_named(s, '#chat')).single.stage,
+        TransferStage.running,
+        reason: 'not drawn as stopped before it is true',
+      );
       await answered;
     });
   });
 
-  group('the transfer bar', () {
+  group('the file card', () {
+    late AppSettings settings;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      settings = await AppSettings.load();
+    });
+
+    FileTransfer offer({bool reverse = false, int? total = 2048}) =>
+        FileTransfer.offered(
+          id: BigInt.one,
+          filename: 'report.pdf',
+          from: 'alice',
+          total: total == null ? null : BigInt.from(total),
+          isReverse: reverse,
+        );
+
     Widget host(
-      SessionModel s,
-      Conversation c, {
-      void Function(FileTransfer)? onAccept,
+      FileTransfer transfer, {
+      VoidCallback? onAccept,
+      VoidCallback? onCancel,
+      VoidCallback? onReveal,
+      String? blocked,
+      bool showSender = false,
+      double width = 800,
     }) => MaterialApp(
       theme: Tokens.themeFor(Tokens.dark),
       home: Scaffold(
-        body: ListenableBuilder(
-          listenable: s,
-          builder: (_, _) => TransferBar(
-            session: s,
-            conversation: c,
-            onAccept: onAccept ?? (_) {},
+        body: Center(
+          child: SizedBox(
+            width: width,
+            child: FileMessage(
+              transfer: transfer,
+              at: DateTime(2026, 1, 1, 9),
+              settings: settings,
+              showSender: showSender,
+              blockedReason: blocked,
+              onAccept: onAccept ?? () {},
+              onCancel: onCancel ?? () {},
+              onReveal: onReveal,
+            ),
           ),
         ),
       ),
     );
 
-    testWidgets('is nothing at all when there is nothing to answer', (
+    Finder button(String label) => find.bySemanticsLabel(label);
+
+    testWidgets('an offer is a round download button, the name, the claim', (
       tester,
     ) async {
-      final s = await _session();
-      _joined(s, '#chat');
-      await tester.pumpWidget(host(s, _named(s, '#chat')));
+      await tester.pumpWidget(host(offer()));
 
-      expect(find.byType(TextButton), findsNothing);
-      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('report.pdf'), findsOneWidget);
+      expect(find.text('alice says 2 KB'), findsOneWidget);
+      expect(button('Download report.pdf'), findsOneWidget);
+      expect(find.text('Decline'), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_downward_rounded), findsOneWidget);
     });
 
-    testWidgets(
-      'an offer says who, how big they claim, and offers both answers',
-      (tester) async {
-        final s = await _session();
-        _joined(s, '#chat');
-        s.receiveForTesting(_offer());
-        await tester.pumpWidget(host(s, _named(s, '#chat')));
-
-        expect(find.text('report.pdf'), findsOneWidget);
-        expect(find.text('alice says it is 2 KB'), findsOneWidget);
-        expect(find.text('Accept'), findsOneWidget);
-        expect(find.text('Decline'), findsOneWidget);
-      },
-    );
-
-    testWidgets('accepting asks the screen to take it up, and nothing else', (
-      tester,
-    ) async {
-      final s = await _session();
-      _joined(s, '#chat');
-      s.receiveForTesting(_offer());
-      FileTransfer? accepted;
+    testWidgets('pressing the button accepts, and only that', (tester) async {
+      var accepted = 0;
+      var cancelled = 0;
       await tester.pumpWidget(
-        host(s, _named(s, '#chat'), onAccept: (t) => accepted = t),
+        host(offer(), onAccept: () => accepted++, onCancel: () => cancelled++),
       );
 
-      await tester.tap(find.text('Accept'));
+      await tester.tap(button('Download report.pdf'));
       await tester.pump();
 
-      expect(accepted?.filename, 'report.pdf');
-      // The row waits for the core to say it has started; the bar does not
-      // assume it has.
-      expect(_named(s, '#chat').transfers, hasLength(1));
+      expect(accepted, 1);
+      expect(cancelled, 0);
     });
 
-    testWidgets('declining removes the row and does not ask to accept', (
-      tester,
-    ) async {
-      final s = await _session();
-      _joined(s, '#chat');
-      s.receiveForTesting(_offer());
-      var accepted = false;
+    testWidgets('Decline turns it down and does not accept', (tester) async {
+      var accepted = 0;
+      var cancelled = 0;
       await tester.pumpWidget(
-        host(s, _named(s, '#chat'), onAccept: (_) => accepted = true),
+        host(offer(), onAccept: () => accepted++, onCancel: () => cancelled++),
       );
 
       await tester.tap(find.text('Decline'));
       await tester.pump();
 
-      expect(accepted, isFalse);
-      expect(find.text('report.pdf'), findsNothing);
-      expect(_named(s, '#chat').transfers, isEmpty);
+      expect(cancelled, 1);
+      expect(accepted, 0);
+    });
+
+    testWidgets('a sender who gave no size says so', (tester) async {
+      await tester.pumpWidget(host(offer(total: null)));
+      expect(find.text('alice did not say how big it is'), findsOneWidget);
     });
 
     testWidgets(
-      'a reverse offer through a proxy cannot be accepted, and says why',
+      'an offer that cannot be taken up says why, and has no download',
       (tester) async {
-        final s = await _session(
-          proxy: const rust.ProxyConfig(host: '127.0.0.1', port: 9050),
+        var accepted = 0;
+        const reason =
+            'Cannot accept through a proxy — it would reveal your address';
+        await tester.pumpWidget(
+          host(offer(), blocked: reason, onAccept: () => accepted++),
         );
-        _joined(s, '#chat');
-        s.receiveForTesting(_offer(port: null));
-        await tester.pumpWidget(host(s, _named(s, '#chat')));
 
-        // Listening would tell the sender where you are, which is what the proxy
-        // is for. The button that could only fail is withheld; the way out stays.
-        expect(find.text('Accept'), findsNothing);
-        expect(
-          find.text(
-            'Cannot accept through a proxy — it would reveal your address',
-          ),
-          findsOneWidget,
-        );
-        expect(find.text('Decline'), findsOneWidget);
+        expect(find.text(reason), findsOneWidget);
+        // The way out stays; the button that could only fail does not work.
+        expect(find.text('Dismiss'), findsOneWidget);
+        expect(find.text('Decline'), findsNothing);
+        await tester.tap(find.byIcon(Icons.arrow_downward_rounded));
+        await tester.pump();
+        expect(accepted, 0);
       },
     );
 
-    testWidgets(
-      'a direct offer through a proxy can be accepted — it is dialled through it',
-      (tester) async {
-        final s = await _session(
-          proxy: const rust.ProxyConfig(host: '127.0.0.1', port: 9050),
-        );
-        _joined(s, '#chat');
-        s.receiveForTesting(_offer());
-        await tester.pumpWidget(host(s, _named(s, '#chat')));
-
-        expect(find.text('Accept'), findsOneWidget);
-      },
-    );
-
-    testWidgets('a reverse offer with no proxy can be accepted', (
+    testWidgets('while it comes down it is a ring with a cross that stops it', (
       tester,
     ) async {
-      final s = await _session();
-      _joined(s, '#chat');
-      s.receiveForTesting(_offer(port: null));
-      await tester.pumpWidget(host(s, _named(s, '#chat')));
+      final transfer = offer()..begin();
+      transfer.transferred = BigInt.from(1024);
+      var cancelled = 0;
+      await tester.pumpWidget(host(transfer, onCancel: () => cancelled++));
 
-      expect(find.text('Accept'), findsOneWidget);
-    });
-
-    testWidgets(
-      'a running transfer shows how far it has got, and can be stopped',
-      (tester) async {
-        final s = await _session();
-        _joined(s, '#chat');
-        s.receiveForTesting(_offer());
-        s.receiveForTesting(_started());
-        s.receiveForTesting(_progress(1024));
-        await tester.pumpWidget(host(s, _named(s, '#chat')));
-
-        expect(find.text('receiving — 1 KB of 2 KB'), findsOneWidget);
-        expect(
-          tester
-              .widget<LinearProgressIndicator>(
-                find.byType(LinearProgressIndicator),
-              )
-              .value,
-          0.5,
-        );
-        expect(find.text('Cancel'), findsOneWidget);
-        expect(find.text('Accept'), findsNothing, reason: 'already answered');
-      },
-    );
-
-    testWidgets('a sender who gave no size gets an honest, indeterminate bar', (
-      tester,
-    ) async {
-      final s = await _session();
-      _joined(s, '#chat');
-      s.receiveForTesting(_started(total: null));
-      s.receiveForTesting(_progress(3000));
-      await tester.pumpWidget(host(s, _named(s, '#chat')));
-
-      expect(find.text('receiving — 3 KB so far'), findsOneWidget);
+      expect(find.text('1 KB / 2 KB'), findsOneWidget);
       expect(
         tester
-            .widget<LinearProgressIndicator>(
-              find.byType(LinearProgressIndicator),
+            .widget<CircularProgressIndicator>(
+              find.byType(CircularProgressIndicator),
+            )
+            .value,
+        0.5,
+      );
+      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+      expect(find.text('Decline'), findsNothing, reason: 'already answered');
+
+      await tester.tap(button('Cancel report.pdf'));
+      expect(cancelled, 1);
+    });
+
+    testWidgets('a sender who gave no size gets an honest, spinning ring', (
+      tester,
+    ) async {
+      final transfer = offer(total: null)..begin();
+      transfer.transferred = BigInt.from(3000);
+      await tester.pumpWidget(host(transfer));
+
+      expect(find.text('3 KB'), findsOneWidget);
+      expect(
+        tester
+            .widget<CircularProgressIndicator>(
+              find.byType(CircularProgressIndicator),
             )
             .value,
         isNull,
       );
     });
 
-    testWidgets('an outgoing transfer says it is sending', (tester) async {
+    testWidgets('moves by itself as bytes arrive', (tester) async {
+      final transfer = offer()..begin();
+      await tester.pumpWidget(host(transfer));
+      expect(find.text('0 B / 2 KB'), findsOneWidget);
+
+      transfer.transferred = BigInt.from(1536);
+      await tester.pump();
+      expect(find.text('2 KB / 2 KB'), findsOneWidget);
+    });
+
+    testWidgets('becomes the file when it is here, and says where it went', (
+      tester,
+    ) async {
+      final transfer = offer()..begin();
+      await tester.pumpWidget(host(transfer, onReveal: () {}));
+      transfer.finish(path: r'C:\Users\me\Downloads\ddIRC\report.pdf');
+      await tester.pumpAndSettle();
+
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byIcon(Icons.description_outlined), findsOneWidget);
+      expect(find.textContaining('ddIRC'), findsOneWidget);
+      expect(find.textContaining('2 KB'), findsOneWidget);
+    });
+
+    testWidgets('a received file can be shown where there is a file manager', (
+      tester,
+    ) async {
+      var shown = 0;
+      final transfer = offer()
+        ..begin()
+        ..finish(path: '/home/me/Downloads/ddIRC/report.pdf');
+      await tester.pumpWidget(host(transfer, onReveal: () => shown++));
+
+      await tester.tap(button('Show report.pdf in its folder'));
+      expect(shown, 1);
+    });
+
+    testWidgets('and on a phone, where there is none, it is simply the file', (
+      tester,
+    ) async {
+      final transfer = offer()
+        ..begin()
+        ..finish(path: '/data/user/0/dev.ddirc/files/received/report.pdf');
+      await tester.pumpWidget(host(transfer));
+
+      expect(button('Show report.pdf in its folder'), findsNothing);
+      expect(find.textContaining('private storage'), findsOneWidget);
+    });
+
+    testWidgets('a failure is drawn as one, with the reason', (tester) async {
+      final transfer = offer()
+        ..begin()
+        ..finish(error: 'connection reset');
+      await tester.pumpWidget(host(transfer));
+
+      expect(find.text('connection reset'), findsOneWidget);
+      expect(find.byIcon(Icons.error_outline_rounded), findsOneWidget);
+    });
+
+    testWidgets('cancelled and declined say so, and neither is an error', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          offer()
+            ..begin()
+            ..finish(error: FileTransfer.cancelledError),
+        ),
+      );
+      expect(find.text('Cancelled'), findsOneWidget);
+      expect(find.byIcon(Icons.error_outline_rounded), findsNothing);
+
+      await tester.pumpWidget(host(offer()..decline()));
+      expect(find.text('Declined'), findsOneWidget);
+    });
+
+    testWidgets('one we are sending says it is waiting until bytes move', (
+      tester,
+    ) async {
+      final sending = FileTransfer.running(
+        id: BigInt.one,
+        filename: 'photo.jpg',
+        incoming: false,
+        total: BigInt.from(2048),
+      );
+      await tester.pumpWidget(host(sending));
+      expect(find.text('Waiting for them to accept · 2 KB'), findsOneWidget);
+      expect(find.text('0 B / 2 KB'), findsNothing);
+
+      sending.transferred = BigInt.from(1024);
+      await tester.pump();
+      expect(find.text('1 KB / 2 KB'), findsOneWidget);
+    });
+
+    testWidgets('one we sent says it was sent, and is not tappable', (
+      tester,
+    ) async {
+      final transfer =
+          FileTransfer.running(
+              id: BigInt.one,
+              filename: 'photo.jpg',
+              incoming: false,
+              total: BigInt.from(2048),
+            )
+            ..transferred = BigInt.from(2048)
+            ..finish();
+      await tester.pumpWidget(host(transfer, onReveal: () {}));
+
+      expect(find.text('2 KB · Sent'), findsOneWidget);
+      expect(find.byIcon(Icons.image_outlined), findsOneWidget);
+      expect(button('Show photo.jpg in its folder'), findsNothing);
+    });
+
+    testWidgets(
+      'names who offered it in a channel, and not in a private chat',
+      (tester) async {
+        await tester.pumpWidget(host(offer(), showSender: true));
+        expect(find.text('alice'), findsOneWidget);
+
+        await tester.pumpWidget(host(offer(), showSender: false));
+        expect(find.text('alice'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'what we sent sits on the right and what we were sent on the left',
+      (tester) async {
+        await tester.pumpWidget(host(offer()));
+        final received = tester.getRect(find.byType(Container).first);
+        expect(received.left, lessThan(300));
+
+        final sent = FileTransfer.running(
+          id: BigInt.two,
+          filename: 'out.bin',
+          incoming: false,
+          total: BigInt.from(10),
+        );
+        await tester.pumpWidget(host(sent));
+        final outgoing = tester.getRect(find.byType(Container).first);
+        expect(outgoing.right, greaterThan(500));
+      },
+    );
+
+    testWidgets('fits a phone: a long name wraps instead of overflowing', (
+      tester,
+    ) async {
+      final transfer = FileTransfer.offered(
+        id: BigInt.one,
+        filename: '${'a-very-long-file-name-' * 6}.tar.gz',
+        from: 'alice',
+        total: BigInt.from(2048),
+        isReverse: false,
+      );
+      await tester.pumpWidget(host(transfer, width: 360));
+
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('in the conversation', () {
+    late AppSettings settings;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      settings = await AppSettings.load();
+    });
+
+    Future<void> pump(
+      WidgetTester tester,
+      Conversation conversation, {
+      ValueChanged<FileTransfer>? onAccept,
+      ValueChanged<FileTransfer>? onCancel,
+      bool proxied = false,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Tokens.themeFor(Tokens.dark),
+          home: SettingsScope(
+            settings: settings,
+            child: Scaffold(
+              body: MessageView(
+                conversation: conversation,
+                onAcceptFile: onAccept,
+                onCancelFile: onCancel,
+                proxyBlocksReverseOffers: proxied,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'a file offer is a card among the messages, and is accepted there',
+      (tester) async {
+        final s = await _session();
+        _joined(s, '#chat');
+        s.receiveForTesting(_offer());
+        FileTransfer? accepted;
+
+        await pump(tester, _named(s, '#chat'), onAccept: (t) => accepted = t);
+
+        expect(find.text('report.pdf'), findsOneWidget);
+        expect(find.text('alice says 2 KB'), findsOneWidget);
+        await tester.tap(find.bySemanticsLabel('Download report.pdf'));
+        expect(accepted?.filename, 'report.pdf');
+      },
+    );
+
+    testWidgets('there is no bar, and no prompt over the message box', (
+      tester,
+    ) async {
+      // The old design put Accept and Decline in a bar above the composer. They
+      // are on the message now, and nowhere else.
       final s = await _session();
       _joined(s, '#chat');
-      s.receiveForTesting(_started(incoming: false));
-      await tester.pumpWidget(host(s, _named(s, '#chat')));
+      s.receiveForTesting(_offer());
+      await pump(tester, _named(s, '#chat'));
 
-      expect(find.textContaining('sending'), findsOneWidget);
+      expect(find.text('Accept'), findsNothing);
+      expect(find.text('Decline'), findsOneWidget, reason: 'on the card');
+    });
+
+    testWidgets(
+      'an offer in a request that has not been let in cannot be taken',
+      (tester) async {
+        final s = await _session();
+        s.receiveForTesting(_offer(channel: 'stranger', from: 'stranger'));
+        final chat = _named(s, 'stranger')..pending = true;
+        var accepted = 0;
+
+        await pump(tester, chat, onAccept: (_) => accepted++);
+
+        expect(
+          find.text('Accept their message request to download this'),
+          findsOneWidget,
+        );
+        await tester.tap(find.byIcon(Icons.arrow_downward_rounded));
+        expect(accepted, 0);
+      },
+    );
+
+    testWidgets('a reverse offer through a proxy says it cannot be accepted', (
+      tester,
+    ) async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer(port: null));
+
+      await pump(tester, _named(s, '#chat'), proxied: true);
+
+      expect(
+        find.text(
+          'Cannot accept through a proxy — it would reveal your address',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a direct offer through a proxy can still be accepted', (
+      tester,
+    ) async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+
+      await pump(tester, _named(s, '#chat'), proxied: true);
+
+      expect(find.bySemanticsLabel('Download report.pdf'), findsOneWidget);
+    });
+
+    testWidgets('the same card follows the file from offer to received', (
+      tester,
+    ) async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      await pump(tester, _named(s, '#chat'));
+      expect(find.text('alice says 2 KB'), findsOneWidget);
+
+      s.receiveForTesting(_started());
+      s.receiveForTesting(_progress(1024));
+      await tester.pump();
+      expect(find.text('1 KB / 2 KB'), findsOneWidget);
+
+      s.receiveForTesting(_ended(path: '/data/received/report.pdf'));
+      await tester.pumpAndSettle();
+      expect(find.text('report.pdf'), findsOneWidget, reason: 'still one card');
+      expect(find.textContaining('private storage'), findsOneWidget);
+    });
+  });
+
+  group('where a received file is saved', () {
+    late Directory root;
+    late Directory downloads;
+    late Directory support;
+
+    setUp(() {
+      root = Directory.systemTemp.createTempSync('ddirc-saved-');
+      downloads = Directory('${root.path}${Platform.pathSeparator}Downloads')
+        ..createSync();
+      support = Directory('${root.path}${Platform.pathSeparator}support')
+        ..createSync();
+    });
+    tearDown(() => root.deleteSync(recursive: true));
+
+    Future<Directory> where(
+      TargetPlatform platform, {
+      Future<Directory?> Function()? downloadsFn,
+    }) => receivedFilesDirectory(
+      platform: platform,
+      downloads: downloadsFn ?? () async => downloads,
+      support: () async => support,
+    );
+
+    for (final platform in [
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+      TargetPlatform.linux,
+    ]) {
+      test('on $platform it is a ddIRC folder inside Downloads', () async {
+        final dir = await where(platform);
+        expect(dir.path, '${downloads.path}${Platform.pathSeparator}ddIRC');
+        expect(dir.existsSync(), isTrue);
+      });
+    }
+
+    for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+      test(
+        'on $platform it is private storage, and Downloads is never asked',
+        () async {
+          final dir = await where(
+            platform,
+            downloadsFn: () async => throw StateError('asked for Downloads'),
+          );
+          expect(dir.path, '${support.path}${Platform.pathSeparator}received');
+          expect(dir.existsSync(), isTrue);
+        },
+      );
+    }
+
+    test(
+      'a computer that will not say where Downloads is still gets a home',
+      () async {
+        final none = await where(
+          TargetPlatform.windows,
+          downloadsFn: () async => null,
+        );
+        expect(none.path, '${support.path}${Platform.pathSeparator}received');
+
+        final broken = await where(
+          TargetPlatform.linux,
+          downloadsFn: () async => throw const FileSystemException('no xdg'),
+        );
+        expect(broken.path, '${support.path}${Platform.pathSeparator}received');
+      },
+    );
+
+    test('nothing is created until something is saved', () async {
+      expect(
+        Directory('${downloads.path}${Platform.pathSeparator}ddIRC')
+            .existsSync(),
+        isFalse,
+      );
+    });
+
+    test('the settings say where, for the device it is', () {
+      expect(
+        receivedFilesWhere(platform: TargetPlatform.windows),
+        contains('"ddIRC" folder inside your Downloads'),
+      );
+      expect(
+        receivedFilesWhere(platform: TargetPlatform.android),
+        contains('private storage'),
+      );
+      expect(
+        receivedFilesWhere(platform: TargetPlatform.iOS),
+        contains('private storage'),
+      );
+    });
+
+    test('a path is described as a place, not a long string', () {
+      expect(
+        describeLocation(r'C:\Users\me\Downloads\ddIRC\a.pdf', separator: r'\'),
+        r'Downloads\ddIRC',
+      );
+      expect(
+        describeLocation('/home/me/Downloads/ddIRC/a.pdf', separator: '/'),
+        'Downloads/ddIRC',
+      );
+      expect(
+        describeLocation('/data/user/0/dev.ddirc/files/received/a.pdf'),
+        'private storage',
+      );
+      expect(describeLocation('a.pdf'), 'a.pdf');
     });
   });
 
@@ -730,10 +1248,7 @@ void main() {
 
       expect(settings.fileTransfers, isTrue);
       expect(find.text('Received files'), findsOneWidget);
-      expect(
-        find.text('Saved inside ddIRC, not in your Downloads folder'),
-        findsOneWidget,
-      );
+      expect(find.text(receivedFilesWhere()), findsOneWidget);
     });
 
     testWidgets('turning it off needs no ceremony', (tester) async {

@@ -50,12 +50,37 @@ class ConnectionLogEntry {
 
 /// One rendered line: either a real message or a subordinate system notice.
 class ChatLine {
-  ChatLine.message(this.message, this.at) : system = null, kind = null;
-  ChatLine.system(this.system, this.at, this.kind) : message = null;
+  ChatLine.message(this.message, this.at)
+    : _system = null,
+      kind = null,
+      transfer = null;
+  ChatLine.system(String text, this.at, this.kind)
+    : message = null,
+      _system = text,
+      transfer = null;
+
+  /// A file, as a message of its own: the offer, the transfer and the received
+  /// file are all this one line, changing as it goes.
+  ///
+  /// A system line as far as everything that is not drawing it is concerned —
+  /// it has no sender, no text someone said, and nothing to reply to — and its
+  /// [system] text is a plain sentence about the file as it is *now*, so search
+  /// and anything else that reads a conversation as text still has something
+  /// true to read.
+  ChatLine.file(FileTransfer this.transfer, this.at)
+    : message = null,
+      _system = null,
+      kind = SystemKind.connection;
 
   final ChatMessage? message;
-  final String? system;
+  final String? _system;
   final SystemKind? kind;
+
+  /// The file this line is about, when it is one.
+  final FileTransfer? transfer;
+
+  /// What a system line says; for a file, how it stands at the moment.
+  String? get system => _system ?? transfer?.summary;
 
   /// When it was said: the server's own time when it offers IRCv3
   /// `server-time`, and the time it arrived otherwise — which is what every
@@ -98,13 +123,6 @@ class Conversation {
   final List<ChatLine> lines = [];
   List<MemberView> members = const [];
   String? topic;
-
-  /// Offers waiting to be answered, and transfers in flight.
-  ///
-  /// Held apart from [lines] because they are not lines: they change while you
-  /// look at them, and the scrollback is a record of what was said. Only the
-  /// outcome of a transfer becomes a line, once it has stopped moving.
-  final List<FileTransfer> transfers = [];
 
   /// Messages since this conversation was last looked at.
   int unread = 0;
@@ -368,6 +386,12 @@ class SessionModel extends ChangeNotifier {
   final AppSettings settings;
 
   final Map<String, Conversation> _conversations = {};
+
+  /// Every offer and transfer that is not over yet, by the core's id for it, so
+  /// progress and the end find their card without searching the scrollback.
+  /// An entry leaves when the transfer ends; the card stays in the
+  /// conversation as the record of it.
+  final Map<BigInt, FileTransfer> _transfers = {};
   final List<String> _order = [];
 
   /// The conversations open as tabs, in the order they were opened.
@@ -1315,28 +1339,21 @@ class SessionModel extends ChangeNotifier {
         // a stranger's text, so displaying it is the one thing that costs
         // anything here.
         if (!settings.fileTransfers) break;
+        final offered = FileTransfer.offered(
+          id: id,
+          filename: offer.filename,
+          from: from,
+          total: offer.size,
+          isReverse: offer.port == null,
+        );
+        _transfers[id] = offered;
+        // One line, for the whole life of the file. It is the offer with its
+        // button now, the progress while it moves, and the received file
+        // afterwards — the card in the conversation listens to it and changes.
         _addLine(
           channel,
-          ChatLine.system(
-            _describeOffer(from, offer),
-            now,
-            SystemKind.connection,
-          ),
+          ChatLine.file(offered, now),
           isChannel: _looksLikeChannel(channel),
-        );
-        // The line above is the record; this is the thing with buttons on it.
-        // Both, because the line survives the decision and the row does not.
-        _conversationFor(
-          channel,
-          isChannel: _looksLikeChannel(channel),
-        ).transfers.add(
-          FileTransfer.offered(
-            id: id,
-            filename: offer.filename,
-            from: from,
-            total: offer.size,
-            isReverse: offer.port == null,
-          ),
         );
 
       case IrcEvent_FileTransferStarted(
@@ -1346,35 +1363,35 @@ class SessionModel extends ChangeNotifier {
         :final incoming,
         :final total,
       ):
-        final conversation = _conversationFor(
-          channel,
-          isChannel: _looksLikeChannel(channel),
-        );
-        // An accepted offer becomes the transfer it turned into rather than
-        // sitting beside it, so the row never shows both a decision already
-        // made and the thing it decided.
-        conversation.transfers.removeWhere((t) => t.id == id);
-        conversation.transfers.add(
-          FileTransfer.running(
+        final existing = _transfers[id];
+        if (existing != null) {
+          // An accepted offer *is* the transfer it turned into: the same card,
+          // the same place in the conversation, one step on.
+          existing.begin(size: total);
+        } else {
+          // A file we are sending has no offer to have answered; it first
+          // appears here, when the other side connects.
+          final sending = FileTransfer.running(
             id: id,
             filename: filename,
             incoming: incoming,
             total: total,
-          ),
-        );
+          );
+          _transfers[id] = sending;
+          _addLine(
+            channel,
+            ChatLine.file(sending, now),
+            isChannel: _looksLikeChannel(channel),
+          );
+        }
 
       case IrcEvent_FileTransferProgress(:final id, :final transferred):
         // Carries no channel — it is only ever read against a transfer that
-        // was already placed when it started. Searching every conversation is
-        // cheap next to the alternative of a name to keep in step.
-        for (final conversation in _conversations.values) {
-          for (final transfer in conversation.transfers) {
-            if (transfer.id == id) {
-              transfer.transferred = transferred;
-              break;
-            }
-          }
-        }
+        // was already placed. Only that card repaints, not the conversation.
+        final transfer = _transfers[id];
+        if (transfer != null) transfer.transferred = transferred;
+        // Nothing else changed, so nothing else is told.
+        return;
 
       case IrcEvent_FileTransferEnded(
         :final id,
@@ -1383,33 +1400,47 @@ class SessionModel extends ChangeNotifier {
         :final path,
         :final error,
       ):
-        final conversation = _conversationFor(
-          channel,
-          isChannel: _looksLikeChannel(channel),
-        );
-        conversation.transfers.removeWhere((t) => t.id == id);
-        // Two places, because they answer different questions. The line is the
-        // record and will still make sense next week; the notice is the alert,
-        // and without it a transfer that failed after two minutes would be a
-        // muted grey line indistinguishable from someone joining.
-        raiseNotice(
-          noticeForTransfer(filename: filename, path: path, error: error),
-        );
-        // Now it is over it becomes a line, which is where something that has
-        // stopped changing belongs — and where it will still make sense later.
-        _addLine(
-          channel,
-          ChatLine.system(
-            FileTransfer.describeOutcome(
-              filename: filename,
-              path: path,
-              error: error,
-            ),
+        final transfer = _transfers.remove(id);
+        if (transfer != null) {
+          transfer.finish(path: path, error: error);
+          // The card changed in place, which is invisible to history and to the
+          // chat log: both take a line as it arrives. So how it ended is
+          // written down as a line of its own there — which is what they held
+          // before a file was a card, and what makes a scrollback loaded next
+          // week say what became of it.
+          final outcome = ChatLine.system(
+            transfer.summary,
             now,
             SystemKind.connection,
-          ),
-          isChannel: _looksLikeChannel(channel),
-        );
+          );
+          _log(channel, outcome);
+          _save(channel, outcome);
+        } else {
+          // An end with no beginning we saw — an offer shown while transfers
+          // were off, say. Still worth a line, so it is not lost.
+          _addLine(
+            channel,
+            ChatLine.system(
+              FileTransfer.describeOutcome(
+                filename: filename,
+                path: path,
+                error: error,
+              ),
+              now,
+              SystemKind.connection,
+            ),
+            isChannel: _looksLikeChannel(channel),
+          );
+        }
+        // The card is the record, so a good outcome needs no second message.
+        // A failure still raises its alert: a transfer that fell over after two
+        // minutes must not be something the user only finds by looking.
+        // Stopping one yourself is not a failure, and is not reported as one.
+        if (error != null && error != FileTransfer.cancelledError) {
+          raiseNotice(
+            noticeForTransfer(filename: filename, path: path, error: error),
+          );
+        }
 
       case IrcEvent_Whois(:final field0):
         _whois.remove(field0.nick.toLowerCase())?.complete(field0);
@@ -1450,23 +1481,6 @@ class SessionModel extends ChangeNotifier {
 
   static bool _looksLikeChannel(String target) =>
       target.isNotEmpty && '#&+!'.contains(target[0]);
-
-  /// One line for a file someone has offered.
-  ///
-  /// The size is the sender's claim and is written as one — "says it is" —
-  /// because nothing has verified it and a transfer that turns out to be ten
-  /// times larger should not be able to say it was never warned about.
-  String _describeOffer(String from, DccOffer offer) {
-    final size = offer.size;
-    // The one byte formatter, shared with the transfer rows. Two of them
-    // meant the same file could be "2 KB" in the scrollback and "2.0 KB" in
-    // the row above it, which is the kind of difference that looks like a bug
-    // in the numbers rather than in the formatting.
-    final howBig = size == null
-        ? ''
-        : ', says it is ${FileTransfer.describeSize(size)}';
-    return '$from offered you "${offer.filename}"$howBig';
-  }
 
   /// Leaving for real: the conversation is gone, so its tab goes with it.
   void _close(String channel) {
@@ -1573,10 +1587,15 @@ class SessionModel extends ChangeNotifier {
   /// Declining is silent — nothing is sent to whoever offered — so this is
   /// also how an offer is dismissed without answering it.
   Future<String?> cancelTransfer(BigInt id) {
-    for (final conversation in _conversations.values) {
-      conversation.transfers.removeWhere((t) => t.id == id);
+    final transfer = _transfers[id];
+    // An offer turned down is answered at once and for good: nothing is going
+    // to come back to say so, because nothing was sent. A running transfer is
+    // different — the core reports when it has actually stopped, and the card
+    // changes then, not before it is true.
+    if (transfer != null && transfer.stage == TransferStage.offered) {
+      transfer.decline();
+      _transfers.remove(id);
     }
-    notifyListeners();
     return _run(() => core.cancelTransfer(id: connectionId, transferId: id));
   }
 

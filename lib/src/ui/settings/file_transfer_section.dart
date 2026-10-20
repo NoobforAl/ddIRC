@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../model/proxy.dart';
 import '../../model/settings.dart';
+import '../../model/transfer.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
 import '../motion.dart';
@@ -63,9 +64,12 @@ class _FileTransferSectionState extends State<FileTransferSection> {
           // switch decides is whether offers are shown, can be accepted, and
           // can be sent at all; the rest of what that means is in the dialog
           // that turned it on.
-          const SettingsReadout(
+          SettingsReadout(
             label: 'Received files',
-            value: 'Saved inside ddIRC, not in your Downloads folder',
+            // Where they really go, for the device this is: a folder of its
+            // own in Downloads on a computer, and the app's private storage on
+            // a phone. Said as what is true here, not as a list of places.
+            value: receivedFilesWhere(),
           ),
           const SettingsReadout(
             label: 'Sending',

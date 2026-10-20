@@ -143,10 +143,18 @@ send one.
   are written under a `.part` name and renamed only once whole, so a failed
   transfer cannot be mistaken for the file it was going to be, and filenames go
   through `safe_filename` so a sender cannot escape the directory.
-- **Received files land in app-private storage**, beside the logs — not the
-  system Downloads folder. A file somebody else chose does not belong among the
-  ones the user fetched themselves, and on Android shared storage is readable
-  by anything holding the storage permission.
+- **Where received files land depends on the device.** On Android and iOS, in
+  app-private storage: Android's shared storage is readable by anything holding
+  the storage permission, so nothing is put there. On Windows, macOS and Linux,
+  in a `ddIRC` folder inside Downloads, where a person looks for what arrived.
+  That is a deliberate trade — a file somebody else chose sits somewhere the
+  user's other programs and the user can reach — so it is made safe in other
+  ways: the app never opens a received file (the card only shows it in the file
+  manager, selected), filenames cannot name a path, a stream or a device
+  (`safe_filename`), and nothing is overwritten.
+- **An offer from a stranger cannot be accepted until the stranger has been.**
+  A file offer in a message request that is still waiting shows no download
+  button; the request is answered first.
 - **The size in an offer is the sender's claim.** The 4 GB ceiling is enforced
   against the bytes that actually arrive, so an understated size cannot become
   permission to fill a disk.

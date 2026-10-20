@@ -33,7 +33,6 @@ import 'person_sheet.dart';
 import 'saved_messages_dialog.dart';
 import 'send_file_sheet.dart';
 import 'touchable.dart';
-import 'transfer_bar.dart';
 import 'settings/app_settings_dialog.dart';
 import 'settings/channel_browser_dialog.dart';
 import 'settings/channel_settings_dialog.dart';
@@ -675,11 +674,22 @@ class _SessionScreenState extends State<SessionScreen> {
     session.raiseNotice(error == null ? null : noticeForFailure(error));
   }
 
-  /// Take up an offer, into the app's own received-files directory.
-  ///
-  /// Not the system Downloads folder — see `receivedFilesDirectory`. A file
-  /// somebody else chose does not belong among the ones the user fetched
-  /// themselves.
+  /// Show a received file in the system's file manager. Never opens it: see
+  /// [revealInFileManager].
+  Future<void> _revealFile(FileTransfer transfer) async {
+    final path = transfer.path;
+    if (path == null) return;
+    final shown = await revealInFileManager(path);
+    if (!shown && mounted) {
+      session.raiseNotice(
+        Notice.error('Could not open the folder', detail: path),
+      );
+    }
+  }
+
+  /// Take up an offer, into the folder [receivedFilesDirectory] chooses: a
+  /// `ddIRC` folder of its own inside Downloads on a computer, and the app's
+  /// private storage on a phone.
   Future<void> _acceptTransfer(FileTransfer transfer) async {
     final String directory;
     try {
@@ -947,20 +957,15 @@ class _SessionScreenState extends State<SessionScreen> {
                       onQuote: active.pending ? null : _quote,
                       onMention: active.pending ? null : _mention,
                       onLoadOlder: () => session.loadOlder(active),
+                      // Files are answered on the message they arrive as, not
+                      // in a bar over the composer.
+                      onAcceptFile: _acceptTransfer,
+                      onCancelFile: (transfer) =>
+                          session.cancelTransfer(transfer.id),
+                      onRevealFile: canRevealFiles ? _revealFile : null,
+                      proxyBlocksReverseOffers: session.usesProxy,
                     ),
             ),
-          ),
-          // Offers and transfers in flight, between the scrollback and the
-          // composer. Revealed rather than appearing, so a transfer starting
-          // does not shove the composer out from under a caret mid-word.
-          Reveal(
-            child: active == null || active.transfers.isEmpty
-                ? null
-                : TransferBar(
-                    session: session,
-                    conversation: active,
-                    onAccept: _acceptTransfer,
-                  ),
           ),
           // Growing rather than appearing, so a notice never shoves the
           // composer out from under a caret already being typed into.
