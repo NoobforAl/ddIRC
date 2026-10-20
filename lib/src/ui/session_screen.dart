@@ -763,59 +763,83 @@ class _SessionScreenState extends State<SessionScreen> {
             onEditPerson: _showPerson,
           );
 
-    return Scaffold(
-      key: _scaffold,
-      // Networks and channels answer the same question — where am I — so on a
-      // narrow screen they are one drawer behind one button rather than two
-      // competing for an edge each.
-      drawer: layout.channelsPinned
-          ? null
-          : Drawer(
-              width: Layout.drawerWidth(screenWidth, preferred: 300),
-              child: SafeArea(
-                child: Row(
-                  children: [
-                    if (widget.rail != null) widget.rail!,
-                    Expanded(child: channels),
-                  ],
-                ),
-              ),
-            ),
-      endDrawer: layout.membersPinned || active == null || !active.isChannel
-          ? null
-          : Drawer(
-              width: Layout.drawerWidth(screenWidth, preferred: 260),
-              child: SafeArea(child: members),
-            ),
-      body: SafeArea(
-        child: Row(
-          children: [
-            if (layout.channelsPinned)
-              SizedBox(
-                width: _channelPanelWidth,
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      right: BorderSide(color: t.rule, width: Tokens.hairline),
+    // Escape closes a drawer, the way it closes every other thing that opens
+    // over the conversation. The drawer's own scrim and swipe are for a finger;
+    // on a narrow desktop window the keyboard is what is in hand.
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          final scaffold = _scaffold.currentState;
+          if (scaffold == null) return;
+          if (scaffold.isDrawerOpen) {
+            scaffold.closeDrawer();
+          } else if (scaffold.isEndDrawerOpen) {
+            scaffold.closeEndDrawer();
+          }
+        },
+      },
+      child: Scaffold(
+        key: _scaffold,
+        // Networks and channels answer the same question — where am I — so on a
+        // narrow screen they are one drawer behind one button rather than two
+        // competing for an edge each.
+        drawer: layout.channelsPinned
+            ? null
+            : Drawer(
+                width: Layout.drawerWidth(screenWidth, preferred: 300),
+                // Focus starts inside, so a key pressed with the drawer open
+                // reaches the shortcut above and not nothing.
+                child: Focus(
+                  autofocus: true,
+                  child: SafeArea(
+                    child: Row(
+                      children: [
+                        if (widget.rail != null) widget.rail!,
+                        Expanded(child: channels),
+                      ],
                     ),
                   ),
-                  child: channels,
                 ),
               ),
-            Expanded(child: _conversationPane(t, layout, active)),
-            if (_membersBeside && active != null && active.isChannel)
-              SizedBox(
-                width: _memberPanelWidth,
-                child: Container(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(color: t.rule, width: Tokens.hairline),
+        endDrawer: layout.membersPinned || active == null || !active.isChannel
+            ? null
+            : Drawer(
+                width: Layout.drawerWidth(screenWidth, preferred: 260),
+                child: Focus(autofocus: true, child: SafeArea(child: members)),
+              ),
+        body: SafeArea(
+          child: Row(
+            children: [
+              if (layout.channelsPinned)
+                SizedBox(
+                  width: _channelPanelWidth,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        right: BorderSide(
+                          color: t.rule,
+                          width: Tokens.hairline,
+                        ),
+                      ),
                     ),
+                    child: channels,
                   ),
-                  child: members,
                 ),
-              ),
-          ],
+              Expanded(child: _conversationPane(t, layout, active)),
+              if (_membersBeside && active != null && active.isChannel)
+                SizedBox(
+                  width: _memberPanelWidth,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(color: t.rule, width: Tokens.hairline),
+                      ),
+                    ),
+                    child: members,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -1193,7 +1217,12 @@ class _Header extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              conversation?.name ?? session.nick,
+              // With nothing open the header names the network. It used to
+              // say the user's own nickname, which is a name for the person
+              // looking at the screen and not for anything on it.
+              conversation?.name ??
+                  ProfileScope.of(context).byId(session.profileId)?.name ??
+                  'ddIRC',
               style: TextStyle(
                 color: t.text,
                 fontSize: 15,
@@ -1835,7 +1864,7 @@ class _RequestBar extends StatelessWidget {
           const SizedBox(width: 8),
           TextButton(
             onPressed: onDecline,
-            style: TextButton.styleFrom(foregroundColor: t.muted),
+            style: TextButton.styleFrom(foregroundColor: t.bad),
             child: const Text('Decline'),
           ),
           const SizedBox(width: 4),

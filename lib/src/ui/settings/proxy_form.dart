@@ -150,7 +150,6 @@ class ProxyFields extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              flex: 3,
               child: _field(
                 ProxyField.host,
                 'Address',
@@ -166,7 +165,9 @@ class ProxyFields extends StatelessWidget {
                     'proxy rather than here.',
               ),
             ),
-            Expanded(child: _field(ProxyField.port, 'Port')),
+            // Fixed, for the reason the network editor's port box is: a share
+            // of the row clips the fifth digit of a port like 52675.
+            SizedBox(width: 120, child: _field(ProxyField.port, 'Port')),
           ],
         ),
         Row(

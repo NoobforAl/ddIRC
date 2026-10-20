@@ -395,7 +395,11 @@ class _Empty extends StatelessWidget {
                 builder: (context) => TextButton.icon(
                   onPressed: () async {
                     final box = context.findRenderObject()! as RenderBox;
-                    final at = box.localToGlobal(box.size.center(Offset.zero));
+                    // Under the button, lined up with its left edge, not on its
+                    // centre: from the centre the menu opened wherever it
+                    // happened to fit, which read as unrelated to what had
+                    // been pressed.
+                    final at = box.localToGlobal(Offset(0, box.size.height));
                     final choice = await showAddNetworkMenu(context, at);
                     if (choice != null) onAddChoice(choice);
                   },

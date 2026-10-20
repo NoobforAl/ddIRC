@@ -95,7 +95,9 @@ class NetworkRail extends StatelessWidget {
               tooltip: 'Add a network',
               onTap: () async {
                 final box = context.findRenderObject()! as RenderBox;
-                final at = box.localToGlobal(box.size.center(Offset.zero));
+                // Beside the button, off the rail, rather than on the button's
+                // centre — where it covered the rail it had been opened from.
+                final at = box.localToGlobal(Offset(box.size.width, 0));
                 final choice = await showAddNetworkMenu(context, at);
                 if (choice != null) onAddChoice(choice);
               },

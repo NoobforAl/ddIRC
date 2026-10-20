@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme.dart';
 import 'layout.dart';
 import 'motion.dart';
+import 'text_direction.dart';
 
 /// The place a message is typed, at the foot of a conversation.
 ///
@@ -71,35 +72,45 @@ class Composer extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: controller,
-                      focusNode: focusNode,
-                      onSubmitted: (_) => onSubmit(),
-                      textInputAction: TextInputAction.send,
-                      maxLines: 5,
-                      minLines: 1,
-                      autocorrect: false,
-                      cursorColor: t.accent,
-                      style: TextStyle(color: t.text, fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: hint,
-                        hintStyle: TextStyle(color: t.faint, fontSize: 15),
-                        isDense: true,
-                        // Every border named, because the app's input theme
-                        // supplies one for each state and an unnamed state
-                        // falls back to it.
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        disabledBorder: InputBorder.none,
-                        errorBorder: InputBorder.none,
-                        focusedErrorBorder: InputBorder.none,
-                        contentPadding: EdgeInsets.fromLTRB(
-                          18,
-                          (_height - 20) / 2,
-                          attach == null ? 18 : 4,
-                          (_height - 20) / 2,
+                    // Rebuilt as the text changes, because the direction is a
+                    // property of what has been typed: the first Persian
+                    // letter turns the field right to left, the way every
+                    // messenger's does, and clearing it turns it back. Until
+                    // there is a letter with a direction it stays as it was,
+                    // so the placeholder does not jump about.
+                    child: ListenableBuilder(
+                      listenable: controller,
+                      builder: (context, _) => TextField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        textDirection: strongDirectionOf(controller.text),
+                        onSubmitted: (_) => onSubmit(),
+                        textInputAction: TextInputAction.send,
+                        maxLines: 5,
+                        minLines: 1,
+                        autocorrect: false,
+                        cursorColor: t.accent,
+                        style: TextStyle(color: t.text, fontSize: 15),
+                        decoration: InputDecoration(
+                          hintText: hint,
+                          hintStyle: TextStyle(color: t.faint, fontSize: 15),
+                          isDense: true,
+                          // Every border named, because the app's input theme
+                          // supplies one for each state and an unnamed state
+                          // falls back to it.
+                          filled: false,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          disabledBorder: InputBorder.none,
+                          errorBorder: InputBorder.none,
+                          focusedErrorBorder: InputBorder.none,
+                          contentPadding: EdgeInsets.fromLTRB(
+                            18,
+                            (_height - 20) / 2,
+                            attach == null ? 18 : 4,
+                            (_height - 20) / 2,
+                          ),
                         ),
                       ),
                     ),

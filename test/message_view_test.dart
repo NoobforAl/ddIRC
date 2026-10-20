@@ -6,7 +6,8 @@
 // day when the scrollback crosses one, and replies that show what they
 // answer.
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -353,6 +354,113 @@ void main() {
     await tester.tap(find.text('Mention alice'));
     await tester.pumpAndSettle();
     expect(mentions, ['alice']);
+  });
+
+  group('direction', () {
+    const longLine = 'a much longer second line, so the bubble is wide';
+
+    testWidgets('each message runs the way its own words read', (tester) async {
+      await _pump(
+        tester,
+        _conversation([
+          _said('alice', 'hello there', at: DateTime(2026, 1, 1, 9)),
+          _said('bob', 'سلام دنیا', at: DateTime(2026, 1, 1, 9, 5)),
+        ]),
+      );
+
+      expect(
+        Directionality.of(tester.element(find.text('hello there'))),
+        TextDirection.ltr,
+      );
+      expect(
+        Directionality.of(tester.element(find.text('سلام دنیا'))),
+        TextDirection.rtl,
+      );
+    });
+
+    testWidgets('a short right-to-left line sits at the bubble\'s right edge', (
+      tester,
+    ) async {
+      // One bubble, two lines: the second is long, so the first has room it
+      // does not fill. Left to right it hugs the left edge; right to left it
+      // has to hug the right.
+      await _pump(
+        tester,
+        _conversation([
+          _said('bob', 'سلام', at: DateTime(2026, 1, 1, 9)),
+          _said('bob', longLine, at: DateTime(2026, 1, 1, 9)),
+        ]),
+      );
+
+      final persian = tester.getRect(find.text('سلام'));
+      final long = tester.getRect(find.text(longLine));
+      // Against the end edge: at least as far right as where the long line's
+      // words stop (the time stamp sits beyond that, at the true edge), and
+      // well clear of where the long line starts.
+      expect(persian.right, greaterThanOrEqualTo(long.right));
+      expect(persian.left, greaterThan(long.left + 40));
+    });
+
+    testWidgets('a short left-to-right line still hugs the left', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        _conversation([
+          _said('alice', 'hi', at: DateTime(2026, 1, 1, 9)),
+          _said('alice', longLine, at: DateTime(2026, 1, 1, 9)),
+        ]),
+      );
+
+      // Shares its left edge with the long line: nothing has moved it.
+      expect(
+        tester.getRect(find.text('hi')).left,
+        closeTo(tester.getRect(find.text(longLine)).left, 1),
+      );
+    });
+  });
+
+  group('right-click', () {
+    testWidgets('opens the message menu, not the platform\'s Select all', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        await _pump(tester, _conversation([_said('alice', 'right click me')]));
+
+        final mouse = await tester.startGesture(
+          tester.getCenter(find.text('right click me')),
+          kind: PointerDeviceKind.mouse,
+          buttons: kSecondaryButton,
+        );
+        await mouse.up();
+        await tester.pumpAndSettle();
+
+        // Ours: Copy is always there, and the platform's menu is not.
+        expect(find.text('Copy'), findsOneWidget);
+        expect(find.text('Select all'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('a left click opens nothing', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        await _pump(tester, _conversation([_said('alice', 'plain click')]));
+
+        final mouse = await tester.startGesture(
+          tester.getCenter(find.text('plain click')),
+          kind: PointerDeviceKind.mouse,
+        );
+        await mouse.up();
+        await tester.pumpAndSettle();
+
+        expect(find.text('Copy'), findsNothing);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
   });
 
   testWidgets('nicks wear their colour; yours needs no label at all', (

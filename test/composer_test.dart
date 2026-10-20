@@ -208,6 +208,38 @@ void main() {
     expect((send.bottom - field.bottom).abs(), lessThan(14));
   });
 
+  testWidgets('the field runs the way what is typed in it reads', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _host(_composer(controller: controller, focus: focus)),
+    );
+    TextDirection? directionOfField() =>
+        tester.widget<TextField>(find.byType(TextField)).textDirection;
+
+    // Nothing typed: no opinion, so the placeholder stays where it is.
+    expect(directionOfField(), isNull);
+
+    await tester.enterText(find.byType(TextField), 'hello');
+    await tester.pump();
+    expect(directionOfField(), TextDirection.ltr);
+
+    // The first Persian letter turns it right to left...
+    await tester.enterText(find.byType(TextField), 'سلام');
+    await tester.pump();
+    expect(directionOfField(), TextDirection.rtl);
+
+    // ...a leading number does not decide, the first letter after it does...
+    await tester.enterText(find.byType(TextField), '123 سلام');
+    await tester.pump();
+    expect(directionOfField(), TextDirection.rtl);
+
+    // ...and clearing it hands the field back.
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pump();
+    expect(directionOfField(), isNull);
+  });
+
   testWidgets('reads in both themes', (tester) async {
     for (final mode in [ThemeMode.dark, ThemeMode.light]) {
       await tester.pumpWidget(

@@ -103,13 +103,23 @@ Future<T?> showPointerMenu<T>(
 }) {
   final t = context.tokens;
   final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  // `at` is a position in the window, and the menu is placed in the overlay's
+  // own coordinates. They are the same only while the overlay starts at the
+  // window's top-left; with the app's title strip above it, the menu opened
+  // the strip's height — 34 pixels — below the pointer.
+  at = overlay.globalToLocal(at);
   return showMenu<T>(
     context: context,
     color: t.surface,
     elevation: 0,
     shape: menuShape(t),
+    // A pixel wide, not a point. Flutter lays a menu out from a zero-width
+    // anchor with its *right* edge on the point, whichever side the point is
+    // on, so every menu opened leftwards from where it was asked for. With any
+    // width at all it starts at the anchor and runs towards the side with room
+    // — which is where a native context menu opens.
     position: RelativeRect.fromRect(
-      Rect.fromPoints(at, at),
+      Rect.fromLTWH(at.dx, at.dy, 1, 1),
       Offset.zero & overlay.size,
     ),
     items: items,

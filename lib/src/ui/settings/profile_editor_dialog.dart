@@ -164,9 +164,61 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
   bool get _isNew => widget.profile == null;
 
+  /// What each field held when the editor opened, so "has anything been
+  /// changed" is a comparison and not a guess.
+  late final Map<_Input, String> _opened;
+
+  /// Whether leaving now would throw away something the user typed.
+  bool get _dirty =>
+      _autoConnect != (widget.profile?.autoConnect ?? false) ||
+      _fields.entries.any((e) => e.value.text != _opened[e.key]);
+
+  /// Asked when the editor is dismissed — Escape, a click outside it, the
+  /// system back — with something typed in it. Closing used to discard a
+  /// half-filled form without a word, which for an address, a nickname and a
+  /// password is a lot to retype for one stray key.
+  Future<void> _onDismissed(bool didPop) async {
+    if (didPop) return;
+    if (_busy || !_dirty) {
+      Navigator.of(context).pop();
+      return;
+    }
+    final discard = await showSoftDialog<bool>(
+      context: context,
+      builder: (context) {
+        final t = context.tokens;
+        return AlertDialog(
+          backgroundColor: t.surface,
+          title: Text(
+            'Discard your changes?',
+            style: TextStyle(color: t.text, fontSize: 16),
+          ),
+          content: Text(
+            _isNew
+                ? 'This network has not been saved yet.'
+                : 'The changes to this network have not been saved.',
+            style: TextStyle(color: t.muted, fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            SettingsTertiaryButton(
+              label: 'Keep editing',
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            SettingsDangerButton(
+              label: 'Discard',
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+    if (discard == true && mounted) Navigator.of(context).pop();
+  }
+
   @override
   void initState() {
     super.initState();
+    _opened = {for (final e in _fields.entries) e.key: e.value.text};
     // Open from the start when this profile already has an answer in there.
     // A disclosure that hides a setting the user themselves configured is a
     // setting they will conclude has been lost.
@@ -616,169 +668,189 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         .isConnected(widget.profile?.id ?? '');
     final compact = context.layout.isCompact;
 
-    return SettingsDialog(
-      title: _isNew ? 'Add a network' : 'Edit network',
-      subtitle: _isNew ? 'Every connection uses TLS' : widget.profile!.name,
-      actions: _isNew
-          ? const []
-          : [
-              IconButton(
-                onPressed: _busy ? null : _export,
-                icon: const Icon(Icons.save_alt, size: 18),
-                color: t.muted,
-                visualDensity: VisualDensity.compact,
-                tooltip: 'Export as a .irc file…',
+    // `canPop: false` always, and the decision made in the callback: whether
+    // to ask depends on what is typed *now*, and the buttons that finish the
+    // dialog pop it directly, which this does not stand in the way of.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) => _onDismissed(didPop),
+      child: SettingsDialog(
+        title: _isNew ? 'Add a network' : 'Edit network',
+        subtitle: _isNew ? 'Every connection uses TLS' : widget.profile!.name,
+        actions: _isNew
+            ? const []
+            : [
+                IconButton(
+                  onPressed: _busy ? null : _export,
+                  icon: const Icon(Icons.save_alt, size: 18),
+                  color: t.muted,
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Export as a .irc file…',
+                ),
+              ],
+        // Pinned, so the buttons are on screen without scrolling to them — and
+        // stay there when a validation message makes the form taller.
+        footer: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // The answer sits directly above the button that asks for it, which
+            // is the whole reason this was a section of its own before: a test
+            // has a result, and a result with nowhere to go is a button that
+            // appears to do nothing.
+            if (_testNote != null)
+              SettingsNote(text: _testNote!, isError: _testFailed),
+            if (_exportNote != null)
+              SettingsNote(text: _exportNote!, isError: _exportFailed),
+            const SizedBox(height: 8),
+            _actions(connected: connected, compact: compact),
+            const SizedBox(height: 4),
+          ],
+        ),
+        children: [
+          SettingsSection(
+            label: 'Server',
+            children: [
+              _field(
+                _Input.name,
+                'Name',
+                hint: 'Optional — defaults to the host',
+                help:
+                    'What this network is called in the rail on the left and in '
+                    'the channel list. Yours to choose — it is never sent '
+                    'anywhere, and changing it does not change what you connect '
+                    'to.',
+              ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _field(
+                      _Input.host,
+                      'Address',
+                      hint: 'irc.example.org',
+                      help:
+                          'The server to connect to, as a hostname or an IP '
+                          'address. A `.onion` address works too, and is routed '
+                          'through Tor. Pasting `host:port` is fine — the port '
+                          'moves into the box beside it.',
+                    ),
+                  ),
+                  // A fixed width, not a share of the row: a share left the box
+                  // too narrow for a five-digit port, which clipped the last
+                  // digit of `52675` so it could not be read back. Wide enough
+                  // for the longest valid port with room to spare, and the
+                  // address — which can be any length — takes everything else.
+                  SizedBox(
+                    width: 120,
+                    child: _field(
+                      _Input.port,
+                      'Port',
+                      help:
+                          'Almost always 6697, which is the standard port for '
+                          'IRC over TLS. ddIRC never connects in the clear, so '
+                          'the plaintext ports — 6667 and friends — will not '
+                          'work here.',
+                    ),
+                  ),
+                ],
+              ),
+              _networkNote(t),
+              _field(
+                _Input.channels,
+                'Channels',
+                hint: 'Comma-separated',
+                help:
+                    'Joined automatically whenever this network connects. They '
+                    'fill the channel list rather than opening a tab each, so '
+                    'saving a dozen does not mean landing in a dozen.',
+              ),
+              _suggestedChannels(t),
+              SettingsSwitch(
+                label: 'Connect at launch',
+                description:
+                    'Opens this network when ddIRC starts. Several may be '
+                    'marked; they connect together, and the first in the list '
+                    'is the one you land on.',
+                value: _autoConnect,
+                onChanged: (v) => setState(() => _autoConnect = v),
               ),
             ],
-      children: [
-        SettingsSection(
-          label: 'Server',
-          children: [
-            _field(
-              _Input.name,
-              'Name',
-              hint: 'Optional — defaults to the host',
-              help:
-                  'What this network is called in the rail on the left and in '
-                  'the channel list. Yours to choose — it is never sent '
-                  'anywhere, and changing it does not change what you connect '
-                  'to.',
-            ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: _field(
-                    _Input.host,
-                    'Address',
-                    hint: 'irc.example.org',
-                    help:
-                        'The server to connect to, as a hostname or an IP '
-                        'address. A `.onion` address works too, and is routed '
-                        'through Tor. Pasting `host:port` is fine — the port '
-                        'moves into the box beside it.',
-                  ),
+          ),
+          const SettingsRule(),
+          SettingsSection(
+            label: 'Identity',
+            children: [
+              PersonaPicker(
+                selected: _personaId,
+                networkId: widget.profile?.id,
+                onChanged: (id) => setState(() => _personaId = id),
+                fixedNickField: _field(
+                  _Input.nick,
+                  'Nickname',
+                  help:
+                      'How people address you on this network, and how you '
+                      'appear in every channel. No spaces. If it is already '
+                      'taken the server offers you the next one down — the '
+                      'connection test below says which name you actually got.',
                 ),
-                Expanded(
-                  child: _field(
-                    _Input.port,
-                    'Port',
-                    help:
-                        'Almost always 6697, which is the standard port for '
-                        'IRC over TLS. ddIRC never connects in the clear, so '
-                        'the plaintext ports — 6667 and friends — will not '
-                        'work here.',
-                  ),
-                ),
-              ],
-            ),
-            _networkNote(t),
-            _field(
-              _Input.channels,
-              'Channels',
-              hint: 'Comma-separated',
-              help:
-                  'Joined automatically whenever this network connects. They '
-                  'fill the channel list rather than opening a tab each, so '
-                  'saving a dozen does not mean landing in a dozen.',
-            ),
-            _suggestedChannels(t),
-            SettingsSwitch(
-              label: 'Connect at launch',
-              description:
-                  'Opens this network when ddIRC starts. Several may be '
-                  'marked; they connect together, and the first in the list '
-                  'is the one you land on.',
-              value: _autoConnect,
-              onChanged: (v) => setState(() => _autoConnect = v),
-            ),
-          ],
-        ),
-        const SettingsRule(),
-        SettingsSection(
-          label: 'Identity',
-          children: [
-            PersonaPicker(
-              selected: _personaId,
-              networkId: widget.profile?.id,
-              onChanged: (id) => setState(() => _personaId = id),
-              fixedNickField: _field(
-                _Input.nick,
-                'Nickname',
-                help:
-                    'How people address you on this network, and how you '
-                    'appear in every channel. No spaces. If it is already '
-                    'taken the server offers you the next one down — the '
-                    'connection test below says which name you actually got.',
               ),
-            ),
-          ],
-        ),
-        const SettingsRule(),
-        SettingsDisclosure(
-          label: 'Advanced',
-          summary: _advancedSummary,
-          open: _showAdvanced,
-          onToggle: () => setState(() => _showAdvanced = !_showAdvanced),
-          children: [
-            SettingsSection(
-              label: 'Authentication',
-              children: [
-                _field(
-                  _Input.serverPassword,
-                  'Server password',
-                  obscure: true,
-                  hint: _hasStoredServerPassword
-                      ? 'Stored — leave blank to keep it'
-                      : 'Optional',
-                  help:
-                      'Sent as the server\'s PASS before registration. Kept '
-                      'in the platform keychain, never in app settings.',
-                ),
-                _field(_Input.account, 'SASL account'),
-                _field(
-                  _Input.password,
-                  'SASL password',
-                  obscure: true,
-                  hint: !_isNew && widget.profile!.usesSasl
-                      ? 'Stored — leave blank to keep it'
-                      : null,
-                  help:
-                      'Optional. Kept in the platform keychain, never in app '
-                      'settings, and zeroized by the core once authentication '
-                      'completes.',
-                ),
-                _field(
-                  _Input.nickservPassword,
-                  'NickServ password',
-                  obscure: true,
-                  hint: _hasStoredNickservPassword
-                      ? 'Stored — leave blank to keep it'
-                      : 'Optional',
-                  help:
-                      'Used to identify with NickServ if SASL was not '
-                      'accepted. Kept in the platform keychain, never in app '
-                      'settings.',
-                ),
-                const SecretStorageNote(),
-              ],
-            ),
-            _proxySection(t),
-          ],
-        ),
-        const SettingsRule(),
-        // The answer sits directly above the button that asks for it, which is
-        // the whole reason this was a section of its own before: a test has a
-        // result, and a result with nowhere to go is a button that appears to
-        // do nothing.
-        if (_testNote != null)
-          SettingsNote(text: _testNote!, isError: _testFailed),
-        if (_exportNote != null)
-          SettingsNote(text: _exportNote!, isError: _exportFailed),
-        _actions(connected: connected, compact: compact),
-        const SizedBox(height: 6),
-      ],
+            ],
+          ),
+          const SettingsRule(),
+          SettingsDisclosure(
+            label: 'Advanced',
+            summary: _advancedSummary,
+            open: _showAdvanced,
+            onToggle: () => setState(() => _showAdvanced = !_showAdvanced),
+            children: [
+              SettingsSection(
+                label: 'Authentication',
+                children: [
+                  _field(
+                    _Input.serverPassword,
+                    'Server password',
+                    obscure: true,
+                    hint: _hasStoredServerPassword
+                        ? 'Stored — leave blank to keep it'
+                        : 'Optional',
+                    help:
+                        'Sent as the server\'s PASS before registration. Kept '
+                        'in the platform keychain, never in app settings.',
+                  ),
+                  _field(_Input.account, 'SASL account'),
+                  _field(
+                    _Input.password,
+                    'SASL password',
+                    obscure: true,
+                    hint: !_isNew && widget.profile!.usesSasl
+                        ? 'Stored — leave blank to keep it'
+                        : null,
+                    help:
+                        'Optional. Kept in the platform keychain, never in app '
+                        'settings, and zeroized by the core once authentication '
+                        'completes.',
+                  ),
+                  _field(
+                    _Input.nickservPassword,
+                    'NickServ password',
+                    obscure: true,
+                    hint: _hasStoredNickservPassword
+                        ? 'Stored — leave blank to keep it'
+                        : 'Optional',
+                    help:
+                        'Used to identify with NickServ if SASL was not '
+                        'accepted. Kept in the platform keychain, never in app '
+                        'settings.',
+                  ),
+                  const SecretStorageNote(),
+                ],
+              ),
+              _proxySection(t),
+            ],
+          ),
+        ],
+      ),
     );
   }
 

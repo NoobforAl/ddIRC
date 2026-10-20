@@ -25,6 +25,7 @@ Widget _host(Widget child) => MaterialApp(
 );
 
 void main() {
+  settingsDialogFooterTests();
   group('SettingsNavRow', () {
     testWidgets('shows what is set inside it, not only its name', (
       tester,
@@ -375,5 +376,86 @@ void main() {
         expect(track.resolve({}), t.rule);
       });
     }
+  });
+}
+
+// The buttons that finish a dialog have to be on screen. As the last item of a
+// scrolling form they were not: on a window 800 tall the network editor opened
+// with "Save & connect" below the fold, and a validation message, which makes
+// the form taller, pushed the buttons half out of view.
+void settingsDialogFooterTests() {
+  group('SettingsDialog footer', () {
+    Widget dialog({Widget? footer}) => MaterialApp(
+      theme: Tokens.themeFor(Tokens.dark),
+      home: Scaffold(
+        body: SettingsDialog(
+          title: 'Edit',
+          footer: footer,
+          children: [
+            for (var i = 0; i < 40; i++)
+              SizedBox(height: 60, child: Text('row $i')),
+          ],
+        ),
+      ),
+    );
+
+    testWidgets('is on screen without scrolling, under a form far taller', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(dialog(footer: const Text('FOOTER')));
+
+      final footer = tester.getRect(find.text('FOOTER'));
+      expect(footer.top, greaterThanOrEqualTo(0));
+      expect(footer.bottom, lessThanOrEqualTo(600));
+    });
+
+    testWidgets('does not move when the form is scrolled', (tester) async {
+      tester.view.physicalSize = const Size(1000, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(dialog(footer: const Text('FOOTER')));
+      final before = tester.getRect(find.text('FOOTER'));
+
+      await tester.drag(find.byType(ListView), const Offset(0, -1500));
+      await tester.pumpAndSettle();
+
+      expect(tester.getRect(find.text('FOOTER')), before);
+      // And the form really did scroll under it.
+      expect(find.text('row 0'), findsNothing);
+    });
+
+    testWidgets('a footer taller than its share scrolls inside it', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        dialog(footer: const SizedBox(height: 2000, child: Text('TALL'))),
+      );
+
+      // Capped at 40% of the window, so the form above it is still usable.
+      final listHeight = tester.getSize(find.byType(ListView)).height;
+      expect(listHeight, greaterThan(150));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('no footer, no change: the dialog is as it was', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(dialog());
+      expect(find.byType(SingleChildScrollView), findsNothing);
+      expect(find.text('row 0'), findsOneWidget);
+    });
   });
 }

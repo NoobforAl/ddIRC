@@ -335,7 +335,9 @@ class _ChannelListState extends State<ChannelList> {
       child: TextButton(
         onPressed: widget.onDisconnect,
         style: TextButton.styleFrom(
-          foregroundColor: t.muted,
+          // Red, because it ends the session: the same colour the settings
+          // dialog's Disconnect already wears, so it reads as one action.
+          foregroundColor: t.bad,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: const RoundedRectangleBorder(),
         ),

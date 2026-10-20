@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
@@ -37,6 +39,7 @@ class SettingsDialog extends StatelessWidget {
     this.width = 420,
     this.onBack,
     this.actions = const [],
+    this.footer,
   });
 
   final String title;
@@ -60,6 +63,17 @@ class SettingsDialog extends StatelessWidget {
   /// network editor is currently the only one. Empty by default, so the
   /// eight surfaces that do not need one say nothing about it.
   final List<Widget> actions;
+
+  /// Pinned under the scrolling body, above a hairline, so it is on screen
+  /// however far the form has been scrolled.
+  ///
+  /// For the buttons that finish the dialog. As the last item of [children]
+  /// they scrolled with the form: on a window 800 tall the network editor
+  /// opened with *Save & connect* below the fold, and a validation message,
+  /// which makes the form taller, pushed the buttons half out of view. It is
+  /// capped to a share of the window and scrolls inside that, so a long note
+  /// in it cannot crowd out the form it belongs to.
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -117,6 +131,16 @@ class SettingsDialog extends StatelessWidget {
                   children: children,
                 ),
               ),
+              if (footer != null)
+                Container(
+                  constraints: BoxConstraints(maxHeight: viewport.height * 0.4),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: t.rule, width: Tokens.hairline),
+                    ),
+                  ),
+                  child: SingleChildScrollView(child: footer),
+                ),
             ],
           ),
         ),
@@ -1444,6 +1468,18 @@ class SettingsNote extends StatelessWidget {
 class SecretStorageNote extends StatelessWidget {
   const SecretStorageNote({super.key});
 
+  /// What the keychain is called *here*. The note used to list all of them —
+  /// Android, iOS, macOS and Windows — to someone who is on exactly one, which
+  /// made a reassurance read as a catalogue.
+  String get _store => switch (defaultTargetPlatform) {
+    TargetPlatform.android => 'the Android Keystore',
+    TargetPlatform.iOS => 'the iOS Keychain',
+    TargetPlatform.macOS => 'the macOS Keychain',
+    TargetPlatform.windows => 'Windows data protection (DPAPI)',
+    TargetPlatform.linux => 'the system secret service',
+    TargetPlatform.fuchsia => 'the system keystore',
+  };
+
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
@@ -1456,9 +1492,8 @@ class SecretStorageNote extends StatelessWidget {
           const SizedBox(width: 7),
           Expanded(
             child: Text(
-              'Kept as a secret in the device keychain — Android Keystore, '
-              'the iOS and macOS Keychain, DPAPI on Windows. Never in app '
-              'settings, never in a log, and never written back out to a '
+              'Kept as a secret in the device keychain — $_store. Never in '
+              'app settings, never in a log, and never written back out to a '
               '.irc file.',
               style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.4),
             ),

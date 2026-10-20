@@ -1,7 +1,8 @@
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, ValueListenable, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/physics.dart' show SpringSimulation;
 import 'package:flutter/gestures.dart'
-    show PointerDeviceKind, TapGestureRecognizer;
+    show PointerDeviceKind, TapGestureRecognizer, kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show Clipboard, ClipboardData, HapticFeedback;
@@ -21,6 +22,7 @@ import 'link.dart';
 import 'menu.dart';
 import 'motion.dart';
 import 'nick_color.dart';
+import 'text_direction.dart';
 import 'touchable.dart';
 
 /// A handle on a [MessageView], for the screen around it to point at a line.
@@ -82,6 +84,15 @@ class MessageView extends StatefulWidget {
   @override
   State<MessageView> createState() => _MessageViewState();
 }
+
+/// Whether a mouse is how this app is driven: a desktop, not a phone or the web.
+bool get _isDesktop =>
+    !kIsWeb &&
+    const {
+      TargetPlatform.windows,
+      TargetPlatform.linux,
+      TargetPlatform.macOS,
+    }.contains(defaultTargetPlatform);
 
 class _MessageViewState extends State<MessageView> {
   final _controller = ScrollController();
@@ -538,6 +549,16 @@ class _MessageViewState extends State<MessageView> {
         Positioned.fill(
           child: SelectionArea(
             onSelectionChanged: (content) => _selected = content?.plainText,
+            // On a desktop a right-click on a message opens *our* menu, which
+            // has Copy and Reply and Pin and the rest. The selection's own —
+            // which offers only Select all — used to win it, so the better
+            // menu could never be reached with a mouse. A touch screen keeps
+            // the platform's toolbar, which is how its selection is copied.
+            contextMenuBuilder: (context, selectable) => _isDesktop
+                ? const SizedBox.shrink()
+                : AdaptiveTextSelectionToolbar.selectableRegion(
+                    selectableRegionState: selectable,
+                  ),
             child: CustomScrollView(
               controller: _controller,
               center: split ? _centerKey : null,
@@ -1316,6 +1337,10 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
 
   /// Which line a swipe or the hover button is about.
   int _target = 0;
+
+  /// Whether the button now held down is the mouse's right one, so the pointer
+  /// coming up opens the menu. A release carries no button of its own.
+  bool _secondaryDown = false;
   bool _hovered = false;
 
   late List<GlobalKey> _lineKeys = _keys();
@@ -1597,6 +1622,19 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         ),
     ];
 
+    // A bubble is as wide as its widest line, so a shorter line has no width
+    // of its own to align inside. Right-to-left lines would stay hugging the
+    // left edge of it — which reads as left-aligned however the text itself
+    // runs. So the bubble as a whole decides where its lines gather, by how
+    // its first line reads; `_MessageBody` takes care of the direction within
+    // each line.
+    final gathersAtEnd =
+        directionOfText(
+          first.spans.map((s) => s.text).join(),
+          fallback: Directionality.of(context),
+        ) ==
+        TextDirection.rtl;
+
     Widget bubble = Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(color: fill, borderRadius: radius),
@@ -1615,7 +1653,9 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
           settings.density == Density.compact ? 4 : 6,
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: gathersAtEnd
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: children,
         ),
@@ -1812,8 +1852,19 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     return MouseRegion(
       key: _lineKeys[i],
       onEnter: (_) => _target = i,
-      child: GestureDetector(
-        onSecondaryTapUp: (d) => _menu(i, at: d.globalPosition),
+      // A raw pointer listener rather than a gesture recogniser: the
+      // selection around the list competes for a right-click in the gesture
+      // arena and wins it, so a recogniser here was never asked. A listener is
+      // not in the arena, and hears the click whatever else does.
+      child: Listener(
+        onPointerDown: (e) => _secondaryDown =
+            e.kind == PointerDeviceKind.mouse && e.buttons == kSecondaryButton,
+        onPointerUp: (e) {
+          if (!_secondaryDown) return;
+          _secondaryDown = false;
+          _menu(i, at: e.position);
+        },
+        onPointerCancel: (_) => _secondaryDown = false,
         child: GestureDetector(
           supportedDevices: _Bubble._swipeDevices,
           onLongPress: () => _menu(i),
@@ -2056,8 +2107,30 @@ class _MessageBodyState extends State<_MessageBody> {
     return _decorated!;
   }
 
+  /// The direction this message's own words run, which is not necessarily the
+  /// app's: judged per message, so a Persian line and an English one in the
+  /// same channel each sit the way they read.
+  ///
+  /// Everything below inherits it — alignment, the order of a line and its
+  /// time, which side a quote's bar or a list's bullet is on — so none of it
+  /// needs to know about direction itself, only to say `start` and `end`
+  /// where it used to say `left` and `right`.
+  TextDirection _directionFor(BuildContext context) {
+    final words = widget.message.spans.map((s) => s.text).join();
+    return directionOfText(words, fallback: Directionality.of(context));
+  }
+
   @override
   Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: _directionFor(context),
+      // A builder, so what is built below reads the direction just set and not
+      // the one above it.
+      child: Builder(builder: _buildLine),
+    );
+  }
+
+  Widget _buildLine(BuildContext context) {
     final message = widget.message;
     final renderColors = widget.renderColors;
     final timeStyle = widget.timeStyle;
@@ -2149,9 +2222,11 @@ class _MessageBodyState extends State<_MessageBody> {
     if (decorated.quote) {
       aside = 11;
       text = Container(
-        padding: const EdgeInsets.only(left: 8),
+        padding: const EdgeInsetsDirectional.only(start: 8),
         decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: t.faint, width: 3)),
+          border: BorderDirectional(
+            start: BorderSide(color: t.faint, width: 3),
+          ),
         ),
         child: text,
       );
@@ -2199,7 +2274,7 @@ class _MessageBodyState extends State<_MessageBody> {
       };
       aside = indent + gutter;
       text = Padding(
-        padding: EdgeInsets.only(left: indent),
+        padding: EdgeInsetsDirectional.only(start: indent),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2277,7 +2352,7 @@ class _MessageBodyState extends State<_MessageBody> {
           return Stack(
             children: [
               text,
-              Positioned(right: 0, bottom: 1, child: stamp),
+              PositionedDirectional(end: 0, bottom: 1, child: stamp),
             ],
           );
         }
