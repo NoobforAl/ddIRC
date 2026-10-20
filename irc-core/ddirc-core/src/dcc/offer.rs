@@ -199,7 +199,11 @@ pub fn safe_filename(name: &str) -> Option<String> {
     }
 
     if is_windows_device_name(trimmed) {
-        return Some(format!("_{trimmed}"));
+        // The prefix is one more byte, and the length limit was checked before
+        // it was added: a name already at the limit has no room for it, and a
+        // refused offer is better than one that fails at the filesystem later.
+        let prefixed = format!("_{trimmed}");
+        return (prefixed.len() <= 255).then_some(prefixed);
     }
     Some(trimmed.to_owned())
 }
@@ -210,8 +214,17 @@ pub fn safe_filename(name: &str) -> Option<String> {
 /// case: `NUL`, `nul.txt` and `Nul.tar.gz` are all the null device. The
 /// superscript digits are included because Windows resolves `COM¹` the same
 /// way it resolves `COM1`.
+///
+/// Spaces between the name and the dot are ignored, because Windows ignores
+/// them too: `NUL .txt` is the null device. Comparing the raw stem would have
+/// let exactly that name through.
 fn is_windows_device_name(name: &str) -> bool {
-    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
     matches!(
         stem.as_str(),
         "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
@@ -435,6 +448,28 @@ mod tests {
         ] {
             assert_eq!(safe_filename(given).unwrap(), want, "from {given:?}");
         }
+    }
+
+    #[test]
+    fn spaces_before_the_extension_do_not_hide_a_device_name() {
+        // Windows skips spaces between a device name and the dot, so these are
+        // still the null device and the console.
+        assert_eq!(safe_filename("NUL .txt").unwrap(), "_NUL .txt");
+        assert_eq!(safe_filename("con   .log").unwrap(), "_con   .log");
+        assert_eq!(safe_filename("COM1 .bin").unwrap(), "_COM1 .bin");
+        // A space *inside* the name makes it a different name.
+        assert_eq!(safe_filename("NU L.txt").unwrap(), "NU L.txt");
+    }
+
+    #[test]
+    fn the_prefix_cannot_push_a_name_over_the_length_limit() {
+        // 255 bytes exactly, and a device name: there is no room for the `_`.
+        let at_limit = format!("NUL.{}", "a".repeat(251));
+        assert_eq!(at_limit.len(), 255);
+        assert!(safe_filename(&at_limit).is_none());
+        // One byte shorter fits, prefix included.
+        let under = format!("NUL.{}", "a".repeat(250));
+        assert_eq!(safe_filename(&under).unwrap().len(), 255);
     }
 
     #[test]
