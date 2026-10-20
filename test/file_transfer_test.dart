@@ -33,7 +33,7 @@ import 'package:ddirc/src/ui/message_view.dart';
 Future<SessionModel> _session({
   bool transfers = true,
   rust.ProxyConfig? proxy,
-  Future<BigInt?> Function(String filename)? partial,
+  Future<BigInt?> Function(String filename, String from, BigInt? size)? partial,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final settings = await AppSettings.load();
@@ -52,7 +52,7 @@ Future<SessionModel> _session({
     settings: settings,
     // Nothing on disk unless a test says so; the real lookup would go and read
     // the machine this runs on.
-    partialLookup: partial ?? (_) async => null,
+    partialLookup: partial ?? (_, _, _) async => null,
   );
 }
 
@@ -971,7 +971,7 @@ void main() {
       'an offer with a partial file is marked as one that carries on',
       () async {
         final s = await _session(
-          partial: (name) async =>
+          partial: (name, _, _) async =>
               name == 'report.pdf' ? BigInt.from(1024) : null,
         );
         _joined(s, '#chat');
@@ -981,6 +981,27 @@ void main() {
         expect(_files(_named(s, '#chat')).single.resumeFrom, BigInt.from(1024));
       },
     );
+
+    test('the partial file is looked for under who offered it, and the size '
+        'they gave', () async {
+      String? gotName, gotFrom;
+      BigInt? gotSize;
+      final s = await _session(
+        partial: (name, from, size) async {
+          gotName = name;
+          gotFrom = from;
+          gotSize = size;
+          return null;
+        },
+      );
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer(from: 'mallory', size: 4096));
+      await pumpEventQueue();
+
+      expect(gotName, 'report.pdf');
+      expect(gotFrom, 'mallory');
+      expect(gotSize, BigInt.from(4096));
+    });
 
     test('an offer with nothing on disk is not', () async {
       final s = await _session();
@@ -993,7 +1014,7 @@ void main() {
 
     test('a leftover as long as the whole file is some other file', () async {
       for (final have in [2048, 4096]) {
-        final s = await _session(partial: (_) async => BigInt.from(have));
+        final s = await _session(partial: (_, _, _) async => BigInt.from(have));
         _joined(s, '#chat');
         s.receiveForTesting(_offer(size: 2048));
         await pumpEventQueue();
@@ -1006,17 +1027,21 @@ void main() {
       }
     });
 
-    test('an offer with no claimed size can still be carried on', () async {
-      final s = await _session(partial: (_) async => BigInt.from(500));
+    test('an offer with no claimed size cannot be carried on', () async {
+      // There is no size to check a partial file against, so the core does not
+      // keep one or ask for the rest, and the card must not say it will.
+      final s = await _session(partial: (_, _, _) async => BigInt.from(500));
       _joined(s, '#chat');
       s.receiveForTesting(_offer(size: null));
       await pumpEventQueue();
 
-      expect(_files(_named(s, '#chat')).single.resumeFrom, BigInt.from(500));
+      expect(_files(_named(s, '#chat')).single.resumeFrom, isNull);
     });
 
     test('a lookup that fails costs the card nothing', () async {
-      final s = await _session(partial: (_) async => throw StateError('disk'));
+      final s = await _session(
+        partial: (_, _, _) async => throw StateError('disk'),
+      );
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
       await pumpEventQueue();
@@ -1028,7 +1053,7 @@ void main() {
 
     test('an offer is never held up waiting for the disk', () async {
       final slow = Completer<BigInt?>();
-      final s = await _session(partial: (_) => slow.future);
+      final s = await _session(partial: (_, _, _) => slow.future);
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
 
@@ -1040,7 +1065,7 @@ void main() {
     });
 
     test('a download that dropped says what it kept', () async {
-      final s = await _session(partial: (_) async => BigInt.from(4096));
+      final s = await _session(partial: (_, _, _) async => BigInt.from(4096));
       _joined(s, '#chat');
       s.receiveForTesting(_offer());
       s.receiveForTesting(_started());
@@ -1055,7 +1080,7 @@ void main() {
     test('one the user stopped keeps nothing, so says nothing', () async {
       var asked = 0;
       final s = await _session(
-        partial: (_) async {
+        partial: (_, _, _) async {
           asked++;
           return null;
         },
@@ -1075,7 +1100,7 @@ void main() {
     test('a failure sending says nothing about what was kept', () async {
       var asked = 0;
       final s = await _session(
-        partial: (_) async {
+        partial: (_, _, _) async {
           asked++;
           return BigInt.one;
         },
@@ -1199,44 +1224,110 @@ void main() {
     String inFolder(Directory base, String folder, String name) =>
         '${base.path}${Platform.pathSeparator}$folder${Platform.pathSeparator}$name';
 
-    Future<BigInt?> look(String name, TargetPlatform platform) =>
-        receivedPartialBytes(
-          name,
-          platform: platform,
-          downloads: () async => downloads,
-          support: () async => support,
-        );
+    /// Looks for [name] as offered by [from] at [size] bytes — what the card
+    /// knows when it is made.
+    Future<BigInt?> look(
+      String name,
+      TargetPlatform platform, {
+      String from = 'alice',
+      int? size = 5000,
+    }) => receivedPartialBytes(
+      name,
+      from: from,
+      size: size == null ? null : BigInt.from(size),
+      platform: platform,
+      downloads: () async => downloads,
+      support: () async => support,
+    );
+
+    /// A partial file and the record the core keeps beside it.
+    void leave(
+      Directory base,
+      String folder,
+      String name,
+      int bytes, {
+      String from = 'alice',
+      int size = 5000,
+      String? record,
+    }) {
+      Directory('${base.path}${Platform.pathSeparator}$folder').createSync();
+      File(inFolder(base, folder, '$name.part'))
+          .writeAsBytesSync(List.filled(bytes, 1));
+      File(inFolder(base, folder, '$name.part.from')).writeAsStringSync(
+        record ?? partialOriginRecord(from, BigInt.from(size)),
+      );
+    }
 
     test('finds what a computer left in the ddIRC folder', () async {
-      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
-      File(inFolder(downloads, 'ddIRC', 'a.zip.part'))
-          .writeAsBytesSync(List.filled(1234, 1));
+      leave(downloads, 'ddIRC', 'a.zip', 1234);
 
       expect(await look('a.zip', TargetPlatform.windows), BigInt.from(1234));
     });
 
     test('finds what a phone left in private storage', () async {
-      Directory('${support.path}${Platform.pathSeparator}received')
-          .createSync();
-      File(inFolder(support, 'received', 'a.zip.part'))
-          .writeAsBytesSync(List.filled(77, 1));
+      leave(support, 'received', 'a.zip', 77);
 
       expect(await look('a.zip', TargetPlatform.android), BigInt.from(77));
     });
 
     test('knows a name with no extension has one too', () async {
-      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
-      File(inFolder(downloads, 'ddIRC', 'README.part'))
-          .writeAsBytesSync([1, 2]);
+      leave(downloads, 'ddIRC', 'README', 2);
 
       expect(await look('README', TargetPlatform.linux), BigInt.two);
+    });
+
+    test('is for the person who started it, at the size they gave', () async {
+      leave(downloads, 'ddIRC', 'a.zip', 100, from: 'alice', size: 5000);
+
+      expect(await look('a.zip', TargetPlatform.windows), BigInt.from(100));
+      expect(
+        await look('a.zip', TargetPlatform.windows, from: 'ALICE'),
+        BigInt.from(100),
+        reason: 'nicks are compared without case',
+      );
+      expect(
+        await look('a.zip', TargetPlatform.windows, from: 'mallory'),
+        isNull,
+        reason: 'somebody else would be splicing two files together',
+      );
+      expect(await look('a.zip', TargetPlatform.windows, size: 5001), isNull);
+      expect(await look('a.zip', TargetPlatform.windows, size: null), isNull);
+    });
+
+    test('the record is the text the core writes', () {
+      // The same literal is asserted in the core; the two must agree.
+      expect(
+        partialOriginRecord('Alice', BigInt.from(5000)),
+        'ddirc-partial 1\nfrom=alice\nsize=5000\n',
+      );
+    });
+
+    test('a partial file with no record is not carried on', () async {
+      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
+      File(inFolder(downloads, 'ddIRC', 'a.zip.part'))
+          .writeAsBytesSync(List.filled(50, 1));
+
+      expect(await look('a.zip', TargetPlatform.windows), isNull);
+    });
+
+    test('a record that is not the core\'s is not believed', () async {
+      leave(downloads, 'ddIRC', 'a.zip', 50, record: 'hello');
+      expect(await look('a.zip', TargetPlatform.windows), isNull);
+
+      leave(
+        downloads,
+        'ddIRC',
+        'b.zip',
+        50,
+        record: '${partialOriginRecord('alice', BigInt.from(5000))}extra',
+      );
+      expect(await look('b.zip', TargetPlatform.windows), isNull);
     });
 
     test('finds nothing where there is nothing', () async {
       expect(await look('a.zip', TargetPlatform.windows), isNull);
 
-      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
-      File(inFolder(downloads, 'ddIRC', 'empty.zip.part')).createSync();
+      leave(downloads, 'ddIRC', 'empty.zip', 0);
       expect(await look('empty.zip', TargetPlatform.windows), isNull);
     });
 
@@ -1259,6 +1350,8 @@ void main() {
     test('a folder that cannot be read is no reason to fail', () async {
       final none = await receivedPartialBytes(
         'a.zip',
+        from: 'alice',
+        size: BigInt.from(5000),
         platform: TargetPlatform.windows,
         downloads: () async => throw const FileSystemException('denied'),
         support: () async => throw const FileSystemException('denied too'),

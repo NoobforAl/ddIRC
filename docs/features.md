@@ -485,8 +485,11 @@ offers the same file again, the new offer says "already here", and accepting it
 asks them to start from that point (`DCC RESUME`) instead of from the beginning.
 A sender whose client does not understand the request is given ten seconds, and
 then the file simply starts over, so resuming is never the reason a transfer
-does not happen. A partial file is only used when it is no longer than the file
-being offered; a longer one is cut back, and a position that does not make sense
+does not happen. A partial file is only used for the person who started it, at the size they
+gave: a note beside it (`<name>.part.from`) records both, and an offer from
+somebody else, or of a different size, starts from the beginning instead of
+splicing two files together. A partial file is also only used when it is
+no longer than the file being offered, and a position that does not make sense
 means a fresh start. Resuming is for offers made to you directly, not for
 ones made to a channel and not for reverse (passive) ones, and the sender has
 to offer the file again after a drop: ddIRC does not reconnect a transfer

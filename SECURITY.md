@@ -150,8 +150,12 @@ send one.
   to us, never as a NOTICE, and only for a port and file name we offered or are
   waiting on, so they cannot be used to probe for a live client. The position is
   checked against the file's real size, and a bad one means starting from the
-  beginning. A partial file longer than the offered size is cut back rather
-  than trusted.
+  beginning. A partial file is carried on only for the person who started it, at
+  the size they offered: the core keeps a record of both beside it and compares
+  before asking anyone for anything, so a different sender who offers the same
+  name cannot have their bytes joined onto somebody else's, and cannot learn
+  how much of a file you hold. A partial file longer than the offered size is
+  cut back rather than trusted.
 - **Where received files land depends on the device.** On Android and iOS, in
   app-private storage: Android's shared storage is readable by anything holding
   the storage permission, so nothing is put there. On Windows, macOS and Linux,

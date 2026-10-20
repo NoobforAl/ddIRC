@@ -209,6 +209,89 @@ pub async fn partial_len(destination: &Path, filename: &str) -> Option<u64> {
     (meta.is_file() && meta.len() > 0).then_some(meta.len())
 }
 
+/// The first line of a record kept beside a partial file. Anything that does
+/// not start with it is not ours, and is neither read as one nor replaced.
+const ORIGIN_MAGIC: &str = "ddirc-partial 1";
+
+/// Where the record of who a partial file came from is kept: beside it.
+pub fn origin_path(destination: &Path, filename: &str) -> PathBuf {
+    destination.join(format!("{filename}.part.from"))
+}
+
+/// What the record says: who offered the file, and how big they said it was.
+///
+/// A partial file is a stranger's bytes, and resuming one means asking somebody
+/// to send the rest of it. That is only meaningful if the rest belongs to the
+/// same file — so a partial is carried on only for the person who started it, at
+/// the size they gave. The nick is compared without regard to case, as IRC does.
+fn origin_text(from: &str, size: u64) -> String {
+    format!(
+        "{ORIGIN_MAGIC}\nfrom={}\nsize={size}\n",
+        from.to_ascii_lowercase()
+    )
+}
+
+/// Whether [`path`] is a record this program wrote, judged by its first bytes
+/// so that a large file somebody named the same thing is not read in full.
+async fn is_origin_record(path: &Path) -> bool {
+    use tokio::io::AsyncReadExt;
+    let Ok(file) = tokio::fs::File::open(path).await else {
+        return false;
+    };
+    let mut head = Vec::new();
+    let _ = file
+        .take(ORIGIN_MAGIC.len() as u64)
+        .read_to_end(&mut head)
+        .await;
+    head == ORIGIN_MAGIC.as_bytes()
+}
+
+/// Note who a partial file is from. Best effort, and never over something that
+/// is not a record of ours: a file that merely has the same name is somebody's
+/// download, and nothing here overwrites those. Without a record a partial file
+/// is simply never resumed, which is the safe way to fail.
+async fn write_origin(destination: &Path, filename: &str, from: &str, size: u64) {
+    let path = origin_path(destination, filename);
+    if tokio::fs::try_exists(&path).await.unwrap_or(false) && !is_origin_record(&path).await {
+        return;
+    }
+    let _ = tokio::fs::write(&path, origin_text(from, size)).await;
+}
+
+/// Forget the record, if it is ours to forget.
+async fn remove_origin(destination: &Path, filename: &str) {
+    let path = origin_path(destination, filename);
+    if is_origin_record(&path).await {
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+}
+
+/// How much of [`filename`] is here from an earlier attempt *by [`from`] at
+/// this [`size`]*, or `None` — including when there is a partial file that
+/// someone else started, or one with no record at all.
+pub async fn resumable_len(
+    destination: &Path,
+    filename: &str,
+    from: &str,
+    size: u64,
+) -> Option<u64> {
+    use tokio::io::AsyncReadExt;
+    let expected = origin_text(from, size);
+    let file = tokio::fs::File::open(origin_path(destination, filename))
+        .await
+        .ok()?;
+    let mut record = Vec::new();
+    // One byte more than expected, so a longer record cannot pass as equal.
+    file.take(expected.len() as u64 + 1)
+        .read_to_end(&mut record)
+        .await
+        .ok()?;
+    if record != expected.as_bytes() {
+        return None;
+    }
+    partial_len(destination, filename).await
+}
+
 /// Accept an offer: connect, and write what arrives to [`destination`].
 ///
 /// Only ever a *normal* offer. A reverse one is refused before this is reached
@@ -225,17 +308,22 @@ pub async fn partial_len(destination: &Path, filename: &str) -> Option<u64> {
 /// the transfer carries on after that point in the existing `.part` file
 /// instead of beginning again. It is taken on trust from nobody — the caller
 /// passes only what it negotiated with the sender, and it is checked here
-/// against the file actually on disk and the size actually offered, so a number
-/// that does not fit either is treated as zero and the file is fetched whole.
+/// against the file actually on disk, the size actually offered, and *who
+/// started that partial file* ([`from`], against the record kept beside it), so
+/// a number that does not fit any of them is treated as zero and the file is
+/// fetched whole.
 ///
 /// A transfer that fails part-way leaves its `.part` file where it is, which is
 /// what makes resuming possible. One the user *cancelled* does not: stopping a
 /// download is a decision to be rid of it, and an unfinished copy of something
 /// the user turned away has no business staying. Nor does one that broke the
 /// size limit, which is a sender misbehaving rather than a connection dropping.
+/// And one whose size was never given is not kept either, as it could not be
+/// resumed.
 pub async fn accept(
     offer: &DccOffer,
     destination: &Path,
+    from: &str,
     proxy: Option<&ProxyConfig>,
     start_at: u64,
     progress: Progress,
@@ -260,7 +348,12 @@ pub async fn accept(
     let partial = partial_path(destination, &offer.filename);
 
     // Only a point inside the file, and only bytes we really have.
-    let on_disk = partial_len(destination, &offer.filename).await.unwrap_or(0);
+    let on_disk = match offer.size {
+        Some(size) => resumable_len(destination, &offer.filename, from, size)
+            .await
+            .unwrap_or(0),
+        None => 0,
+    };
     let start_at = match offer.size {
         Some(size) if start_at > 0 && start_at < size && start_at <= on_disk => start_at,
         _ => 0,
@@ -269,10 +362,17 @@ pub async fn accept(
     let stream = dial(SocketAddr::new(addr, port), proxy).await?;
     progress.send(TransferEvent::Started { total: offer.size });
 
+    // From here the partial file is this attempt's, so the record says so.
+    match offer.size {
+        Some(size) => write_origin(destination, &offer.filename, from, size).await,
+        None => remove_origin(destination, &offer.filename).await,
+    }
+
     let result = receive_into(stream, &partial, offer.size, start_at, &progress, cancel).await;
     match result {
         Ok(()) => {
             tokio::fs::rename(&partial, &path).await?;
+            remove_origin(destination, &offer.filename).await;
             Ok(path)
         }
         Err(e) => {
@@ -280,10 +380,12 @@ pub async fn accept(
             // carried on; removed when the user stopped it or the sender broke
             // the size limit, and when nothing was written at all. See the note
             // on this function.
-            let keep = !matches!(e, TransferError::Cancelled | TransferError::TooLarge(_))
+            let keep = offer.size.is_some()
+                && !matches!(e, TransferError::Cancelled | TransferError::TooLarge(_))
                 && partial_len(destination, &offer.filename).await.is_some();
             if !keep {
                 let _ = tokio::fs::remove_file(&partial).await;
+                remove_origin(destination, &offer.filename).await;
             }
             Err(e)
         }
@@ -688,6 +790,7 @@ mod tests {
         let error = accept(
             &offer,
             &dir,
+            "alice",
             Some(&proxy),
             0,
             progress,
@@ -713,6 +816,7 @@ mod tests {
         let error = accept(
             &offer,
             &std::env::temp_dir(),
+            "alice",
             None,
             0,
             progress,
@@ -762,6 +866,7 @@ mod tests {
         let path = accept(
             &offer,
             &inbox,
+            "alice",
             None,
             0,
             recv_progress,
@@ -816,9 +921,17 @@ mod tests {
         };
         let (progress, _rx) = progress();
 
-        let error = accept(&offer, &dir, None, 0, progress, &mut never_cancelled())
-            .await
-            .unwrap_err();
+        let error = accept(
+            &offer,
+            &dir,
+            "alice",
+            None,
+            0,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(error, TransferError::AlreadyExists(name) if name == "taken.txt"));
         assert_eq!(
@@ -851,9 +964,17 @@ mod tests {
         };
         let (progress, _rx) = progress();
 
-        let error = accept(&offer, &dir, None, 0, progress, &mut never_cancelled())
-            .await
-            .unwrap_err();
+        let error = accept(
+            &offer,
+            &dir,
+            "alice",
+            None,
+            0,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(
             matches!(
@@ -875,7 +996,12 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(leftovers, vec!["half.bin.part".to_owned()]);
+        let mut leftovers = leftovers;
+        leftovers.sort();
+        assert_eq!(
+            leftovers,
+            vec!["half.bin.part".to_owned(), "half.bin.part.from".to_owned()]
+        );
         assert_eq!(std::fs::read(dir.join("half.bin.part")).unwrap(), b"stop");
     }
 
@@ -886,6 +1012,13 @@ mod tests {
         assert_eq!(partial_path(dir, "a.tar.gz"), dir.join("a.tar.gz.part"));
         // The case a rule that swaps the extension gets wrong: nothing to swap.
         assert_eq!(partial_path(dir, "README"), dir.join("README.part"));
+    }
+
+    /// The record a real attempt would have left beside a partial file.
+    async fn leave_origin(inbox: &Path, name: &str, from: &str, size: usize) {
+        tokio::fs::write(origin_path(inbox, name), origin_text(from, size as u64))
+            .await
+            .unwrap();
     }
 
     /// A deterministic body, long enough to span several chunks, and not a
@@ -941,12 +1074,14 @@ mod tests {
         tokio::fs::write(partial_path(&inbox, "big.bin"), &contents[..have])
             .await
             .unwrap();
+        leave_origin(&inbox, "big.bin", "alice", contents.len()).await;
 
         let (port, serving) = serving_from(&dir, &contents, have as u64).await;
         let (recv_progress, mut events) = progress();
         let path = accept(
             &offering("big.bin", port, contents.len()),
             &inbox,
+            "alice",
             None,
             have as u64,
             recv_progress,
@@ -987,12 +1122,14 @@ mod tests {
         tokio::fs::write(partial_path(&inbox, "cut.bin"), &partial)
             .await
             .unwrap();
+        leave_origin(&inbox, "cut.bin", "alice", contents.len()).await;
 
         let (port, serving) = serving_from(&dir, &contents, agreed as u64).await;
         let (progress, _rx) = progress();
         let path = accept(
             &offering("cut.bin", port, contents.len()),
             &inbox,
+            "alice",
             None,
             agreed as u64,
             progress,
@@ -1024,6 +1161,7 @@ mod tests {
                 tokio::fs::write(partial_path(&inbox, "f.bin"), &contents[..partial_len])
                     .await
                     .unwrap();
+                leave_origin(&inbox, "f.bin", "alice", contents.len()).await;
             }
 
             // The sender, who was never told to skip anything, sends it all.
@@ -1032,6 +1170,7 @@ mod tests {
             let path = accept(
                 &offering("f.bin", port, contents.len()),
                 &inbox,
+                "alice",
                 None,
                 start_at,
                 progress,
@@ -1043,6 +1182,190 @@ mod tests {
             assert_eq!(tokio::fs::read(&path).await.unwrap(), contents, "{label}");
             serving.await.unwrap().unwrap();
         }
+    }
+
+    /// The app reads this record too, to say "already here" on the card before
+    /// anything is accepted, and has its own copy of the text. They must agree.
+    #[test]
+    fn the_record_is_the_text_the_app_expects() {
+        assert_eq!(
+            origin_text("Alice", 5000),
+            "ddirc-partial 1
+from=alice
+size=5000
+"
+        );
+    }
+
+    /// Resuming splices two files together if the partial one belongs to a
+    /// different offer, so it is only done for the person who started it, at
+    /// the size they gave.
+    #[tokio::test]
+    async fn a_partial_file_is_only_resumable_for_who_started_it() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        tokio::fs::write(partial_path(&inbox, "a.bin"), b"12345")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resumable_len(&inbox, "a.bin", "alice", 100).await,
+            None,
+            "no record, so nobody"
+        );
+
+        leave_origin(&inbox, "a.bin", "alice", 100).await;
+        assert_eq!(resumable_len(&inbox, "a.bin", "alice", 100).await, Some(5));
+        assert_eq!(
+            resumable_len(&inbox, "a.bin", "ALICE", 100).await,
+            Some(5),
+            "nicks are compared without case"
+        );
+        assert_eq!(resumable_len(&inbox, "a.bin", "mallory", 100).await, None);
+        assert_eq!(resumable_len(&inbox, "a.bin", "alice", 101).await, None);
+        assert_eq!(resumable_len(&inbox, "b.bin", "alice", 100).await, None);
+
+        // A record that merely starts like ours is not ours.
+        tokio::fs::write(
+            origin_path(&inbox, "a.bin"),
+            format!("{}extra", origin_text("alice", 100)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resumable_len(&inbox, "a.bin", "alice", 100).await, None);
+    }
+
+    /// The same, end to end: a partial file somebody else started is not carried
+    /// on, however plausible the position the sender agrees to.
+    #[tokio::test]
+    async fn a_download_from_someone_else_starts_over() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let contents = body(CHUNK * 2 + 77);
+        let have = CHUNK;
+        // Alice's bytes — different from what mallory is about to send, so a
+        // splice would show.
+        tokio::fs::write(partial_path(&inbox, "x.bin"), vec![0xAA; have])
+            .await
+            .unwrap();
+        leave_origin(&inbox, "x.bin", "alice", contents.len()).await;
+
+        // Mallory was never asked to skip anything, so sends all of it.
+        let (port, serving) = serving_from(&dir, &contents, 0).await;
+        let (progress, _rx) = progress();
+        let path = accept(
+            &offering("x.bin", port, contents.len()),
+            &inbox,
+            "mallory",
+            None,
+            have as u64,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            tokio::fs::read(&path).await.unwrap(),
+            contents,
+            "all of it from mallory, none of it from the old partial file"
+        );
+        serving.await.unwrap().unwrap();
+    }
+
+    /// What a download leaves behind, and what it takes away.
+    #[tokio::test]
+    async fn the_record_lives_as_long_as_the_partial_file() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let contents = body(CHUNK * 2);
+
+        // A connection that dies leaves both, so a resume can be checked.
+        let (port, handle) = {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let cut = contents[..CHUNK].to_vec();
+            let handle = tokio::spawn(async move {
+                let (mut s, _) = listener.accept().await.unwrap();
+                s.write_all(&cut).await.unwrap();
+                s.shutdown().await.unwrap();
+                let mut rest = Vec::new();
+                let _ = s.read_to_end(&mut rest).await;
+            });
+            (port, handle)
+        };
+        let (progress1, _rx1) = progress();
+        accept(
+            &offering("r.bin", port, contents.len()),
+            &inbox,
+            "alice",
+            None,
+            0,
+            progress1,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
+        handle.await.unwrap();
+        assert_eq!(
+            resumable_len(&inbox, "r.bin", "alice", contents.len() as u64).await,
+            Some(CHUNK as u64)
+        );
+
+        // Finishing it takes both away.
+        let (port, serving) = serving_from(&dir, &contents, CHUNK as u64).await;
+        let (progress2, _rx2) = progress();
+        accept(
+            &offering("r.bin", port, contents.len()),
+            &inbox,
+            "alice",
+            None,
+            CHUNK as u64,
+            progress2,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
+        serving.await.unwrap().unwrap();
+        assert!(!origin_path(&inbox, "r.bin").exists());
+        assert!(!partial_path(&inbox, "r.bin").exists());
+    }
+
+    /// Nothing here overwrites a file the user already has — including one that
+    /// happens to be named like a record.
+    #[tokio::test]
+    async fn a_file_named_like_a_record_is_left_alone() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let contents = body(CHUNK + 9);
+        let theirs = origin_path(&inbox, "n.bin");
+        tokio::fs::write(&theirs, b"a file somebody sent me")
+            .await
+            .unwrap();
+
+        let (port, serving) = serving_from(&dir, &contents, 0).await;
+        let (progress, _rx) = progress();
+        accept(
+            &offering("n.bin", port, contents.len()),
+            &inbox,
+            "alice",
+            None,
+            0,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
+        serving.await.unwrap().unwrap();
+
+        assert_eq!(
+            tokio::fs::read(&theirs).await.unwrap(),
+            b"a file somebody sent me"
+        );
     }
 
     /// A sender asked to start part-way sends only the rest, and says how much
@@ -1107,6 +1430,7 @@ mod tests {
         let failure = accept(
             &offering("movie.bin", listening.port, contents.len()),
             &inbox,
+            "alice",
             None,
             0,
             progress1,
@@ -1127,6 +1451,7 @@ mod tests {
         let path = accept(
             &offering("movie.bin", port, contents.len()),
             &inbox,
+            "alice",
             None,
             kept,
             progress2,
@@ -1161,7 +1486,7 @@ mod tests {
         let offer = offering("stalls.bin", listening.port, 1_000_000);
         let inbox2 = inbox.clone();
         let task = tokio::spawn(async move {
-            accept(&offer, &inbox2, None, 0, progress, &mut cancel_rx).await
+            accept(&offer, &inbox2, "alice", None, 0, progress, &mut cancel_rx).await
         });
 
         // Wait until something has really been written, then stop it.
@@ -1193,9 +1518,17 @@ mod tests {
             token: None,
         };
         let (progress, _rx) = progress();
-        let error = accept(&offer, &inbox, None, 0, progress, &mut never_cancelled())
-            .await
-            .unwrap_err();
+        let error = accept(
+            &offer,
+            &inbox,
+            "alice",
+            None,
+            0,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
         assert!(matches!(error, TransferError::TooLarge(_)));
         assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
     }

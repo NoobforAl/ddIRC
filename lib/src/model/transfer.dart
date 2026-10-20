@@ -287,28 +287,54 @@ Future<Directory> _resolveReceivedDirectory({
   return Directory('${base.path}${Platform.pathSeparator}received');
 }
 
-/// How many bytes of [filename] an earlier attempt left behind, or null.
+/// What the core writes beside a partial file to say who it came from and how
+/// big that file was said to be. Must stay the same text as the core's, which
+/// is what decides whether a resume is attempted; this only lets the card say
+/// the same thing beforehand.
+String partialOriginRecord(String from, BigInt size) =>
+    'ddirc-partial 1\nfrom=${_asciiLower(from)}\nsize=$size\n';
+
+/// IRC compares nicks without regard to case, and the core folds ASCII only.
+String _asciiLower(String s) => s.replaceAllMapped(
+  RegExp('[A-Z]'),
+  (m) => String.fromCharCode(m[0]!.codeUnitAt(0) + 32),
+);
+
+/// How many bytes of [filename] an earlier attempt left behind *for this offer*,
+/// or null.
 ///
 /// The core keeps an unfinished download as `<name>.part` beside where the
-/// finished one will go, and carries on from it when the same file is offered
-/// and accepted again; this is the same file, found the same way, so the card
-/// can say so beforehand. Never creates anything, and never throws: a card is
-/// not worth failing over a folder that cannot be read.
+/// finished one will go, with a record of who offered it and at what size
+/// (`<name>.part.from`), and carries on from it only when the same person
+/// offers the same file again. This is the same check made the same way, so the
+/// card promises exactly what accepting will do. A partial file from somebody
+/// else, or with no record, is not "already here" for this offer.
+///
+/// Never creates anything, and never throws: a card is not worth failing over a
+/// folder that cannot be read.
 Future<BigInt?> receivedPartialBytes(
   String filename, {
+  required String from,
+  required BigInt? size,
   TargetPlatform? platform,
   Future<Directory?> Function()? downloads,
   Future<Directory> Function()? support,
 }) async {
+  if (size == null) return null;
   try {
     final directory = await _resolveReceivedDirectory(
       platform: platform,
       downloads: downloads,
       support: support,
     );
-    final file = File(
-      '${directory.path}${Platform.pathSeparator}$filename.part',
-    );
+    final base = '${directory.path}${Platform.pathSeparator}$filename';
+    final expected = partialOriginRecord(from, size);
+    final record = File('$base.part.from');
+    // A real record is a few dozen bytes; anything much bigger is somebody's
+    // file that happens to have the same name, and is not read.
+    if (!await record.exists() || await record.length() > 512) return null;
+    if (await record.readAsString() != expected) return null;
+    final file = File('$base.part');
     if (!await file.exists()) return null;
     final length = await file.length();
     return length > 0 ? BigInt.from(length) : null;

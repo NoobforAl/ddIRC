@@ -352,13 +352,18 @@ class SessionModel extends ChangeNotifier {
     required this.settings,
     this.onLine,
     this.onRead,
-    Future<BigInt?> Function(String filename)? partialLookup,
+    Future<BigInt?> Function(String filename, String from, BigInt? size)?
+    partialLookup,
   }) : _nick = config.nickname,
-       _partialLookup = partialLookup ?? receivedPartialBytes;
+       _partialLookup =
+           partialLookup ??
+           ((filename, from, size) =>
+               receivedPartialBytes(filename, from: from, size: size));
 
   /// How much of a file an earlier attempt left on disk. Injected so a test
   /// says what is there without a disk, a platform or a path to be found.
-  final Future<BigInt?> Function(String filename) _partialLookup;
+  final Future<BigInt?> Function(String filename, String from, BigInt? size)
+  _partialLookup;
 
   /// Called for every line filed into a conversation, if anyone is listening.
   ///
@@ -1502,12 +1507,13 @@ class SessionModel extends ChangeNotifier {
   /// one. Quietly nothing if there is not, or the lookup fails.
   Future<void> _noteResumable(FileTransfer offer) async {
     try {
-      final have = await _partialLookup(offer.filename);
       final size = offer.total;
-      // Only a partial file that is shorter than what is being offered is a
-      // place to carry on from; one as long as the whole, or longer, is a
-      // different file with the same name.
-      if (have != null && (size == null || have < size)) {
+      // The lookup only finds a partial file this sender started at this size,
+      // which is the only kind the core will carry on from.
+      final have = await _partialLookup(offer.filename, offer.from ?? '', size);
+      // And only one shorter than what is being offered is a place to carry on
+      // from; one as long as the whole, or longer, is something else.
+      if (have != null && size != null && have < size) {
         offer.resumeFrom = have;
       }
     } catch (_) {
@@ -1518,7 +1524,13 @@ class SessionModel extends ChangeNotifier {
   /// Record how much of a failed download was kept.
   Future<void> _noteKept(FileTransfer transfer) async {
     try {
-      transfer.kept = await _partialLookup(transfer.filename);
+      final from = transfer.from;
+      if (from == null) return;
+      transfer.kept = await _partialLookup(
+        transfer.filename,
+        from,
+        transfer.total,
+      );
     } catch (_) {
       // As above.
     }

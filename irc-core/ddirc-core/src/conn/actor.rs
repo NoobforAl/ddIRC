@@ -1560,6 +1560,7 @@ impl Actor {
         let proxy = self.config.proxy.clone();
         let channel = pending.channel;
         let filename = pending.offer.filename.clone();
+        let from = pending.from.clone();
         let offer = pending.offer;
         let resume = self
             .ask_to_resume(
@@ -1606,6 +1607,7 @@ impl Actor {
                     transfer::accept(
                         &offer,
                         std::path::Path::new(&directory),
+                        &from,
                         proxy.as_ref(),
                         start_at,
                         progress,
@@ -1645,7 +1647,7 @@ impl Actor {
             return None;
         }
         let (port, size) = (offer.port?, offer.size?);
-        let have = transfer::partial_len(directory, &offer.filename).await?;
+        let have = transfer::resumable_len(directory, &offer.filename, from, size).await?;
         if have >= size {
             // Nothing left to ask for; the transfer itself will say what is
             // wrong with a partial file as large as the whole.
@@ -3196,6 +3198,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         if bytes > 0 {
             std::fs::write(dir.join(format!("{name}.part")), vec![1u8; bytes]).unwrap();
+            std::fs::write(
+                dir.join(format!("{name}.part.from")),
+                "ddirc-partial 1\nfrom=alice\nsize=1000\n",
+            )
+            .unwrap();
         }
         dir
     }
@@ -3263,6 +3270,46 @@ mod tests {
                 "{label}: waiting anyway"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_partial_file_somebody_else_started_is_not_asked_about() {
+        // The partial belongs to alice's offer of exactly 1000 bytes. Asking a
+        // different person for "the rest" of it, or asking for the rest of a
+        // file of a different size, would splice two files together.
+        for (label, from, offer) in [
+            (
+                "another sender",
+                "mallory",
+                offer_for("g.bin", Some(5001), Some(1000)),
+            ),
+            (
+                "the same sender, a different size",
+                "alice",
+                offer_for("h.bin", Some(5001), Some(2000)),
+            ),
+        ] {
+            let (mut actor, _rx, mut outgoing) = actor(&[]);
+            let dir = inbox_with_partial(&offer.filename, 400);
+            let asked = actor.ask_to_resume(&mut outgoing, from, &offer, &dir).await;
+            assert!(asked.is_none(), "{label}: asked anyway");
+            assert!(outgoing.is_empty(), "{label}: something was sent");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_same_person_in_another_case_is_still_the_same_person() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let dir = inbox_with_partial("i.bin", 400);
+        let asked = actor
+            .ask_to_resume(
+                &mut outgoing,
+                "ALICE",
+                &offer_for("i.bin", Some(5001), Some(1000)),
+                &dir,
+            )
+            .await;
+        assert!(asked.is_some());
     }
 
     #[test]
