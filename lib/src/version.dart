@@ -6,7 +6,7 @@
 /// drift apart, which is the part that actually matters.
 library;
 
-const appVersion = '0.12.1';
+const appVersion = '0.12.2';
 
 /// How the app names itself where there is room for one line.
 ///
