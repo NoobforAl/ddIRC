@@ -255,21 +255,20 @@ pub fn safe_filename(name: &str) -> Option<String> {
         return None;
     }
 
-    // The same room is needed as for a device name, and refused the same way.
-    let lower = trimmed.to_ascii_lowercase();
+    // Both adjustments apply to the same name, so neither may return early: a
+    // `NUL.part` is still the null device once it has been marked. Each costs a
+    // byte, and the length limit was checked before either was added, so a name
+    // already at it has no room and is refused, which is better than one that
+    // fails at the filesystem later.
+    let mut name = trimmed.to_owned();
+    let lower = name.to_ascii_lowercase();
     if lower.ends_with(".part") || lower.ends_with(".part.from") {
-        let marked = format!("{trimmed}_");
-        return (marked.len() <= 255).then_some(marked);
+        name.push('_');
     }
-
-    if is_windows_device_name(trimmed) {
-        // The prefix is one more byte, and the length limit was checked before
-        // it was added: a name already at the limit has no room for it, and a
-        // refused offer is better than one that fails at the filesystem later.
-        let prefixed = format!("_{trimmed}");
-        return (prefixed.len() <= 255).then_some(prefixed);
+    if is_windows_device_name(&name) {
+        name.insert(0, '_');
     }
-    Some(trimmed.to_owned())
+    (name.len() <= 255).then_some(name)
 }
 
 /// Whether Windows would treat `name` as a device rather than a file.
@@ -607,6 +606,15 @@ mod tests {
         }
         assert_eq!(safe_filename("x.partial").unwrap(), "x.partial");
         assert_eq!(safe_filename("x.part.txt").unwrap(), "x.part.txt");
+        // Both rules can apply to one name, and neither hides the other.
+        for (offered, saved) in [
+            ("COM1.part", "_COM1.part_"),
+            ("nul.part.from", "_nul.part.from_"),
+            ("NUL .part", "_NUL .part_"),
+            ("con.txt", "_con.txt"),
+        ] {
+            assert_eq!(safe_filename(offered).as_deref(), Some(saved), "{offered}");
+        }
         // No room for the mark: refused rather than failing later.
         let long = format!("{}.part", "a".repeat(250));
         assert_eq!(long.len(), 255);
