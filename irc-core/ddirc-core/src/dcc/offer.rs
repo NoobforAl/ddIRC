@@ -147,12 +147,31 @@ fn take_filename(s: &str) -> Option<(&str, &str)> {
 ///   separators.
 /// - **Long is refused.** 255 bytes is the common limit for a single component
 ///   and a longer one fails at the filesystem anyway, later and less clearly.
+/// - **Characters Windows reserves become `_`**: `< > : " | ? *`. They are
+///   ordinary in a Linux filename, so refusing them would silently drop an
+///   offer from a perfectly honest sender — unlike a control character, which
+///   is never legitimate. The one that matters most is `:`. On NTFS
+///   `name:stream` does not name a file, it names a hidden *alternate data
+///   stream* on `name`, so an offer called `report.txt:payload` made the
+///   receiver create an empty `report.txt` and write the sender's bytes into a
+///   stream nobody can see in a file manager. That is an offer choosing where
+///   its data goes, which is what the bare-name rule above exists to prevent.
+/// - **Trailing dots and spaces are dropped.** Windows removes them silently
+///   when it creates the file, so the name on disk would not be the name that
+///   was shown, and an offer made only of them would be an empty name.
+/// - **A Windows device name is prefixed with `_`**: `CON`, `PRN`, `AUX`,
+///   `NUL`, `COM1`–`COM9` and `LPT1`–`LPT9`, with or without an extension
+///   (`con.txt` is still the console). Left alone, a name like that does not
+///   create a file at all.
 ///
-/// Deliberately *not* done: rewriting Windows-reserved names (`CON`, `NUL`,
-/// `COM1`), stripping trailing dots and spaces, or making the result unique.
-/// Those matter at the point of creating the file, where the directory is
-/// known and a collision can be answered by picking another name — doing it
-/// here would give a false sense that the string is now safe for anything.
+/// All of that is applied on every platform, not just Windows, so the same
+/// offer is saved under the same name wherever it lands and the name shown in
+/// the offer row is the name that will be written.
+///
+/// Deliberately *not* done: making the result unique. That matters at the
+/// point of creating the file, where the directory is known and a collision
+/// can be answered by picking another name — doing it here would give a false
+/// sense that the string is now safe for anything.
 pub fn safe_filename(name: &str) -> Option<String> {
     let bare = name.rsplit(['/', '\\']).next().unwrap_or(name);
 
@@ -165,7 +184,45 @@ pub fn safe_filename(name: &str) -> Option<String> {
     if bare.chars().any(|c| c.is_control()) {
         return None;
     }
-    Some(bare.to_owned())
+
+    let replaced: String = bare
+        .chars()
+        .map(|c| match c {
+            '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',
+            other => other,
+        })
+        .collect();
+
+    let trimmed = replaced.trim_end_matches(['.', ' ']);
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if is_windows_device_name(trimmed) {
+        return Some(format!("_{trimmed}"));
+    }
+    Some(trimmed.to_owned())
+}
+
+/// Whether Windows would treat `name` as a device rather than a file.
+///
+/// What counts is the part before the first dot, compared without regard to
+/// case: `NUL`, `nul.txt` and `Nul.tar.gz` are all the null device. The
+/// superscript digits are included because Windows resolves `COM¹` the same
+/// way it resolves `COM1`.
+fn is_windows_device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        stem.strip_prefix(prefix).is_some_and(|rest| {
+            matches!(
+                rest,
+                "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    })
 }
 
 /// Parse a DCC address.
@@ -313,6 +370,104 @@ mod tests {
         assert!(safe_filename("evil\n.txt").is_none());
         assert!(safe_filename("evil\r\n.txt").is_none());
         assert!(safe_filename("bell\u{7}").is_none());
+    }
+
+    #[test]
+    fn a_name_cannot_aim_its_data_at_an_alternate_data_stream() {
+        // Found by sending one: `report.txt:payload` made the receiver create an
+        // empty `report.txt` and write the offered bytes into a hidden NTFS
+        // stream on it. The colon is the whole mechanism, so it never survives.
+        assert_eq!(safe_filename("ads.txt:hidden").unwrap(), "ads.txt_hidden");
+        assert_eq!(safe_filename("a.txt:b:$DATA").unwrap(), "a.txt_b_$DATA");
+        assert_eq!(safe_filename(":stream").unwrap(), "_stream");
+        // Once the colon is gone this is no longer the console device, so it
+        // is a file like any other and needs no prefix.
+        assert_eq!(safe_filename("con:ads").unwrap(), "con_ads");
+        for name in ["ads.txt:hidden", "a:b", "x:"] {
+            assert!(
+                !safe_filename(name).unwrap().contains(':'),
+                "{name:?} kept its colon"
+            );
+        }
+    }
+
+    #[test]
+    fn the_other_characters_windows_reserves_are_replaced_not_refused() {
+        // Ordinary on Linux, so an honest sender must not lose the offer.
+        assert_eq!(
+            safe_filename("what? <now> |pipe| *star*").unwrap(),
+            "what_ _now_ _pipe_ _star_"
+        );
+        assert_eq!(safe_filename("say \"hi\".txt").unwrap(), "say _hi_.txt");
+        // The path rule still runs first, so a separator is not "replaced".
+        assert_eq!(safe_filename(r"a\b:c").unwrap(), "b_c");
+    }
+
+    #[test]
+    fn trailing_dots_and_spaces_are_dropped() {
+        // Windows would drop them on creation, so the name shown and the name
+        // written would differ; an offer made only of them has no name.
+        assert_eq!(safe_filename("trailing.dot.").unwrap(), "trailing.dot");
+        assert_eq!(safe_filename("spaced.txt   ").unwrap(), "spaced.txt");
+        assert_eq!(safe_filename("both. . ").unwrap(), "both");
+        for bad in ["...", " ", ". .", " . "] {
+            assert!(safe_filename(bad).is_none(), "{bad:?} should be refused");
+        }
+        // Leading dots are a real name on Unix and are left alone.
+        assert_eq!(safe_filename(".bashrc").unwrap(), ".bashrc");
+    }
+
+    #[test]
+    fn a_windows_device_name_is_prefixed_so_it_creates_a_file() {
+        for (given, want) in [
+            ("NUL", "_NUL"),
+            ("nul", "_nul"),
+            ("con.txt", "_con.txt"),
+            ("CON.tar.gz", "_CON.tar.gz"),
+            ("Aux", "_Aux"),
+            ("PRN.log", "_PRN.log"),
+            ("COM1", "_COM1"),
+            ("com9.bin", "_com9.bin"),
+            ("LPT3", "_LPT3"),
+            ("COM\u{00B9}", "_COM\u{00B9}"),
+            ("NUL.", "_NUL"),
+            ("CONIN$", "_CONIN$"),
+        ] {
+            assert_eq!(safe_filename(given).unwrap(), want, "from {given:?}");
+        }
+    }
+
+    #[test]
+    fn names_that_merely_resemble_a_device_are_left_alone() {
+        for name in [
+            "console.txt",
+            "nullable",
+            "COM10",
+            "COM",
+            "LPT",
+            "auxiliary.c",
+            "pron",
+            "a.con",
+            "my.nul",
+            "CON-tent",
+        ] {
+            assert_eq!(safe_filename(name).unwrap(), name, "{name:?} was changed");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_name_is_untouched() {
+        for name in [
+            "cat.jpg",
+            "my holiday (1).png",
+            "ünïcödé.txt",
+            "日本語.txt",
+            "a-b_c.d.e",
+            "file@2x.png",
+            "100%.txt",
+        ] {
+            assert_eq!(safe_filename(name).unwrap(), name);
+        }
     }
 
     #[test]
