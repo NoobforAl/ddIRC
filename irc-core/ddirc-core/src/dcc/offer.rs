@@ -214,6 +214,13 @@ fn take_filename(s: &str) -> Option<(&str, &str)> {
 ///   (`con.txt` is still the console). Left alone, a name like that does not
 ///   create a file at all.
 ///
+/// - **A name ending in `.part` or `.part.from` gets a `_` after it.** Those are
+///   the names this program gives an unfinished download and the note it keeps
+///   about who started it, and a resume trusts both. An offer that could create
+///   them would be writing its own partial file and its own note, and so choosing
+///   what a later offer from somebody else is joined onto. Compared without
+///   regard to case, as Windows does.
+///
 /// All of that is applied on every platform, not just Windows, so the same
 /// offer is saved under the same name wherever it lands and the name shown in
 /// the offer row is the name that will be written.
@@ -246,6 +253,13 @@ pub fn safe_filename(name: &str) -> Option<String> {
     let trimmed = replaced.trim_end_matches(['.', ' ']);
     if trimmed.is_empty() {
         return None;
+    }
+
+    // The same room is needed as for a device name, and refused the same way.
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.ends_with(".part") || lower.ends_with(".part.from") {
+        let marked = format!("{trimmed}_");
+        return (marked.len() <= 255).then_some(marked);
     }
 
     if is_windows_device_name(trimmed) {
@@ -561,6 +575,42 @@ mod tests {
         ] {
             assert!(parse_resume(bad).is_none(), "{bad:?} should not parse");
         }
+    }
+
+    #[test]
+    fn a_name_cannot_be_one_this_program_keeps_unfinished_downloads_under() {
+        for (offered, saved) in [
+            ("cat.jpg.part", "cat.jpg.part_"),
+            ("cat.jpg.PART", "cat.jpg.PART_"),
+            ("cat.jpg.part.from", "cat.jpg.part.from_"),
+            ("cat.jpg.Part.From", "cat.jpg.Part.From_"),
+            ("../../x.part", "x.part_"),
+            ("x.part.", "x.part_"),
+        ] {
+            assert_eq!(safe_filename(offered).as_deref(), Some(saved), "{offered}");
+        }
+        // Names that merely contain it are ordinary.
+        for ok in [
+            "part",
+            ".part",
+            "x.partial",
+            "x.part.txt",
+            "x.from",
+            "x.part_",
+        ] {
+            let saved = safe_filename(ok).unwrap();
+            assert!(
+                !saved.to_ascii_lowercase().ends_with(".part")
+                    && !saved.to_ascii_lowercase().ends_with(".part.from"),
+                "{ok} -> {saved}"
+            );
+        }
+        assert_eq!(safe_filename("x.partial").unwrap(), "x.partial");
+        assert_eq!(safe_filename("x.part.txt").unwrap(), "x.part.txt");
+        // No room for the mark: refused rather than failing later.
+        let long = format!("{}.part", "a".repeat(250));
+        assert_eq!(long.len(), 255);
+        assert!(safe_filename(&long).is_none());
     }
 
     #[test]

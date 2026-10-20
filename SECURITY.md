@@ -154,7 +154,10 @@ send one.
   the size they offered: the core keeps a record of both beside it and compares
   before asking anyone for anything, so a different sender who offers the same
   name cannot have their bytes joined onto somebody else's, and cannot learn
-  how much of a file you hold. A partial file longer than the offered size is
+  how much of a file you hold. Nor can a sender write
+  those files themselves: an offered name ending in `.part` or `.part.from` is
+  saved with a `_` after it, so nobody can plant a partial file or a record of
+  their own for a later offer to be joined onto. A partial file longer than the offered size is
   cut back rather than trusted.
 - **Where received files land depends on the device.** On Android and iOS, in
   app-private storage: Android's shared storage is readable by anything holding
