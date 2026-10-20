@@ -1680,9 +1680,11 @@ impl Actor {
     /// it was not asked to do. The port has to be one we are listening on and
     /// the name the one we offered under; a request about somebody else's
     /// transfer is nothing to us. The person has to be the one the offer went
-    /// to (or, for a channel offer, anyone who could have seen it). And the
-    /// position has to be inside the file. Anything else is dropped without a
-    /// word, which is what every other CTCP gets.
+    /// to; an offer made to a channel is never resumed, because it has one
+    /// offset and anyone there could otherwise move it under the person who
+    /// is actually downloading. And the position has to be inside the file.
+    /// Anything else is dropped without a word, which is what every other CTCP
+    /// gets.
     fn on_resume_request(
         &mut self,
         sender: &str,
@@ -1703,7 +1705,7 @@ impl Actor {
         if request.position == 0 || request.position >= serving.size {
             return;
         }
-        if !is_channel_target(&serving.target) && !serving.target.eq_ignore_ascii_case(sender) {
+        if is_channel_target(&serving.target) || !serving.target.eq_ignore_ascii_case(sender) {
             return;
         }
 
@@ -3087,7 +3089,10 @@ mod tests {
     }
 
     #[test]
-    fn anyone_who_saw_a_channel_offer_may_ask_to_resume_it() {
+    fn a_channel_offer_cannot_be_resumed() {
+        // One offer, one listener, one offset: if any member of the channel
+        // could move it, whoever asked last would decide where somebody else's
+        // download starts.
         let (mut actor, _rx, mut outgoing) = actor(&["#test"]);
         let offset = serving(&mut actor, "#test", 5001, 1000);
 
@@ -3097,11 +3102,8 @@ mod tests {
             ":carol!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 250\u{01}",
         );
 
-        assert_eq!(
-            sent_texts(&outgoing),
-            vec!["carol \u{01}DCC ACCEPT cat.jpg 5001 250\u{01}".to_owned()]
-        );
-        assert_eq!(offset.load(Ordering::Acquire), 250);
+        assert!(outgoing.is_empty());
+        assert_eq!(offset.load(Ordering::Acquire), 0);
     }
 
     fn awaiting(actor: &mut Actor, from: &str, port: u16) -> oneshot::Receiver<u64> {
