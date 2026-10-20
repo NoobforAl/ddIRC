@@ -143,6 +143,15 @@ send one.
   are written under a `.part` name and renamed only once whole, so a failed
   transfer cannot be mistaken for the file it was going to be, and filenames go
   through `safe_filename` so a sender cannot escape the directory.
+- **Resuming asks nothing a normal transfer does not.** When a file is accepted
+  and an unfinished copy exists, ddIRC sends the offerer one `DCC RESUME` for
+  the position it already holds, and only because the user accepted. Incoming
+  `DCC RESUME` and `DCC ACCEPT` messages are honoured only when sent privately
+  to us, never as a NOTICE, and only for a port and file name we offered or are
+  waiting on, so they cannot be used to probe for a live client. The position is
+  checked against the file's real size, and a bad one means starting from the
+  beginning. A partial file longer than the offered size is cut back rather
+  than trusted.
 - **Where received files land depends on the device.** On Android and iOS, in
   app-private storage: Android's shared storage is readable by anything holding
   the storage permission, so nothing is put there. On Windows, macOS and Linux,

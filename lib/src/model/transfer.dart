@@ -92,6 +92,30 @@ class FileTransfer extends ChangeNotifier {
   /// Why it stopped, when it stopped badly.
   String? error;
 
+  BigInt? _resumeFrom;
+
+  /// How much of an *offered* file is already here from an earlier attempt, so
+  /// the card can say that accepting carries on rather than starts over. Null
+  /// when there is nothing to carry on from. Looked up after the offer
+  /// arrives, which is why it can appear a moment later.
+  BigInt? get resumeFrom => _resumeFrom;
+  set resumeFrom(BigInt? value) {
+    if (value == _resumeFrom) return;
+    _resumeFrom = value;
+    notifyListeners();
+  }
+
+  BigInt? _kept;
+
+  /// How much of a *failed* download was kept on disk, so the card can say it
+  /// can be carried on if the sender offers it again. Null when nothing was.
+  BigInt? get kept => _kept;
+  set kept(BigInt? value) {
+    if (value == _kept) return;
+    _kept = value;
+    notifyListeners();
+  }
+
   /// Whether nothing more will happen to it.
   bool get isOver =>
       _stage == TransferStage.done ||
@@ -227,25 +251,70 @@ Future<Directory> receivedFilesDirectory({
   Future<Directory?> Function()? downloads,
   Future<Directory> Function()? support,
 }) async {
+  final directory = await _resolveReceivedDirectory(
+    platform: platform,
+    downloads: downloads,
+    support: support,
+  );
+  await directory.create(recursive: true);
+  return directory;
+}
+
+/// Where [receivedFilesDirectory] would put things, without making it.
+///
+/// Split out so that *looking* — for a partial file to resume, say — never
+/// creates a folder in somebody's Downloads: a user who has never accepted a
+/// file should still have nothing of ours there.
+Future<Directory> _resolveReceivedDirectory({
+  TargetPlatform? platform,
+  Future<Directory?> Function()? downloads,
+  Future<Directory> Function()? support,
+}) async {
   final target = platform ?? defaultTargetPlatform;
   if (_isDesktop(target)) {
     try {
       final base = await (downloads ?? getDownloadsDirectory)();
       if (base != null) {
-        final directory = Directory(
+        return Directory(
           '${base.path}${Platform.pathSeparator}$receivedFolderName',
         );
-        await directory.create(recursive: true);
-        return directory;
       }
     } catch (_) {
       // Fall through to the app's own directory.
     }
   }
   final base = await (support ?? getApplicationSupportDirectory)();
-  final directory = Directory('${base.path}${Platform.pathSeparator}received');
-  await directory.create(recursive: true);
-  return directory;
+  return Directory('${base.path}${Platform.pathSeparator}received');
+}
+
+/// How many bytes of [filename] an earlier attempt left behind, or null.
+///
+/// The core keeps an unfinished download as `<name>.part` beside where the
+/// finished one will go, and carries on from it when the same file is offered
+/// and accepted again; this is the same file, found the same way, so the card
+/// can say so beforehand. Never creates anything, and never throws: a card is
+/// not worth failing over a folder that cannot be read.
+Future<BigInt?> receivedPartialBytes(
+  String filename, {
+  TargetPlatform? platform,
+  Future<Directory?> Function()? downloads,
+  Future<Directory> Function()? support,
+}) async {
+  try {
+    final directory = await _resolveReceivedDirectory(
+      platform: platform,
+      downloads: downloads,
+      support: support,
+    );
+    final file = File(
+      '${directory.path}${Platform.pathSeparator}$filename.part',
+    );
+    if (!await file.exists()) return null;
+    final length = await file.length();
+    return length > 0 ? BigInt.from(length) : null;
+  } catch (_) {
+    return null;
+  }
 }
 
 bool _isDesktop(TargetPlatform platform) => switch (platform) {

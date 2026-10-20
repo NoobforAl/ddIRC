@@ -479,6 +479,18 @@ halfway cannot be mistaken for the file it was going to be. The size in an offer
 is the sender's claim and is labelled as one; the 4 GB ceiling is enforced
 against the bytes that actually arrive.
 
+**An interrupted download can be carried on.** The `.part` file is kept when a
+transfer breaks off, and the card says how much of it is there. If the sender
+offers the same file again, the new offer says "already here", and accepting it
+asks them to start from that point (`DCC RESUME`) instead of from the beginning.
+A sender whose client does not understand the request is given ten seconds, and
+then the file simply starts over, so resuming is never the reason a transfer
+does not happen. A partial file is only used when it is no longer than the file
+being offered; a longer one is cut back, and a position that does not make sense
+means a fresh start. Resuming is for ordinary offers, not for reverse (passive)
+ones, and the sender has to offer the file again after a drop: ddIRC does not
+reconnect a transfer behind your back. Cancelling deletes the partial file.
+
 **With a proxy configured**, the rule is that a transfer discloses no more than
 the connection that negotiated it:
 

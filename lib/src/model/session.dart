@@ -352,7 +352,13 @@ class SessionModel extends ChangeNotifier {
     required this.settings,
     this.onLine,
     this.onRead,
-  }) : _nick = config.nickname;
+    Future<BigInt?> Function(String filename)? partialLookup,
+  }) : _nick = config.nickname,
+       _partialLookup = partialLookup ?? receivedPartialBytes;
+
+  /// How much of a file an earlier attempt left on disk. Injected so a test
+  /// says what is there without a disk, a platform or a path to be found.
+  final Future<BigInt?> Function(String filename) _partialLookup;
 
   /// Called for every line filed into a conversation, if anyone is listening.
   ///
@@ -1347,6 +1353,10 @@ class SessionModel extends ChangeNotifier {
           isReverse: offer.port == null,
         );
         _transfers[id] = offered;
+        // Whether accepting would carry on from something already here. Asked
+        // after the card is up and answered when it is known: nothing waits on
+        // it, and an offer should not be slower to appear for a disk lookup.
+        unawaited(_noteResumable(offered));
         // One line, for the whole life of the file. It is the offer with its
         // button now, the progress while it moves, and the received file
         // afterwards — the card in the conversation listens to it and changes.
@@ -1415,6 +1425,12 @@ class SessionModel extends ChangeNotifier {
           );
           _log(channel, outcome);
           _save(channel, outcome);
+          // A download that dropped keeps what arrived. Say so on the card, so
+          // the way to finish it — have the sender offer it again — is not
+          // something to be found out.
+          if (transfer.stage == TransferStage.failed && transfer.incoming) {
+            unawaited(_noteKept(transfer));
+          }
         } else {
           // An end with no beginning we saw — an offer shown while transfers
           // were off, say. Still worth a line, so it is not lost.
@@ -1481,6 +1497,32 @@ class SessionModel extends ChangeNotifier {
 
   static bool _looksLikeChannel(String target) =>
       target.isNotEmpty && '#&+!'.contains(target[0]);
+
+  /// Mark an offer as one that would carry on from a partial file, if there is
+  /// one. Quietly nothing if there is not, or the lookup fails.
+  Future<void> _noteResumable(FileTransfer offer) async {
+    try {
+      final have = await _partialLookup(offer.filename);
+      final size = offer.total;
+      // Only a partial file that is shorter than what is being offered is a
+      // place to carry on from; one as long as the whole, or longer, is a
+      // different file with the same name.
+      if (have != null && (size == null || have < size)) {
+        offer.resumeFrom = have;
+      }
+    } catch (_) {
+      // A card is not worth failing over.
+    }
+  }
+
+  /// Record how much of a failed download was kept.
+  Future<void> _noteKept(FileTransfer transfer) async {
+    try {
+      transfer.kept = await _partialLookup(transfer.filename);
+    } catch (_) {
+      // As above.
+    }
+  }
 
   /// Leaving for real: the conversation is gone, so its tab goes with it.
   void _close(String channel) {

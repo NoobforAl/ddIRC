@@ -102,6 +102,56 @@ pub fn parse_send(body: &str) -> Option<DccOffer> {
     })
 }
 
+/// A `DCC RESUME` or `DCC ACCEPT`: the two halves of asking to continue a file.
+///
+/// The receiver, holding the first `position` bytes of a file it was offered
+/// before, says `DCC RESUME <name> <port> <position>`; a sender willing to start
+/// there answers `DCC ACCEPT <name> <port> <position>`, and then serves from that
+/// point. The two have the same shape, so they share a type. The port is how the
+/// two sides recognise which offer is meant, and the filename is the offered one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumeMessage {
+    /// The name, run through [`safe_filename`] exactly as an offer's is, so that
+    /// a name compared against one that was offered is compared like with like.
+    pub filename: String,
+    pub port: u16,
+    /// How many bytes the receiver already has.
+    pub position: u64,
+    /// Present on the reverse (passive) form, which is not supported here; kept
+    /// so that form can be recognised and ignored rather than misread.
+    pub token: Option<u64>,
+}
+
+/// Parse the body of a CTCP message as `DCC RESUME`.
+pub fn parse_resume(body: &str) -> Option<ResumeMessage> {
+    parse_resume_like(body, "RESUME")
+}
+
+/// Parse the body of a CTCP message as `DCC ACCEPT`.
+pub fn parse_accept(body: &str) -> Option<ResumeMessage> {
+    parse_resume_like(body, "ACCEPT")
+}
+
+fn parse_resume_like(body: &str, keyword: &str) -> Option<ResumeMessage> {
+    let rest = strip_keyword(body, "DCC")?;
+    let rest = strip_keyword(rest, keyword)?;
+
+    let (name, rest) = take_filename(rest)?;
+    let filename = safe_filename(name)?;
+
+    let mut args = rest.split_whitespace();
+    let port: u16 = args.next()?.parse().ok()?;
+    let position: u64 = args.next()?.parse().ok()?;
+    let token = args.next().and_then(|s| s.parse::<u64>().ok());
+
+    Some(ResumeMessage {
+        filename,
+        port,
+        position,
+        token,
+    })
+}
+
 /// Case-insensitively strip a leading keyword and the space after it.
 fn strip_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
     let s = s.trim_start();
@@ -447,6 +497,69 @@ mod tests {
             ("CONIN$", "_CONIN$"),
         ] {
             assert_eq!(safe_filename(given).unwrap(), want, "from {given:?}");
+        }
+    }
+
+    #[test]
+    fn a_resume_request_and_its_acceptance_parse_alike() {
+        let resume = parse_resume("DCC RESUME cat.jpg 5001 1048576").unwrap();
+        assert_eq!(resume.filename, "cat.jpg");
+        assert_eq!(resume.port, 5001);
+        assert_eq!(resume.position, 1_048_576);
+        assert_eq!(resume.token, None);
+
+        let accept = parse_accept("DCC ACCEPT cat.jpg 5001 1048576").unwrap();
+        assert_eq!(accept, resume);
+    }
+
+    #[test]
+    fn a_quoted_name_with_spaces_survives_a_resume() {
+        let resume = parse_resume("DCC RESUME \"holiday photos.zip\" 4000 99").unwrap();
+        assert_eq!(resume.filename, "holiday photos.zip");
+        assert_eq!(resume.position, 99);
+    }
+
+    #[test]
+    fn the_keyword_decides_which_it_is() {
+        assert!(parse_resume("DCC ACCEPT f 1 2").is_none());
+        assert!(parse_accept("DCC RESUME f 1 2").is_none());
+        assert!(parse_resume("DCC SEND f 1 2 3").is_none());
+        assert!(parse_resume("DCCRESUME f 1 2").is_none());
+    }
+
+    #[test]
+    fn a_resume_name_is_made_safe_like_an_offered_one() {
+        // So the two compare like with like, and a hostile name is no more
+        // welcome here than it is in an offer.
+        assert_eq!(
+            parse_resume("DCC RESUME ..\\..\\x.txt 5 6")
+                .unwrap()
+                .filename,
+            "x.txt"
+        );
+        assert_eq!(parse_resume("DCC RESUME a:b 5 6").unwrap().filename, "a_b");
+        assert!(parse_resume("DCC RESUME .. 5 6").is_none());
+    }
+
+    #[test]
+    fn the_passive_form_is_recognised_so_it_can_be_left_alone() {
+        let resume = parse_resume("DCC RESUME f 0 100 7").unwrap();
+        assert_eq!(resume.port, 0);
+        assert_eq!(resume.token, Some(7));
+    }
+
+    #[test]
+    fn a_malformed_resume_is_nothing() {
+        for bad in [
+            "DCC RESUME",
+            "DCC RESUME f",
+            "DCC RESUME f 5001",
+            "DCC RESUME f port 10",
+            "DCC RESUME f 5001 ten",
+            "DCC RESUME f 99999 10",
+            "DCC RESUME f 5001 -1",
+        ] {
+            assert!(parse_resume(bad).is_none(), "{bad:?} should not parse");
         }
     }
 

@@ -11,6 +11,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -19,7 +21,7 @@ use irc::client::prelude::Config as IrcConfig;
 use irc::client::Client;
 use irc::proto::message::Tag;
 use irc::proto::{ChannelMode, Command as Irc, Message, Mode, Response};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::time::{sleep, timeout};
 use zeroize::Zeroizing;
 
@@ -32,8 +34,9 @@ use crate::conn::diagnose;
 use crate::conn::ratelimit::{ReceiveLimiter, SendLimiter};
 use crate::conn::reconnect::Backoff;
 use crate::conn::sasl::{Credentials, NotAttempted, SaslNegotiator, SaslOutcome};
+use crate::dcc::offer::{parse_accept, parse_resume};
 use crate::dcc::transfer::{self, Progress, TransferError, TransferEvent};
-use crate::dcc::DccOffer;
+use crate::dcc::{safe_filename, DccOffer};
 use crate::state::{limits, truncate, Session};
 use crate::text::{format, reply};
 
@@ -390,10 +393,44 @@ struct Transfers {
     offers: HashMap<u64, PendingOffer>,
     /// Running, and how to stop each one.
     running: HashMap<u64, mpsc::Sender<()>>,
+    /// Downloads that have asked the sender to carry on from a partial file and
+    /// are waiting to hear whether it will. Keyed by who they asked and the
+    /// port of the offer, because that pair is all a `DCC ACCEPT` names — and
+    /// nothing is acted on that does not match one of these, so an `ACCEPT`
+    /// nobody was waiting for is simply dropped.
+    resumes: HashMap<(String, u16), AwaitedResume>,
+    /// Files we are serving, by the port we listen on, so a `DCC RESUME` that
+    /// names a port can be matched to the one transfer it could mean.
+    serving: HashMap<u16, Serving>,
+}
+
+/// A `DCC RESUME` we sent and are waiting to see answered.
+struct AwaitedResume {
+    /// The offered name, which the answer has to repeat.
+    filename: String,
+    /// Where the answer goes: the position the sender agreed to start from.
+    reply: oneshot::Sender<u64>,
+}
+
+/// A file we offered and are listening to serve.
+struct Serving {
+    /// Who the offer was made to: a person, or a channel.
+    target: String,
+    /// The name we offered it under.
+    filename: String,
+    size: u64,
+    /// Where the transfer should start, which a resume request moves. Shared
+    /// with the serving task, which reads it when the receiver connects.
+    offset: Arc<AtomicU64>,
 }
 
 struct PendingOffer {
+    /// The conversation it belongs to: the channel, or the sender for a
+    /// private offer.
     channel: String,
+    /// Who made it. Not the same as [`channel`] in a channel, and needed to
+    /// address a resume request to the right person.
+    from: String,
     offer: DccOffer,
 }
 
@@ -402,6 +439,22 @@ impl Transfers {
         self.next_id = self.next_id.wrapping_add(1);
         self.next_id
     }
+
+    /// Forget files that are no longer being served.
+    ///
+    /// The serving task holds the other end of each offset, so when it finishes
+    /// — delivered, cancelled, timed out — it drops its share and ours is the
+    /// only one left. Looked for when needed rather than reported, because the
+    /// task has no way to tell the actor it is done.
+    fn forget_finished(&mut self) {
+        self.serving
+            .retain(|_, serving| Arc::strong_count(&serving.offset) > 1);
+    }
+}
+
+/// Whether a conversation target is a channel rather than a person.
+fn is_channel_target(target: &str) -> bool {
+    target.starts_with(['#', '&', '+', '!'])
 }
 
 impl Actor {
@@ -654,7 +707,7 @@ impl Actor {
                             self.send_file(&mut outgoing, target, path).await;
                         }
                         ClientCommand::AcceptFile { id, directory } => {
-                            self.accept_file(id, directory);
+                            self.accept_file(&mut outgoing, id, directory).await;
                         }
                         ClientCommand::CancelTransfer { id } => {
                             self.cancel_transfer(id);
@@ -1186,12 +1239,22 @@ impl Actor {
             }
             Irc::ChannelMODE(channel, modes) => self.on_mode(channel, modes, source),
 
-            Irc::PRIVMSG(target, text) => {
-                self.on_chat(target, text, source, false, message.tags.as_deref())
-            }
-            Irc::NOTICE(target, text) => {
-                self.on_chat(target, text, source, true, message.tags.as_deref())
-            }
+            Irc::PRIVMSG(target, text) => self.on_chat(
+                target,
+                text,
+                source,
+                false,
+                message.tags.as_deref(),
+                outgoing,
+            ),
+            Irc::NOTICE(target, text) => self.on_chat(
+                target,
+                text,
+                source,
+                true,
+                message.tags.as_deref(),
+                outgoing,
+            ),
 
             _ => {}
         }
@@ -1403,18 +1466,40 @@ impl Actor {
 
     /// Handle a CTCP request that is not ACTION.
     ///
-    /// Exactly one is recognised — `DCC SEND` — and recognising it means
-    /// emitting an event, not replying and not connecting. Everything else is
-    /// dropped in silence, which is the existing policy and the reason this
-    /// client cannot be made to report its version, its uptime or its
-    /// timezone to anyone who asks.
+    /// Three are recognised, all of them DCC. An offer (`SEND`) is *reported*:
+    /// it emits an event and nothing else, not replying and not connecting.
+    /// The other two belong to resuming a file and are answered only in the one
+    /// situation each could mean something — see [`Self::on_resume_request`] and
+    /// [`Self::on_resume_accepted`]. Everything else is dropped in silence,
+    /// which is the existing policy and the reason this client cannot be made
+    /// to report its version, its uptime or its timezone to anyone who asks.
     ///
     /// A NOTICE is never a request, so a `DCC` arriving in one is ignored:
     /// answering a NOTICE is how two clients get into a loop, and the reply to
     /// a CTCP request is itself a NOTICE.
-    fn on_ctcp(&mut self, target: &str, body: &str, sender: &str, is_notice: bool) {
+    fn on_ctcp(
+        &mut self,
+        target: &str,
+        body: &str,
+        sender: &str,
+        is_notice: bool,
+        outgoing: &mut VecDeque<Message>,
+    ) {
         if is_notice {
             return;
+        }
+        // Both only ever arrive addressed to us: a resume request is one person
+        // talking to another about a transfer between them, and one made in a
+        // channel is not that.
+        if self.session.is_self(target) {
+            if let Some(request) = parse_resume(body) {
+                self.on_resume_request(sender, &request, outgoing);
+                return;
+            }
+            if let Some(accepted) = parse_accept(body) {
+                self.on_resume_accepted(sender, &accepted);
+                return;
+            }
         }
         let Some(offer) = crate::dcc::offer::parse_send(body) else {
             return;
@@ -1437,6 +1522,7 @@ impl Actor {
             id,
             PendingOffer {
                 channel: channel.clone(),
+                from: sender.to_owned(),
                 offer: offer.clone(),
             },
         );
@@ -1453,7 +1539,14 @@ impl Actor {
     ///
     /// The transfer runs as its own task: a file takes minutes, and the IRC
     /// socket has to go on answering pings throughout.
-    fn accept_file(&mut self, id: u64, directory: String) {
+    ///
+    /// Async because it may need to *say* something first. If an earlier
+    /// attempt at this file left a partial one behind, the sender is asked to
+    /// carry on from where it stopped (`DCC RESUME`), and that is an IRC
+    /// message — queued here, on the connection's own sender, like any other.
+    /// The user pressing Accept is what makes this the user's doing rather than
+    /// the client's: it is sent only now, never in answer to an offer arriving.
+    async fn accept_file(&mut self, outgoing: &mut VecDeque<Message>, id: u64, directory: String) {
         let Some(pending) = self.transfers.offers.remove(&id) else {
             // Already answered, or left over from a previous connection.
             // Silence is right: nothing was promised and nothing is owed.
@@ -1468,6 +1561,14 @@ impl Actor {
         let channel = pending.channel;
         let filename = pending.offer.filename.clone();
         let offer = pending.offer;
+        let resume = self
+            .ask_to_resume(
+                outgoing,
+                &pending.from,
+                &offer,
+                std::path::Path::new(&directory),
+            )
+            .await;
 
         tokio::spawn(async move {
             let started = IrcEvent::FileTransferStarted {
@@ -1481,15 +1582,39 @@ impl Actor {
                 return;
             }
 
+            // Hear whether the sender will carry on from the partial file. An
+            // answer that does not come, or names a different place, means
+            // starting again — never a failed transfer: the file is still
+            // available, only the shortcut is not.
+            let start_at = match resume {
+                None => Ok(0),
+                Some((answer, wanted)) => tokio::select! {
+                    biased;
+                    Some(()) = cancel_rx.recv() => Err(TransferError::Cancelled),
+                    reply = timeout(transfer::RESUME_REPLY_TIMEOUT, answer) => {
+                        Ok(match reply {
+                            Ok(Ok(position)) if position == wanted => wanted,
+                            _ => 0,
+                        })
+                    }
+                },
+            };
+
             let (progress, forwarder) = forward_progress(events.clone(), id);
-            let result = transfer::accept(
-                &offer,
-                std::path::Path::new(&directory),
-                proxy.as_ref(),
-                progress,
-                &mut cancel_rx,
-            )
-            .await;
+            let result = match start_at {
+                Ok(start_at) => {
+                    transfer::accept(
+                        &offer,
+                        std::path::Path::new(&directory),
+                        proxy.as_ref(),
+                        start_at,
+                        progress,
+                        &mut cancel_rx,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            };
             forwarder.abort();
 
             let _ = events
@@ -1501,6 +1626,116 @@ impl Actor {
                 ))
                 .await;
         });
+    }
+
+    /// Ask the sender to carry on from a partial file, if there is one worth
+    /// carrying on from. Returns the channel the answer will arrive on and the
+    /// position that was asked for.
+    ///
+    /// Only for a normal offer. A reverse one has no port to name and no way to
+    /// be resumed here, so it is fetched whole.
+    async fn ask_to_resume(
+        &mut self,
+        outgoing: &mut VecDeque<Message>,
+        from: &str,
+        offer: &DccOffer,
+        directory: &std::path::Path,
+    ) -> Option<(oneshot::Receiver<u64>, u64)> {
+        if offer.is_reverse() {
+            return None;
+        }
+        let (port, size) = (offer.port?, offer.size?);
+        let have = transfer::partial_len(directory, &offer.filename).await?;
+        if have >= size {
+            // Nothing left to ask for; the transfer itself will say what is
+            // wrong with a partial file as large as the whole.
+            return None;
+        }
+
+        let (reply, answer) = oneshot::channel();
+        self.transfers.resumes.insert(
+            (from.to_ascii_lowercase(), port),
+            AwaitedResume {
+                filename: offer.filename.clone(),
+                reply,
+            },
+        );
+        outgoing.push_back(Message::from(Irc::PRIVMSG(
+            from.to_owned(),
+            format!(
+                "\u{01}DCC RESUME {} {} {}\u{01}",
+                transfer::quote_filename(&offer.filename),
+                port,
+                have
+            ),
+        )));
+        Some((answer, have))
+    }
+
+    /// Someone asks us to carry on a file we are serving from where they have
+    /// got to. Answered — and only answered — when it can only mean one thing:
+    /// the offer we made, to them, for this port.
+    ///
+    /// Each check closes a way for a stranger to make this client do something
+    /// it was not asked to do. The port has to be one we are listening on and
+    /// the name the one we offered under; a request about somebody else's
+    /// transfer is nothing to us. The person has to be the one the offer went
+    /// to (or, for a channel offer, anyone who could have seen it). And the
+    /// position has to be inside the file. Anything else is dropped without a
+    /// word, which is what every other CTCP gets.
+    fn on_resume_request(
+        &mut self,
+        sender: &str,
+        request: &crate::dcc::ResumeMessage,
+        outgoing: &mut VecDeque<Message>,
+    ) {
+        if request.token.is_some() || request.port == 0 {
+            // The passive form, which this does not do.
+            return;
+        }
+        self.transfers.forget_finished();
+        let Some(serving) = self.transfers.serving.get(&request.port) else {
+            return;
+        };
+        if safe_filename(&serving.filename).as_deref() != Some(request.filename.as_str()) {
+            return;
+        }
+        if request.position == 0 || request.position >= serving.size {
+            return;
+        }
+        if !is_channel_target(&serving.target) && !serving.target.eq_ignore_ascii_case(sender) {
+            return;
+        }
+
+        // Set before the answer goes out: the receiver connects only after it
+        // has the answer, and the serving task reads this when it does.
+        serving.offset.store(request.position, Ordering::Release);
+        outgoing.push_back(Message::from(Irc::PRIVMSG(
+            sender.to_owned(),
+            format!(
+                "\u{01}DCC ACCEPT {} {} {}\u{01}",
+                transfer::quote_filename(&serving.filename),
+                request.port,
+                request.position
+            ),
+        )));
+    }
+
+    /// A sender agrees to carry on from where we asked. Acted on only if we
+    /// asked: it must come from the person we asked, name the port we named,
+    /// and repeat the file. An `ACCEPT` nobody was waiting for is ignored.
+    fn on_resume_accepted(&mut self, sender: &str, accepted: &crate::dcc::ResumeMessage) {
+        if accepted.token.is_some() || accepted.port == 0 {
+            return;
+        }
+        let key = (sender.to_ascii_lowercase(), accepted.port);
+        match self.transfers.resumes.get(&key) {
+            Some(waiting) if waiting.filename == accepted.filename => {}
+            _ => return,
+        }
+        if let Some(waiting) = self.transfers.resumes.remove(&key) {
+            let _ = waiting.reply.send(accepted.position);
+        }
     }
 
     /// Offer a file to someone, and serve it when they take it up.
@@ -1577,11 +1812,27 @@ impl Actor {
         self.transfers.running.insert(id, cancel_tx);
         let events = self.events.clone();
 
+        // Findable by port, so that a receiver asking to carry on from where it
+        // got to can be matched to this file — and only this one. It starts at
+        // zero, which is what a receiver that asks for nothing gets.
+        let offset = Arc::new(AtomicU64::new(0));
+        self.transfers.forget_finished();
+        self.transfers.serving.insert(
+            listening.port,
+            Serving {
+                target: target.clone(),
+                filename: filename.clone(),
+                size,
+                offset: Arc::clone(&offset),
+            },
+        );
+
         tokio::spawn(async move {
             let (progress, forwarder) = forward_progress(events.clone(), id);
             let result = transfer::serve(
                 listener,
                 std::path::Path::new(&path),
+                offset,
                 progress,
                 &mut cancel_rx,
             )
@@ -1613,6 +1864,7 @@ impl Actor {
         source: Option<String>,
         is_notice: bool,
         tags: Option<&[Tag]>,
+        outgoing: &mut VecDeque<Message>,
     ) {
         let Some(sender) = source else { return };
 
@@ -1628,7 +1880,7 @@ impl Actor {
         let (body, is_action) = match trimmed.strip_prefix("ACTION ") {
             Some(rest) => (rest, true),
             None if text.starts_with('\u{01}') => {
-                self.on_ctcp(target, trimmed, &sender, is_notice);
+                self.on_ctcp(target, trimmed, &sender, is_notice, outgoing);
                 return;
             }
             None => (text, false),
@@ -2695,6 +2947,340 @@ mod tests {
             .expect("expected a FileOffered event");
         // Shown in the conversation with alice, not one named after us.
         assert_eq!(channel, "alice");
+    }
+
+    // ---- Resuming a file ------------------------------------------------
+
+    /// A file we are "serving" to [`target`] on [`port`], held the way
+    /// `send_file` holds one. The returned handle stands in for the serving
+    /// task: while it is alive the transfer is, and dropping it ends it.
+    fn serving(actor: &mut Actor, target: &str, port: u16, size: u64) -> Arc<AtomicU64> {
+        let offset = Arc::new(AtomicU64::new(0));
+        actor.transfers.serving.insert(
+            port,
+            Serving {
+                target: target.to_owned(),
+                filename: "cat.jpg".to_owned(),
+                size,
+                offset: Arc::clone(&offset),
+            },
+        );
+        offset
+    }
+
+    fn sent_texts(outgoing: &VecDeque<Message>) -> Vec<String> {
+        outgoing
+            .iter()
+            .filter_map(|m| match &m.command {
+                Irc::PRIVMSG(to, text) => Some(format!("{to} {text}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_resume_for_a_file_we_are_serving_is_accepted_and_moves_the_start() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let offset = serving(&mut actor, "alice", 5001, 1000);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 400\u{01}",
+        );
+
+        assert_eq!(
+            sent_texts(&outgoing),
+            vec!["alice \u{01}DCC ACCEPT cat.jpg 5001 400\u{01}".to_owned()]
+        );
+        assert_eq!(offset.load(Ordering::Acquire), 400);
+    }
+
+    #[test]
+    fn a_name_with_spaces_is_quoted_in_the_answer() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let offset = serving(&mut actor, "alice", 5001, 1000);
+        actor.transfers.serving.get_mut(&5001).unwrap().filename = "my cat.jpg".to_owned();
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME \"my cat.jpg\" 5001 10\u{01}",
+        );
+
+        assert_eq!(
+            sent_texts(&outgoing),
+            vec!["alice \u{01}DCC ACCEPT \"my cat.jpg\" 5001 10\u{01}".to_owned()]
+        );
+        assert_eq!(offset.load(Ordering::Acquire), 10);
+    }
+
+    #[test]
+    fn a_resume_nobody_could_mean_is_not_answered() {
+        // Every way a request can fail to be about the offer we made. Each one
+        // is dropped without a word, like any other CTCP we do not act on.
+        for (label, raw) in [
+            (
+                "the wrong person",
+                ":bob!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 400\u{01}",
+            ),
+            (
+                "a port we are not serving",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5002 400\u{01}",
+            ),
+            (
+                "a different file",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME dog.jpg 5001 400\u{01}",
+            ),
+            (
+                "a start of nothing",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 0\u{01}",
+            ),
+            (
+                "a start at the very end",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 1000\u{01}",
+            ),
+            (
+                "a start past the end",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 99999\u{01}",
+            ),
+            (
+                "the passive form",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 0 400 7\u{01}",
+            ),
+            (
+                "a notice",
+                ":alice!u@h NOTICE ddirc :\u{01}DCC RESUME cat.jpg 5001 400\u{01}",
+            ),
+            (
+                "a channel",
+                ":alice!u@h PRIVMSG #test :\u{01}DCC RESUME cat.jpg 5001 400\u{01}",
+            ),
+        ] {
+            let (mut actor, _rx, mut outgoing) = actor(&["#test"]);
+            let offset = serving(&mut actor, "alice", 5001, 1000);
+            feed(&mut actor, &mut outgoing, raw);
+            assert!(outgoing.is_empty(), "{label}: something was sent");
+            assert_eq!(
+                offset.load(Ordering::Acquire),
+                0,
+                "{label}: the start moved"
+            );
+        }
+    }
+
+    #[test]
+    fn a_resume_for_a_transfer_that_is_over_is_not_answered() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let offset = serving(&mut actor, "alice", 5001, 1000);
+        // The serving task finished: its share of the offset is gone.
+        drop(offset);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 400\u{01}",
+        );
+
+        assert!(outgoing.is_empty());
+        assert!(actor.transfers.serving.is_empty(), "and it is forgotten");
+    }
+
+    #[test]
+    fn anyone_who_saw_a_channel_offer_may_ask_to_resume_it() {
+        let (mut actor, _rx, mut outgoing) = actor(&["#test"]);
+        let offset = serving(&mut actor, "#test", 5001, 1000);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":carol!u@h PRIVMSG ddirc :\u{01}DCC RESUME cat.jpg 5001 250\u{01}",
+        );
+
+        assert_eq!(
+            sent_texts(&outgoing),
+            vec!["carol \u{01}DCC ACCEPT cat.jpg 5001 250\u{01}".to_owned()]
+        );
+        assert_eq!(offset.load(Ordering::Acquire), 250);
+    }
+
+    fn awaiting(actor: &mut Actor, from: &str, port: u16) -> oneshot::Receiver<u64> {
+        let (reply, answer) = oneshot::channel();
+        actor.transfers.resumes.insert(
+            (from.to_ascii_lowercase(), port),
+            AwaitedResume {
+                filename: "cat.jpg".to_owned(),
+                reply,
+            },
+        );
+        answer
+    }
+
+    #[test]
+    fn an_accept_we_were_waiting_for_reaches_the_download() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let mut answer = awaiting(&mut actor, "Alice", 5001);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC ACCEPT cat.jpg 5001 400\u{01}",
+        );
+
+        assert_eq!(answer.try_recv().unwrap(), 400);
+        assert!(actor.transfers.resumes.is_empty(), "answered once");
+        assert!(outgoing.is_empty(), "an ACCEPT is never itself answered");
+    }
+
+    #[test]
+    fn an_accept_nobody_asked_for_is_ignored() {
+        for (label, raw) in [
+            (
+                "from someone else",
+                ":bob!u@h PRIVMSG ddirc :\u{01}DCC ACCEPT cat.jpg 5001 400\u{01}",
+            ),
+            (
+                "for another port",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC ACCEPT cat.jpg 5002 400\u{01}",
+            ),
+            (
+                "for another file",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC ACCEPT dog.jpg 5001 400\u{01}",
+            ),
+            (
+                "in a notice",
+                ":alice!u@h NOTICE ddirc :\u{01}DCC ACCEPT cat.jpg 5001 400\u{01}",
+            ),
+            (
+                "the passive form",
+                ":alice!u@h PRIVMSG ddirc :\u{01}DCC ACCEPT cat.jpg 0 400 7\u{01}",
+            ),
+        ] {
+            let (mut actor, _rx, mut outgoing) = actor(&[]);
+            let mut answer = awaiting(&mut actor, "alice", 5001);
+            feed(&mut actor, &mut outgoing, raw);
+            assert!(answer.try_recv().is_err(), "{label}: it was delivered");
+            assert_eq!(actor.transfers.resumes.len(), 1, "{label}: still waiting");
+        }
+
+        // And one with nothing waiting at all is simply nothing.
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC ACCEPT cat.jpg 5001 400\u{01}",
+        );
+        assert!(outgoing.is_empty());
+        assert!(drain(&mut rx).is_empty());
+    }
+
+    fn offer_for(name: &str, port: Option<u16>, size: Option<u64>) -> DccOffer {
+        DccOffer {
+            filename: name.to_owned(),
+            addr: port.map(|_| "127.0.0.1".parse().unwrap()),
+            port,
+            size,
+            token: port.is_none().then_some(7),
+        }
+    }
+
+    fn inbox_with_partial(name: &str, bytes: usize) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ddirc-resume-{}-{}",
+            std::process::id(),
+            name.replace(['.', ' '], "_")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if bytes > 0 {
+            std::fs::write(dir.join(format!("{name}.part")), vec![1u8; bytes]).unwrap();
+        }
+        dir
+    }
+
+    #[tokio::test]
+    async fn accepting_an_offer_with_a_partial_file_asks_the_sender_to_carry_on() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let dir = inbox_with_partial("cat.jpg", 400);
+
+        let asked = actor
+            .ask_to_resume(
+                &mut outgoing,
+                "Alice",
+                &offer_for("cat.jpg", Some(5001), Some(1000)),
+                &dir,
+            )
+            .await;
+
+        let (_answer, wanted) = asked.expect("a partial file should be worth resuming");
+        assert_eq!(wanted, 400);
+        assert_eq!(
+            sent_texts(&outgoing),
+            vec!["Alice \u{01}DCC RESUME cat.jpg 5001 400\u{01}".to_owned()]
+        );
+        assert!(actor
+            .transfers
+            .resumes
+            .contains_key(&("alice".to_owned(), 5001)));
+    }
+
+    #[tokio::test]
+    async fn there_is_nothing_to_ask_when_nothing_is_worth_resuming() {
+        for (label, partial, offer) in [
+            (
+                "no partial file",
+                0usize,
+                offer_for("a.bin", Some(5001), Some(1000)),
+            ),
+            (
+                "a partial as large as the file",
+                1000,
+                offer_for("b.bin", Some(5001), Some(1000)),
+            ),
+            (
+                "a partial larger than the file",
+                2000,
+                offer_for("c.bin", Some(5001), Some(1000)),
+            ),
+            (
+                "an offer with no size",
+                400,
+                offer_for("d.bin", Some(5001), None),
+            ),
+            ("a reverse offer", 400, offer_for("e.bin", None, Some(1000))),
+        ] {
+            let (mut actor, _rx, mut outgoing) = actor(&[]);
+            let dir = inbox_with_partial(&offer.filename, partial);
+            let asked = actor
+                .ask_to_resume(&mut outgoing, "alice", &offer, &dir)
+                .await;
+            assert!(asked.is_none(), "{label}: asked anyway");
+            assert!(outgoing.is_empty(), "{label}: something was sent");
+            assert!(
+                actor.transfers.resumes.is_empty(),
+                "{label}: waiting anyway"
+            );
+        }
+    }
+
+    #[test]
+    fn an_offer_arriving_is_still_never_answered_even_with_a_partial_file() {
+        // Resuming is something Accept does. An offer arriving does nothing, and
+        // that is the policy this whole module exists to keep.
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        let _dir = inbox_with_partial("cat.jpg", 400);
+
+        feed(
+            &mut actor,
+            &mut outgoing,
+            ":alice!u@h PRIVMSG ddirc :\u{01}DCC SEND cat.jpg 2130706433 5001 1000\u{01}",
+        );
+
+        assert!(outgoing.is_empty());
+        assert!(drain(&mut rx)
+            .iter()
+            .any(|e| matches!(e, IrcEvent::FileOffered { .. })));
+        assert!(actor.transfers.resumes.is_empty());
     }
 
     #[test]

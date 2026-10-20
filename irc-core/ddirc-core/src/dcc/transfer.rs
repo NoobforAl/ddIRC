@@ -40,11 +40,14 @@
 //! that fails.
 
 use std::io;
+use std::io::SeekFrom;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_socks::tcp::Socks5Stream;
@@ -73,6 +76,15 @@ pub const MAX_TRANSFER_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// because a transfer may be crossing Tor; bounded, because an offer nobody
 /// ever answers must not leave a listener open for the life of the app.
 const RENDEZVOUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// How long to wait for a sender to answer a `DCC RESUME` before giving up on
+/// resuming and fetching the whole file again.
+///
+/// Short, because the other side is a person's client that either understands
+/// the request or does not, and one that does answers at once. A sender that
+/// stays silent is one that does not support it, and the transfer should not
+/// sit for minutes finding that out.
+pub const RESUME_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How long to go on reading acknowledgements after the last byte is sent.
 ///
@@ -176,6 +188,27 @@ pub struct Listening {
     pub port: u16,
 }
 
+/// Where an unfinished download of [`filename`] is kept in [`destination`].
+///
+/// The name the file has while it is incomplete, so that nothing half-written
+/// can be mistaken for the real thing — and the name a later attempt looks for
+/// to carry on from. Just the offered name with `.part` after it: the one rule
+/// that holds for a name with no extension too, which an extension-swapping
+/// rule does not.
+pub fn partial_path(destination: &Path, filename: &str) -> PathBuf {
+    destination.join(format!("{filename}.part"))
+}
+
+/// How many bytes of [`filename`] are already here from an earlier attempt, if
+/// there are any. `None` for no partial file, an empty one, or something that
+/// is not a file.
+pub async fn partial_len(destination: &Path, filename: &str) -> Option<u64> {
+    let meta = tokio::fs::metadata(partial_path(destination, filename))
+        .await
+        .ok()?;
+    (meta.is_file() && meta.len() > 0).then_some(meta.len())
+}
+
 /// Accept an offer: connect, and write what arrives to [`destination`].
 ///
 /// Only ever a *normal* offer. A reverse one is refused before this is reached
@@ -185,10 +218,26 @@ pub struct Listening {
 /// transfer that fails halfway cannot be mistaken for the file it was going to
 /// be. Nothing overwrites: a name already taken is an error, never a silent
 /// replacement of something the user already had.
+///
+/// # Resuming
+///
+/// [`start_at`] is how many bytes of the file the sender has agreed to skip:
+/// the transfer carries on after that point in the existing `.part` file
+/// instead of beginning again. It is taken on trust from nobody — the caller
+/// passes only what it negotiated with the sender, and it is checked here
+/// against the file actually on disk and the size actually offered, so a number
+/// that does not fit either is treated as zero and the file is fetched whole.
+///
+/// A transfer that fails part-way leaves its `.part` file where it is, which is
+/// what makes resuming possible. One the user *cancelled* does not: stopping a
+/// download is a decision to be rid of it, and an unfinished copy of something
+/// the user turned away has no business staying. Nor does one that broke the
+/// size limit, which is a sender misbehaving rather than a connection dropping.
 pub async fn accept(
     offer: &DccOffer,
     destination: &Path,
     proxy: Option<&ProxyConfig>,
+    start_at: u64,
     progress: Progress,
     cancel: &mut mpsc::Receiver<()>,
 ) -> Result<PathBuf, TransferError> {
@@ -208,24 +257,34 @@ pub async fn accept(
     if tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Err(TransferError::AlreadyExists(offer.filename.clone()));
     }
-    let partial = path.with_extension(format!(
-        "{}.part",
-        path.extension().and_then(|e| e.to_str()).unwrap_or("")
-    ));
+    let partial = partial_path(destination, &offer.filename);
+
+    // Only a point inside the file, and only bytes we really have.
+    let on_disk = partial_len(destination, &offer.filename).await.unwrap_or(0);
+    let start_at = match offer.size {
+        Some(size) if start_at > 0 && start_at < size && start_at <= on_disk => start_at,
+        _ => 0,
+    };
 
     let stream = dial(SocketAddr::new(addr, port), proxy).await?;
     progress.send(TransferEvent::Started { total: offer.size });
 
-    let result = receive_into(stream, &partial, offer.size, &progress, cancel).await;
+    let result = receive_into(stream, &partial, offer.size, start_at, &progress, cancel).await;
     match result {
         Ok(()) => {
             tokio::fs::rename(&partial, &path).await?;
             Ok(path)
         }
         Err(e) => {
-            // A partial file left behind is litter the user did not ask for,
-            // and one named like the real thing would be worse than litter.
-            let _ = tokio::fs::remove_file(&partial).await;
+            // Kept when the connection simply went away, so that it can be
+            // carried on; removed when the user stopped it or the sender broke
+            // the size limit, and when nothing was written at all. See the note
+            // on this function.
+            let keep = !matches!(e, TransferError::Cancelled | TransferError::TooLarge(_))
+                && partial_len(destination, &offer.filename).await.is_some();
+            if !keep {
+                let _ = tokio::fs::remove_file(&partial).await;
+            }
             Err(e)
         }
     }
@@ -247,9 +306,15 @@ pub async fn listen() -> Result<(TcpListener, Listening), TransferError> {
 }
 
 /// Serve [`path`] to whoever connects to [`listener`] first.
+///
+/// [`offset`] is where in the file to begin, and is read *after* the connection
+/// arrives, not before. A receiver that asks to resume says so first and only
+/// then connects, so the actor that hears the request has until that moment to
+/// set it; one that asks for nothing leaves it at zero and gets the whole file.
 pub async fn serve(
     listener: TcpListener,
     path: &Path,
+    offset: Arc<AtomicU64>,
     progress: Progress,
     cancel: &mut mpsc::Receiver<()>,
 ) -> Result<u64, TransferError> {
@@ -259,7 +324,14 @@ pub async fn serve(
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => return Err(TransferError::NoRendezvous(RENDEZVOUS_TIMEOUT.as_secs())),
     };
-    send_from(stream, path, &progress, cancel).await
+    send_from(
+        stream,
+        path,
+        offset.load(Ordering::Acquire),
+        &progress,
+        cancel,
+    )
+    .await
 }
 
 /// Serve [`path`] by dialling *them* — the sending half of a reverse offer.
@@ -275,7 +347,9 @@ pub async fn serve_by_dialling(
     cancel: &mut mpsc::Receiver<()>,
 ) -> Result<u64, TransferError> {
     let stream = dial(addr, proxy).await?;
-    send_from(stream, path, &progress, cancel).await
+    // From the start: resuming a reverse transfer is not supported, so there is
+    // nobody who could have asked to begin anywhere else.
+    send_from(stream, path, 0, &progress, cancel).await
 }
 
 /// Open a TCP connection, through the proxy when there is one.
@@ -336,16 +410,39 @@ fn end_of_stream(read: io::Result<usize>) -> io::Result<usize> {
 }
 
 /// Read the stream into a file, acknowledging as DCC expects.
+///
+/// [`start_at`] bytes are already in the file: it is opened where they end and
+/// everything that arrives is added after them. Counts, acknowledgements and
+/// progress are all *positions in the whole file* from then on, which is what a
+/// sender that was asked to resume expects to be told.
 async fn receive_into(
     mut stream: TcpStream,
     path: &Path,
     expected: Option<u64>,
+    start_at: u64,
     progress: &Progress,
     cancel: &mut mpsc::Receiver<()>,
 ) -> Result<(), TransferError> {
-    let mut file = BufWriter::new(File::create(path).await?);
+    let raw = if start_at > 0 {
+        // Cut to exactly the agreed point first: the file may hold more than
+        // was agreed (a transfer that died after the last full write), and
+        // anything beyond it is not something the sender is going to resend.
+        let mut file = OpenOptions::new().write(true).open(path).await?;
+        file.set_len(start_at).await?;
+        file.seek(SeekFrom::Start(start_at)).await?;
+        file
+    } else {
+        File::create(path).await?
+    };
+    let mut file = BufWriter::new(raw);
     let mut buffer = vec![0u8; CHUNK];
-    let mut received: u64 = 0;
+    let mut received: u64 = start_at;
+    if start_at > 0 {
+        // So the ring starts where the file already is, not at nothing.
+        progress.send(TransferEvent::Progress {
+            transferred: start_at,
+        });
+    }
 
     loop {
         // `Some(())` rather than `_`: a cancel channel whose sender has been
@@ -407,9 +504,14 @@ async fn receive_into(
 }
 
 /// Write a file to the stream, draining acknowledgements as they arrive.
+///
+/// Begins [`start`] bytes in. A point outside the file means the request that
+/// set it was wrong, and the whole file is sent instead: more than was asked
+/// for is a transfer that works, where less than nothing is not.
 async fn send_from(
     stream: TcpStream,
     path: &Path,
+    start: u64,
     progress: &Progress,
     cancel: &mut mpsc::Receiver<()>,
 ) -> Result<u64, TransferError> {
@@ -420,8 +522,15 @@ async fn send_from(
             MAX_TRANSFER_BYTES / (1024 * 1024 * 1024),
         ));
     }
+    let start = if start < total { start } else { 0 };
+    if start > 0 {
+        file.seek(SeekFrom::Start(start)).await?;
+    }
 
     progress.send(TransferEvent::Started { total: Some(total) });
+    if start > 0 {
+        progress.send(TransferEvent::Progress { transferred: start });
+    }
 
     // Split so acknowledgements can be drained while writing. They are not
     // waited for — that is what makes this "send ahead" rather than lockstep —
@@ -434,7 +543,7 @@ async fn send_from(
     });
 
     let mut buffer = vec![0u8; CHUNK];
-    let mut sent: u64 = 0;
+    let mut sent: u64 = start;
     let result = async {
         loop {
             // See the note in `receive_into`: `Some(())`, never `_`.
@@ -576,9 +685,16 @@ mod tests {
         let (progress, _rx) = progress();
         let dir = std::env::temp_dir();
 
-        let error = accept(&offer, &dir, Some(&proxy), progress, &mut never_cancelled())
-            .await
-            .unwrap_err();
+        let error = accept(
+            &offer,
+            &dir,
+            Some(&proxy),
+            0,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
 
         assert!(matches!(error, TransferError::WouldDiscloseAddress));
     }
@@ -598,6 +714,7 @@ mod tests {
             &offer,
             &std::env::temp_dir(),
             None,
+            0,
             progress,
             &mut never_cancelled(),
         )
@@ -621,7 +738,14 @@ mod tests {
         let (listener, listening) = listen().await.unwrap();
         let (send_progress, _sp) = progress();
         let serving = tokio::spawn(async move {
-            serve(listener, &source, send_progress, &mut never_cancelled()).await
+            serve(
+                listener,
+                &source,
+                Arc::new(AtomicU64::new(0)),
+                send_progress,
+                &mut never_cancelled(),
+            )
+            .await
         });
 
         let inbox = dir.join("in");
@@ -635,9 +759,16 @@ mod tests {
         };
         let (recv_progress, mut events) = progress();
 
-        let path = accept(&offer, &inbox, None, recv_progress, &mut never_cancelled())
-            .await
-            .unwrap();
+        let path = accept(
+            &offer,
+            &inbox,
+            None,
+            0,
+            recv_progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(serving.await.unwrap().unwrap(), contents.len() as u64);
         assert_eq!(path, inbox.join("arrived.bin"));
@@ -685,7 +816,7 @@ mod tests {
         };
         let (progress, _rx) = progress();
 
-        let error = accept(&offer, &dir, None, progress, &mut never_cancelled())
+        let error = accept(&offer, &dir, None, 0, progress, &mut never_cancelled())
             .await
             .unwrap_err();
 
@@ -696,9 +827,10 @@ mod tests {
         );
     }
 
-    /// A sender that stops early leaves no file behind under the real name.
+    /// A sender that stops early leaves no file behind under the real name — but
+    /// does keep what did arrive, under the partial name, so it can be resumed.
     #[tokio::test]
-    async fn a_truncated_transfer_is_reported_and_leaves_nothing() {
+    async fn a_truncated_transfer_is_reported_and_keeps_its_partial_file() {
         let dir = tempdir();
         let (listener, listening) = listen().await.unwrap();
 
@@ -719,7 +851,7 @@ mod tests {
         };
         let (progress, _rx) = progress();
 
-        let error = accept(&offer, &dir, None, progress, &mut never_cancelled())
+        let error = accept(&offer, &dir, None, 0, progress, &mut never_cancelled())
             .await
             .unwrap_err();
 
@@ -737,8 +869,335 @@ mod tests {
             !dir.join("half.bin").exists(),
             "no file under the real name"
         );
-        let leftovers = std::fs::read_dir(&dir).unwrap().count();
-        assert_eq!(leftovers, 0, "and no partial left lying about");
+        // What did arrive is kept, under a name nothing could mistake for the
+        // finished file, because that is what a resume starts from.
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(leftovers, vec!["half.bin.part".to_owned()]);
+        assert_eq!(std::fs::read(dir.join("half.bin.part")).unwrap(), b"stop");
+    }
+
+    #[test]
+    fn the_partial_name_is_the_offered_name_with_part_after_it() {
+        let dir = Path::new("inbox");
+        assert_eq!(partial_path(dir, "cat.jpg"), dir.join("cat.jpg.part"));
+        assert_eq!(partial_path(dir, "a.tar.gz"), dir.join("a.tar.gz.part"));
+        // The case a rule that swaps the extension gets wrong: nothing to swap.
+        assert_eq!(partial_path(dir, "README"), dir.join("README.part"));
+    }
+
+    /// A deterministic body, long enough to span several chunks, and not a
+    /// repeating pattern a wrong offset could still match.
+    fn body(len: usize) -> Vec<u8> {
+        (0..len)
+            .map(|i| ((i * 7919 + i / 251) % 256) as u8)
+            .collect()
+    }
+
+    fn offering(name: &str, port: u16, size: usize) -> DccOffer {
+        DccOffer {
+            filename: name.to_owned(),
+            addr: Some("127.0.0.1".parse().unwrap()),
+            port: Some(port),
+            size: Some(size as u64),
+            token: None,
+        }
+    }
+
+    /// Serve [`contents`] from [`offset`] and return the port to dial.
+    async fn serving_from(
+        dir: &Path,
+        contents: &[u8],
+        offset: u64,
+    ) -> (u16, tokio::task::JoinHandle<Result<u64, TransferError>>) {
+        let source = dir.join("source.bin");
+        tokio::fs::write(&source, contents).await.unwrap();
+        let (listener, listening) = listen().await.unwrap();
+        let handle = tokio::spawn(async move {
+            let (sp, _rx) = progress();
+            serve(
+                listener,
+                &source,
+                Arc::new(AtomicU64::new(offset)),
+                sp,
+                &mut never_cancelled(),
+            )
+            .await
+        });
+        (listening.port, handle)
+    }
+
+    /// The point of the feature: carry on from the bytes already here, and end
+    /// with exactly the file that was offered.
+    #[tokio::test]
+    async fn a_download_carries_on_from_its_partial_file() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let contents = body(CHUNK * 3 + 123);
+        let have = CHUNK + 500;
+        tokio::fs::write(partial_path(&inbox, "big.bin"), &contents[..have])
+            .await
+            .unwrap();
+
+        let (port, serving) = serving_from(&dir, &contents, have as u64).await;
+        let (recv_progress, mut events) = progress();
+        let path = accept(
+            &offering("big.bin", port, contents.len()),
+            &inbox,
+            None,
+            have as u64,
+            recv_progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), contents);
+        assert_eq!(serving.await.unwrap().unwrap(), contents.len() as u64);
+        assert!(!partial_path(&inbox, "big.bin").exists(), "renamed away");
+
+        // Progress is a position in the whole file: it starts where the file
+        // already was and never reports less than that.
+        let mut positions = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let TransferEvent::Progress { transferred } = event {
+                positions.push(transferred);
+            }
+        }
+        assert_eq!(positions.first().copied(), Some(have as u64));
+        assert!(positions.iter().all(|p| *p >= have as u64));
+        assert_eq!(positions.last().copied(), Some(contents.len() as u64));
+    }
+
+    /// Bytes beyond the agreed point are not something the sender will resend,
+    /// so they must not survive into the finished file.
+    #[tokio::test]
+    async fn a_partial_file_longer_than_the_agreed_point_is_cut_back() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let contents = body(CHUNK * 2 + 9);
+        let agreed = 1000usize;
+        // Right up to the agreed point, then garbage a failed write left behind.
+        let mut partial = contents[..agreed].to_vec();
+        partial.extend(std::iter::repeat_n(0xEE, 5000));
+        tokio::fs::write(partial_path(&inbox, "cut.bin"), &partial)
+            .await
+            .unwrap();
+
+        let (port, serving) = serving_from(&dir, &contents, agreed as u64).await;
+        let (progress, _rx) = progress();
+        let path = accept(
+            &offering("cut.bin", port, contents.len()),
+            &inbox,
+            None,
+            agreed as u64,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), contents);
+        serving.await.unwrap().unwrap();
+    }
+
+    /// A resume point is checked against what is really on disk and what was
+    /// really offered. One that fits neither is no resume point.
+    #[tokio::test]
+    async fn a_resume_point_that_does_not_fit_means_the_whole_file() {
+        let contents = body(5000);
+
+        for (label, partial_len, start_at) in [
+            ("more than the file holds", 10usize, 2000u64),
+            ("no partial file at all", 0, 2000),
+            ("past the end of the offer", 3000, 6000),
+            ("exactly the end", 3000, 5000),
+        ] {
+            let dir = tempdir();
+            let inbox = dir.join("in");
+            tokio::fs::create_dir_all(&inbox).await.unwrap();
+            if partial_len > 0 {
+                tokio::fs::write(partial_path(&inbox, "f.bin"), &contents[..partial_len])
+                    .await
+                    .unwrap();
+            }
+
+            // The sender, who was never told to skip anything, sends it all.
+            let (port, serving) = serving_from(&dir, &contents, 0).await;
+            let (progress, _rx) = progress();
+            let path = accept(
+                &offering("f.bin", port, contents.len()),
+                &inbox,
+                None,
+                start_at,
+                progress,
+                &mut never_cancelled(),
+            )
+            .await
+            .unwrap_or_else(|e| panic!("{label}: {e:?}"));
+
+            assert_eq!(tokio::fs::read(&path).await.unwrap(), contents, "{label}");
+            serving.await.unwrap().unwrap();
+        }
+    }
+
+    /// A sender asked to start part-way sends only the rest, and says how much
+    /// it sent as a position in the whole file.
+    #[tokio::test]
+    async fn a_file_is_served_from_the_point_it_was_asked_to() {
+        let dir = tempdir();
+        let contents = body(CHUNK + 4321);
+        let from = 40_000u64;
+        let (port, serving) = serving_from(&dir, &contents, from).await;
+
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut got = Vec::new();
+        // Acknowledge nothing: a sender that streams ahead does not wait.
+        stream.read_to_end(&mut got).await.unwrap();
+
+        assert_eq!(got, contents[from as usize..]);
+        assert_eq!(serving.await.unwrap().unwrap(), contents.len() as u64);
+    }
+
+    #[tokio::test]
+    async fn a_start_outside_the_file_sends_all_of_it() {
+        let dir = tempdir();
+        let contents = body(3000);
+        for from in [3000u64, 9999, u64::MAX] {
+            let (port, serving) = serving_from(&dir, &contents, from).await;
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            let mut got = Vec::new();
+            stream.read_to_end(&mut got).await.unwrap();
+            assert_eq!(got, contents, "from {from}");
+            serving.await.unwrap().unwrap();
+        }
+    }
+
+    /// The whole story, end to end: a download that dies, a partial file that
+    /// survives it, and a second attempt that finishes the job.
+    #[tokio::test]
+    async fn an_interrupted_download_can_be_finished() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let contents = body(CHUNK * 4 + 77);
+        let cut_after = CHUNK * 2 + 11;
+
+        // First attempt: a sender that hangs up part-way through.
+        let (listener, listening) = listen().await.unwrap();
+        let first = contents.clone();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(&first[..cut_after]).await;
+                let _ = stream.shutdown().await;
+                // Read what the receiver sent back before letting go. Closing
+                // with its acknowledgements unread is an abortive close, which
+                // on Windows throws away bytes still in flight — the very thing
+                // `send_from` takes care to avoid, and a test sender has to as
+                // well or it measures its own rudeness.
+                let mut acks = Vec::new();
+                let _ = stream.read_to_end(&mut acks).await;
+            }
+        });
+        let (progress1, _rx1) = progress();
+        let failure = accept(
+            &offering("movie.bin", listening.port, contents.len()),
+            &inbox,
+            None,
+            0,
+            progress1,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(failure, TransferError::Truncated { .. }));
+
+        // What survived is exactly what arrived.
+        let kept = partial_len(&inbox, "movie.bin").await.unwrap();
+        assert_eq!(kept, cut_after as u64);
+        assert!(!inbox.join("movie.bin").exists());
+
+        // Second attempt: ask to resume from there, as the actor would.
+        let (port, serving) = serving_from(&dir, &contents, kept).await;
+        let (progress2, _rx2) = progress();
+        let path = accept(
+            &offering("movie.bin", port, contents.len()),
+            &inbox,
+            None,
+            kept,
+            progress2,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), contents);
+        serving.await.unwrap().unwrap();
+        assert!(partial_len(&inbox, "movie.bin").await.is_none());
+    }
+
+    /// Stopping a download is a decision to be rid of it: nothing is kept.
+    #[tokio::test]
+    async fn cancelling_a_download_removes_its_partial_file() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+
+        // A sender that sends some, then stalls.
+        let (listener, listening) = listen().await.unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let _ = stream.write_all(&[7u8; 20_000]).await;
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            }
+        });
+
+        let (cancel_tx, mut cancel_rx) = mpsc::channel(1);
+        let (progress, mut events) = progress();
+        let offer = offering("stalls.bin", listening.port, 1_000_000);
+        let inbox2 = inbox.clone();
+        let task = tokio::spawn(async move {
+            accept(&offer, &inbox2, None, 0, progress, &mut cancel_rx).await
+        });
+
+        // Wait until something has really been written, then stop it.
+        while !matches!(
+            events.recv().await,
+            Some(TransferEvent::Progress { transferred }) if transferred >= 20_000
+        ) {}
+        cancel_tx.send(()).await.unwrap();
+
+        assert!(matches!(
+            task.await.unwrap().unwrap_err(),
+            TransferError::Cancelled
+        ));
+        assert!(partial_len(&inbox, "stalls.bin").await.is_none());
+        assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
+    }
+
+    /// A sender that is the one misbehaving does not get its bytes kept.
+    #[tokio::test]
+    async fn an_oversized_download_is_not_kept_either() {
+        let dir = tempdir();
+        let inbox = dir.join("in");
+        tokio::fs::create_dir_all(&inbox).await.unwrap();
+        let offer = DccOffer {
+            filename: "huge.bin".to_owned(),
+            addr: Some("127.0.0.1".parse().unwrap()),
+            port: Some(1),
+            size: Some(MAX_TRANSFER_BYTES + 1),
+            token: None,
+        };
+        let (progress, _rx) = progress();
+        let error = accept(&offer, &inbox, None, 0, progress, &mut never_cancelled())
+            .await
+            .unwrap_err();
+        assert!(matches!(error, TransferError::TooLarge(_)));
+        assert_eq!(std::fs::read_dir(&inbox).unwrap().count(), 0);
     }
 
     /// The sending half of a reverse offer: they listen, we dial out.

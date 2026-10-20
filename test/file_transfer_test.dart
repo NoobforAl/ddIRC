@@ -9,6 +9,7 @@
 // dialog a person reads before turning it on describes what the feature does
 // rather than what it did two versions ago.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -32,6 +33,7 @@ import 'package:ddirc/src/ui/message_view.dart';
 Future<SessionModel> _session({
   bool transfers = true,
   rust.ProxyConfig? proxy,
+  Future<BigInt?> Function(String filename)? partial,
 }) async {
   SharedPreferences.setMockInitialValues({});
   final settings = await AppSettings.load();
@@ -48,6 +50,9 @@ Future<SessionModel> _session({
       proxy: proxy,
     ),
     settings: settings,
+    // Nothing on disk unless a test says so; the real lookup would go and read
+    // the machine this runs on.
+    partialLookup: partial ?? (_) async => null,
   );
 }
 
@@ -935,6 +940,330 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('report.pdf'), findsOneWidget, reason: 'still one card');
       expect(find.textContaining('private storage'), findsOneWidget);
+    });
+  });
+
+  group('resuming, as the app shows it', () {
+    FileTransfer offer({int? total = 12 * 1024 * 1024}) => FileTransfer.offered(
+      id: BigInt.one,
+      filename: 'holiday.zip',
+      from: 'alice',
+      total: total == null ? null : BigInt.from(total),
+      isReverse: false,
+    );
+
+    test('a transfer knows what is already here and what was kept', () {
+      final o = offer();
+      var heard = 0;
+      o.addListener(() => heard++);
+
+      o.resumeFrom = BigInt.from(3 * 1024 * 1024);
+      o.resumeFrom = BigInt.from(3 * 1024 * 1024);
+      expect(heard, 1, reason: 'the repeat said nothing new');
+      expect(o.resumeFrom, BigInt.from(3 * 1024 * 1024));
+
+      o.kept = BigInt.from(1024);
+      expect(o.kept, BigInt.from(1024));
+      expect(heard, 2);
+    });
+
+    test(
+      'an offer with a partial file is marked as one that carries on',
+      () async {
+        final s = await _session(
+          partial: (name) async =>
+              name == 'report.pdf' ? BigInt.from(1024) : null,
+        );
+        _joined(s, '#chat');
+        s.receiveForTesting(_offer());
+        await pumpEventQueue();
+
+        expect(_files(_named(s, '#chat')).single.resumeFrom, BigInt.from(1024));
+      },
+    );
+
+    test('an offer with nothing on disk is not', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      await pumpEventQueue();
+
+      expect(_files(_named(s, '#chat')).single.resumeFrom, isNull);
+    });
+
+    test('a leftover as long as the whole file is some other file', () async {
+      for (final have in [2048, 4096]) {
+        final s = await _session(partial: (_) async => BigInt.from(have));
+        _joined(s, '#chat');
+        s.receiveForTesting(_offer(size: 2048));
+        await pumpEventQueue();
+
+        expect(
+          _files(_named(s, '#chat')).single.resumeFrom,
+          isNull,
+          reason: 'a partial of $have bytes cannot be the start of 2048',
+        );
+      }
+    });
+
+    test('an offer with no claimed size can still be carried on', () async {
+      final s = await _session(partial: (_) async => BigInt.from(500));
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer(size: null));
+      await pumpEventQueue();
+
+      expect(_files(_named(s, '#chat')).single.resumeFrom, BigInt.from(500));
+    });
+
+    test('a lookup that fails costs the card nothing', () async {
+      final s = await _session(partial: (_) async => throw StateError('disk'));
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      await pumpEventQueue();
+
+      final file = _files(_named(s, '#chat')).single;
+      expect(file.resumeFrom, isNull);
+      expect(file.stage, TransferStage.offered);
+    });
+
+    test('an offer is never held up waiting for the disk', () async {
+      final slow = Completer<BigInt?>();
+      final s = await _session(partial: (_) => slow.future);
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+
+      // Already a card, before the lookup has answered.
+      expect(_files(_named(s, '#chat')), hasLength(1));
+      slow.complete(BigInt.from(7));
+      await pumpEventQueue();
+      expect(_files(_named(s, '#chat')).single.resumeFrom, BigInt.from(7));
+    });
+
+    test('a download that dropped says what it kept', () async {
+      final s = await _session(partial: (_) async => BigInt.from(4096));
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      s.receiveForTesting(_started());
+      s.receiveForTesting(_ended(error: 'connection reset'));
+      await pumpEventQueue();
+
+      final file = _files(_named(s, '#chat')).single;
+      expect(file.stage, TransferStage.failed);
+      expect(file.kept, BigInt.from(4096));
+    });
+
+    test('one the user stopped keeps nothing, so says nothing', () async {
+      var asked = 0;
+      final s = await _session(
+        partial: (_) async {
+          asked++;
+          return null;
+        },
+      );
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      await pumpEventQueue();
+      final before = asked;
+      s.receiveForTesting(_started());
+      s.receiveForTesting(_ended(error: FileTransfer.cancelledError));
+      await pumpEventQueue();
+
+      expect(_files(_named(s, '#chat')).single.kept, isNull);
+      expect(asked, before, reason: 'a cancelled download is not looked up');
+    });
+
+    test('a failure sending says nothing about what was kept', () async {
+      var asked = 0;
+      final s = await _session(
+        partial: (_) async {
+          asked++;
+          return BigInt.one;
+        },
+      );
+      _joined(s, '#chat');
+      s.receiveForTesting(_started(incoming: false));
+      s.receiveForTesting(_ended(error: 'connection reset'));
+      await pumpEventQueue();
+
+      expect(_files(_named(s, '#chat')).single.kept, isNull);
+      expect(asked, 0);
+    });
+  });
+
+  group('the card, when resuming', () {
+    late AppSettings settings;
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      settings = await AppSettings.load();
+    });
+
+    Widget host(FileTransfer transfer) => MaterialApp(
+      theme: Tokens.themeFor(Tokens.dark),
+      home: Scaffold(
+        body: Center(
+          child: SizedBox(
+            width: 800,
+            child: FileMessage(
+              transfer: transfer,
+              at: DateTime(2026, 1, 1, 9),
+              settings: settings,
+              showSender: false,
+              onAccept: () {},
+              onCancel: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+
+    FileTransfer offer() => FileTransfer.offered(
+      id: BigInt.one,
+      filename: 'holiday.zip',
+      from: 'alice',
+      total: BigInt.from(12 * 1024 * 1024),
+      isReverse: false,
+    );
+
+    testWidgets('says that pressing the button carries on, and how far it is', (
+      tester,
+    ) async {
+      final transfer = offer()..resumeFrom = BigInt.from(3 * 1024 * 1024);
+      await tester.pumpWidget(host(transfer));
+
+      expect(
+        find.text('alice says 12.0 MB · 3.0 MB already here'),
+        findsOneWidget,
+      );
+      expect(
+        find.bySemanticsLabel('Resume download of holiday.zip'),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('Download holiday.zip'), findsNothing);
+    });
+
+    testWidgets('appears on the card as soon as it is known', (tester) async {
+      final transfer = offer();
+      await tester.pumpWidget(host(transfer));
+      expect(find.text('alice says 12.0 MB'), findsOneWidget);
+
+      transfer.resumeFrom = BigInt.from(1024 * 1024);
+      await tester.pump();
+      expect(
+        find.text('alice says 12.0 MB · 1.0 MB already here'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a download that dropped says what to do about it', (
+      tester,
+    ) async {
+      final transfer = offer()
+        ..begin()
+        ..finish(error: 'the sender stopped after 4 of 12 bytes');
+      transfer.kept = BigInt.from(4 * 1024 * 1024);
+      await tester.pumpWidget(host(transfer));
+
+      expect(
+        find.textContaining('4.0 MB kept. Ask them to send it again'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('and a failure with nothing kept says only why', (
+      tester,
+    ) async {
+      final transfer = offer()
+        ..begin()
+        ..finish(error: 'connection reset');
+      await tester.pumpWidget(host(transfer));
+
+      expect(find.text('connection reset'), findsOneWidget);
+      expect(find.textContaining('kept'), findsNothing);
+    });
+  });
+
+  group('finding a partial file', () {
+    late Directory root;
+    late Directory downloads;
+    late Directory support;
+
+    setUp(() {
+      root = Directory.systemTemp.createTempSync('ddirc-partial-');
+      downloads = Directory('${root.path}${Platform.pathSeparator}Downloads')
+        ..createSync();
+      support = Directory('${root.path}${Platform.pathSeparator}support')
+        ..createSync();
+    });
+    tearDown(() => root.deleteSync(recursive: true));
+
+    String inFolder(Directory base, String folder, String name) =>
+        '${base.path}${Platform.pathSeparator}$folder${Platform.pathSeparator}$name';
+
+    Future<BigInt?> look(String name, TargetPlatform platform) =>
+        receivedPartialBytes(
+          name,
+          platform: platform,
+          downloads: () async => downloads,
+          support: () async => support,
+        );
+
+    test('finds what a computer left in the ddIRC folder', () async {
+      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
+      File(inFolder(downloads, 'ddIRC', 'a.zip.part'))
+          .writeAsBytesSync(List.filled(1234, 1));
+
+      expect(await look('a.zip', TargetPlatform.windows), BigInt.from(1234));
+    });
+
+    test('finds what a phone left in private storage', () async {
+      Directory('${support.path}${Platform.pathSeparator}received')
+          .createSync();
+      File(inFolder(support, 'received', 'a.zip.part'))
+          .writeAsBytesSync(List.filled(77, 1));
+
+      expect(await look('a.zip', TargetPlatform.android), BigInt.from(77));
+    });
+
+    test('knows a name with no extension has one too', () async {
+      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
+      File(inFolder(downloads, 'ddIRC', 'README.part'))
+          .writeAsBytesSync([1, 2]);
+
+      expect(await look('README', TargetPlatform.linux), BigInt.two);
+    });
+
+    test('finds nothing where there is nothing', () async {
+      expect(await look('a.zip', TargetPlatform.windows), isNull);
+
+      Directory('${downloads.path}${Platform.pathSeparator}ddIRC').createSync();
+      File(inFolder(downloads, 'ddIRC', 'empty.zip.part')).createSync();
+      expect(await look('empty.zip', TargetPlatform.windows), isNull);
+    });
+
+    test('never makes a folder just to look in it', () async {
+      await look('a.zip', TargetPlatform.windows);
+      await look('a.zip', TargetPlatform.android);
+
+      expect(
+        Directory('${downloads.path}${Platform.pathSeparator}ddIRC')
+            .existsSync(),
+        isFalse,
+      );
+      expect(
+        Directory('${support.path}${Platform.pathSeparator}received')
+            .existsSync(),
+        isFalse,
+      );
+    });
+
+    test('a folder that cannot be read is no reason to fail', () async {
+      final none = await receivedPartialBytes(
+        'a.zip',
+        platform: TargetPlatform.windows,
+        downloads: () async => throw const FileSystemException('denied'),
+        support: () async => throw const FileSystemException('denied too'),
+      );
+      expect(none, isNull);
     });
   });
 

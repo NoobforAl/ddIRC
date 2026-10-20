@@ -240,9 +240,16 @@ class FileMessage extends StatelessWidget {
         // verified it, and a download that turns out ten times larger should
         // not be able to say it was never flagged.
         final from = transfer.from ?? 'they';
-        return transfer.total == null
+        final claim = transfer.total == null
             ? '$from did not say how big it is'
             : '$from says ${FileTransfer.describeSize(transfer.total)}';
+        // An earlier attempt left part of it here, so pressing the button
+        // carries on instead of starting over. Said before the press, because
+        // it changes what the press does.
+        final have = transfer.resumeFrom;
+        return have == null
+            ? claim
+            : '$claim · ${FileTransfer.describeSize(have)} already here';
       case TransferStage.running:
         // A file we are sending sits at nothing until the other side connects.
         // "0 B / 3.0 MB" reads as stuck; this says what it is actually doing.
@@ -262,7 +269,14 @@ class FileMessage extends StatelessWidget {
         final path = transfer.path;
         return path == null ? size : '$size · ${describeLocation(path)}';
       case TransferStage.failed:
-        return transfer.error ?? 'It did not complete';
+        final reason = transfer.error ?? 'It did not complete';
+        final kept = transfer.kept;
+        // What arrived is still on disk, and the way to finish it is for the
+        // sender to offer the file again — which the card then says carries on.
+        return kept == null
+            ? reason
+            : '$reason · ${FileTransfer.describeSize(kept)} kept. '
+                  'Ask them to send it again to carry on.';
       case TransferStage.declined:
         return 'Declined';
       case TransferStage.cancelled:
@@ -308,7 +322,9 @@ class _RoundButton extends StatelessWidget {
           size: 24,
         );
         onTap = blocked ? null : onAccept;
-        label = 'Download ${transfer.filename}';
+        label = transfer.resumeFrom == null
+            ? 'Download ${transfer.filename}'
+            : 'Resume download of ${transfer.filename}';
       case TransferStage.running:
         fill = t.accent;
         glyph = Stack(

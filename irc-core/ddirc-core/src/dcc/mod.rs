@@ -50,5 +50,5 @@
 pub mod offer;
 pub mod transfer;
 
-pub use offer::{safe_filename, DccOffer};
+pub use offer::{parse_accept, parse_resume, safe_filename, DccOffer, ResumeMessage};
 pub use transfer::{TransferError, TransferEvent};
