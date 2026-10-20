@@ -16,11 +16,19 @@ on:
     tags:
       - "v0.*"
 
-# One release build per tag; nothing here benefits from a second one racing
-# the first.
+# One release build at a time, across all tags: pushing a newer tag cancels the
+# build of an older one still in flight. A release that has been superseded is
+# not worth finishing, and the slow part (Rust cross-compiled per ABI, the
+# Windows installer) is exactly what is worth not paying for twice.
+#
+# The cost is that a build cancelled while it was uploading can leave a release
+# with only some of its assets. The upload is the last step of each job, so
+# that window is short, and the answer is the same as for any bad release:
+# delete it and push the next tag. Re-running a cancelled tag is also possible,
+# as long as no newer tag has been pushed since.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
+  group: release
+  cancel-in-progress: true
 
 permissions:
   contents: write

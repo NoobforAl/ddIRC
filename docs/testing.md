@@ -108,7 +108,9 @@ that after the first run.
 
 `.github/workflows/release.yml` publishes to a GitHub Release when a tag is
 pushed: the **Android APK** and the **Windows installer**, one job each, both
-uploading to the same release. It only ever fires on `v0.*` — not `v*` —
+uploading to the same release. Releases share one concurrency group, so pushing
+a newer tag cancels the build of an older one still running instead of letting
+both finish. It only ever fires on `v0.*` — not `v*` —
 because that is what marks a release as beta in the tag itself: a `v1.0.0`
 push is a claim this pipeline should not be able to make on its own, so
 widening the pattern is left as a deliberate change for when that claim is
