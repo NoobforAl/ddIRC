@@ -7,7 +7,7 @@ import '../../theme.dart';
 import 'settings_chrome.dart';
 import '../motion.dart';
 
-/// Receiving files over DCC, as shown in App settings — beta.
+/// Receiving files over DCC, as shown in App settings.
 ///
 /// The only switch in this dialog that asks before it will turn on, and the
 /// reason is that it is the only one whose cost is not paid by the person
@@ -47,7 +47,6 @@ class _FileTransferSectionState extends State<FileTransferSection> {
 
     return SettingsSection(
       label: 'File transfers',
-      beta: true,
       children: [
         SettingsSwitch(
           label: 'File transfers',
@@ -147,7 +146,7 @@ class _RiskDialog extends StatelessWidget {
 
     return SettingsDialog(
       title: 'Before you turn this on',
-      subtitle: 'File transfers — beta',
+      subtitle: 'File transfers',
       width: 460,
       children: [
         Padding(

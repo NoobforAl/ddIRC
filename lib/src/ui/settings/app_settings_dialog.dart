@@ -219,9 +219,9 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
           SettingsNavRow(
             label: _Page.connection.label,
             summary: _connectionSummary(proxies, server, settings),
-            // Three of the five sections behind this row are beta, and the badge is
-            // on the row because the point of it is to be seen before the feature
-            // is reached rather than after.
+            // Two of the sections behind this row (the local server and agents)
+            // are beta, and the badge is on the row because the point of it is
+            // to be seen before the feature is reached rather than after.
             beta: true,
             onTap: () => _open(_Page.connection),
           ),

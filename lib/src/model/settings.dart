@@ -295,7 +295,7 @@ class AppSettings extends ChangeNotifier {
     _saveDebugLogs = value;
   });
 
-  /// Whether DCC file transfers are offered at all — beta.
+  /// Whether DCC file transfers are offered at all.
   ///
   /// Off, and it takes more than a switch to turn on: the section that owns
   /// it puts the risk in words and waits for an answer first. That is not
