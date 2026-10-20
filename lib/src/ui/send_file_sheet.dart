@@ -174,6 +174,16 @@ class _Note extends StatelessWidget {
   }
 }
 
+/// The first few bytes of [file], or as many as it has.
+Future<Uint8List> _readHead(File file) async {
+  final reader = await file.open();
+  try {
+    return await reader.read(MediaCleaner.headBytes);
+  } finally {
+    await reader.close();
+  }
+}
+
 /// Prepare a picked file for sending.
 ///
 /// Runs the metadata stripper, and — when it actually removed something —
@@ -188,9 +198,30 @@ Future<({String path, CleanedFile cleaned, int size})?> prepareForSending(
   MediaCleaner cleaner,
   String sourcePath,
 ) async {
+  final file = File(sourcePath);
+  final int size;
+  final Uint8List head;
+  try {
+    size = await file.length();
+    head = await _readHead(file);
+  } catch (e) {
+    debugPrint('could not read $sourcePath: $e');
+    return null;
+  }
+
+  // Most files are not photographs, and a file that is not one has nothing to
+  // clean and nothing to gain from being read. Decided from the first few bytes
+  // so that a large archive is a stat and a sixteen-byte read, not a window
+  // that stops responding while gigabytes are copied for a cleaner that was
+  // always going to say "not an image".
+  final skipped = cleaner.withoutReading(head: head, size: size);
+  if (skipped != null) {
+    return (path: sourcePath, cleaned: skipped, size: size);
+  }
+
   final Uint8List bytes;
   try {
-    bytes = await File(sourcePath).readAsBytes();
+    bytes = await file.readAsBytes();
   } catch (e) {
     debugPrint('could not read $sourcePath: $e');
     return null;

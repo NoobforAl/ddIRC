@@ -24,6 +24,11 @@ enum CleanState {
   /// A supported format that would not parse — usually a damaged file.
   damaged,
 
+  /// An image, but too big to be loaded and rewritten, so it is sent as it is.
+  /// Said separately from [notAnImage], because "this is not an image" would be
+  /// untrue and would hide that the protection did not apply.
+  tooLarge,
+
   /// The setting is off, so nothing was attempted.
   notAttempted,
 }
@@ -64,6 +69,7 @@ class CleanedFile {
   bool get carriesUnknownData =>
       state == CleanState.notAnImage ||
       state == CleanState.damaged ||
+      state == CleanState.tooLarge ||
       state == CleanState.notAttempted;
 
   /// One line describing what happened, for a caption under an attachment.
@@ -77,6 +83,8 @@ class CleanedFile {
       'Not an image ddIRC can clean — it will be sent as it is',
     CleanState.damaged =>
       'This file would not open, so nothing was removed from it',
+    CleanState.tooLarge =>
+      'Too large for ddIRC to clean — it will be sent as it is',
     CleanState.notAttempted =>
       'Metadata removal is switched off — this will be sent as it is',
   };
@@ -97,6 +105,60 @@ class MediaCleaner {
 
   static Future<CleanOutcome> _viaCore(Uint8List bytes) =>
       core.cleanMedia(bytes: bytes);
+
+  /// The largest image that is loaded and rewritten.
+  ///
+  /// The whole file goes into memory, across the FFI boundary and into the
+  /// cleaner, and each of those is a copy of it. Photographs are a few
+  /// megabytes and this has ample room above them; anything past it is not a
+  /// photograph worth opening a gigabyte of memory for, and is sent as it is,
+  /// with the confirmation saying so.
+  static const maxCleanableBytes = 64 * 1024 * 1024;
+
+  /// How many leading bytes are enough to tell an image from anything else.
+  static const headBytes = 16;
+
+  /// Whether the first bytes of a file are one of the image formats the cleaner
+  /// rewrites: JPEG, PNG, GIF or WebP.
+  ///
+  /// By the file's own signature, not its name: a `.jpg` that is something
+  /// else should not be handed to an image parser, and a photograph with the
+  /// wrong extension should not skip the cleaning.
+  static bool looksLikeImage(Uint8List head) {
+    bool starts(List<int> signature, [int at = 0]) {
+      if (head.length < at + signature.length) return false;
+      for (var i = 0; i < signature.length; i++) {
+        if (head[at + i] != signature[i]) return false;
+      }
+      return true;
+    }
+
+    return starts(const [0xFF, 0xD8, 0xFF]) || // JPEG
+        starts(const [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) || // PNG
+        starts(const [0x47, 0x49, 0x46, 0x38]) || // GIF8
+        (starts(const [0x52, 0x49, 0x46, 0x46]) &&
+            starts(const [0x57, 0x45, 0x42, 0x50], 8)); // RIFF....WEBP
+  }
+
+  /// The answer for a file that does not need to be read at all, or null when
+  /// it does.
+  ///
+  /// Decided from the first few bytes and the length alone, so that attaching a
+  /// gigabyte archive costs a stat and sixteen bytes instead of a gigabyte of
+  /// memory and a frozen window. The [CleanedFile.bytes] of such an answer are
+  /// empty: nothing was loaded, and the file on disk is the file to send.
+  CleanedFile? withoutReading({required Uint8List head, required int size}) {
+    if (!settings.stripImageMetadata) {
+      return CleanedFile(bytes: Uint8List(0), state: CleanState.notAttempted);
+    }
+    if (!looksLikeImage(head)) {
+      return CleanedFile(bytes: Uint8List(0), state: CleanState.notAnImage);
+    }
+    if (size > maxCleanableBytes) {
+      return CleanedFile(bytes: Uint8List(0), state: CleanState.tooLarge);
+    }
+    return null;
+  }
 
   /// Clean a file, or explain why it was not cleaned.
   ///
