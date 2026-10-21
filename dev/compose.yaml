@@ -143,6 +143,19 @@ services:
       # File upload (XEP-0363). The slot the server hands out points here, and the
       # client uploads to it over HTTPS on its own connection, not over 5223.
       - "127.0.0.1:5443:5443"
+    # ejabberd listens for its control commands on a Unix socket, and first puts a
+    # provisional one under /opt/ejabberd/sockets whose name is base64 of a value
+    # derived from its random Erlang cookie. Base64 can contain a "/", so the
+    # name is often a directory and a file, and ejabberd makes only the directory
+    # level (`make_dir`, not `make_dirs`) - which fails with `enoent`, and the
+    # server does not start, if /opt/ejabberd/sockets is not already there. It is
+    # not in the image. So a first start fails about as often as the cookie
+    # produces a "/", and a machine with a restart policy retries until one does
+    # not: that is how this worked on a laptop and failed on a fresh CI runner,
+    # where `up --wait` gave up on the first unhealthy start. A tmpfs makes the
+    # directory exist, owned by the server, whatever the cookie says.
+    tmpfs:
+      - /opt/ejabberd/sockets:uid=9000,gid=9000,mode=0700
     volumes:
       # Made by xmpp/gen-certs.sh before the first start. The tests trust the
       # sibling localhost.crt directly.
