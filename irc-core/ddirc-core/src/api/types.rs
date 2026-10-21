@@ -95,7 +95,7 @@ impl ProxyConfig {
     /// knows its port.
     pub const TOR_SOCKS_PORT: u16 = 9050;
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    pub(crate) fn validate(&self) -> Result<(), ConfigError> {
         if self.host.trim().is_empty() {
             return Err(ConfigError::EmptyProxyHost);
         }
