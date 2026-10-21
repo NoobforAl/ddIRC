@@ -136,6 +136,12 @@ impl MessageIndex {
         self.entries.retain(|e| e.conversation != conversation);
     }
 
+    /// Forget every conversation whose name begins with `prefix`: the private
+    /// chats inside a room, which are filed as `room/nick`.
+    pub fn forget_conversation_prefix(&mut self, prefix: &str) {
+        self.entries.retain(|e| !e.conversation.starts_with(prefix));
+    }
+
     /// Carry an author's messages over to a new name, for a rename in a room.
     pub fn rename_author(&mut self, conversation: &str, old: &str, new: &str) {
         for e in &mut self.entries {
@@ -351,6 +357,22 @@ mod tests {
         index.rename_author("room", "bob", "robert");
         assert!(index.for_correction("room", "b1", "bob").is_none());
         assert!(index.for_correction("room", "b1", "robert").is_some());
+    }
+
+    #[test]
+    fn forgetting_by_prefix_takes_the_private_chats_of_a_room() {
+        let mut index = MessageIndex::default();
+        index.record(entry("room@c/bob", "room@c/bob", "s1", Some("b1")));
+        index.record(entry("room@c", "bob", "s2", Some("b2")));
+        index.record(entry("room2@c/bob", "room2@c/bob", "s3", Some("b3")));
+        index.forget_conversation_prefix("room@c/");
+        assert!(index
+            .for_correction("room@c/bob", "b1", "room@c/bob")
+            .is_none());
+        assert!(index.for_correction("room@c", "b2", "bob").is_some());
+        assert!(index
+            .for_correction("room2@c/bob", "b3", "room2@c/bob")
+            .is_some());
     }
 
     #[test]

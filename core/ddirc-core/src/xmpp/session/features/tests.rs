@@ -1761,6 +1761,36 @@ fn waiting_requests_start_again_on_a_new_login() {
     ));
 }
 
+#[test]
+fn a_nickname_taken_over_cannot_change_the_last_holders_private_messages() {
+    let mut s = in_room();
+    let from = format!("{MUC}/bob");
+    feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='chat' from='{from}' id='pm1'><body>psst</body></message>"
+        ),
+    );
+    feed(
+        &mut s,
+        &muc_presence("bob", Some("unavailable"), &item("none", "none"), &[]),
+    );
+    feed(
+        &mut s,
+        &muc_presence("bob", None, &item("none", "participant"), &[]),
+    );
+    let fx = feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='chat' from='{from}' id='pm2'><body>rewritten</body>             <replace xmlns='urn:xmpp:message-correct:0' id='pm1'/></message>"
+        ),
+    );
+    assert!(!fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageEdited { .. })));
+}
+
 // Keep `stanza` used: the helpers above build XML and parse it through feed.
 #[test]
 fn the_test_helpers_agree_about_stanzas() {

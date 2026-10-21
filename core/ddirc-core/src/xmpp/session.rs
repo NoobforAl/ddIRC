@@ -974,6 +974,9 @@ impl Session {
             // A rename is announced as the old nick going away.
             if statuses.contains(&Status::NewNick) {
                 if let Some(new) = item.and_then(|i| i.nick.as_deref()).map(clean_name) {
+                    // The old name is free from now, and the private chat filed
+                    // under it must not pass to whoever takes it.
+                    self.index.forget_conversation(&format!("{channel}/{nick}"));
                     room.remove(&nick);
                     room.renaming.insert(new, nick);
                 }
@@ -990,8 +993,11 @@ impl Session {
             // send - and ours, all of it, when we leave.
             if is_self {
                 self.index.forget_conversation(&channel);
+                self.index
+                    .forget_conversation_prefix(&format!("{channel}/"));
             } else {
                 self.index.forget_author(&channel, &nick);
+                self.index.forget_conversation(&format!("{channel}/{nick}"));
             }
             if is_self {
                 self.rooms.remove(jid);
