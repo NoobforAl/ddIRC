@@ -115,7 +115,7 @@ struct Shared {
 }
 
 /// Why a login attempt did not produce a stream.
-enum LoginError {
+pub(crate) enum LoginError {
     Xmpp(Error),
     NoMechanism(BTreeSet<String>),
 }
@@ -132,7 +132,7 @@ impl From<Error> for LoginError {
 /// What `tokio-xmpp` does internally, except that the mechanisms offered to
 /// the library are the ones [`auth::acceptable`] allows, and a server offering
 /// none is an error that says what it offered.
-async fn login(
+pub(crate) async fn login(
     connector: &DirectTlsConnector,
     jid: &Jid,
     password: &str,

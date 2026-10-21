@@ -103,6 +103,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WhoisInfo dco_decode_box_autoadd_whois_info(dynamic raw);
 
   @protected
+  XmppConfig dco_decode_box_autoadd_xmpp_config(dynamic raw);
+
+  @protected
   ChannelListing dco_decode_channel_listing(dynamic raw);
 
   @protected
@@ -271,6 +274,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WhoisInfo dco_decode_whois_info(dynamic raw);
 
   @protected
+  XmppConfig dco_decode_xmpp_config(dynamic raw);
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
@@ -356,6 +362,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   WhoisInfo sse_decode_box_autoadd_whois_info(SseDeserializer deserializer);
+
+  @protected
+  XmppConfig sse_decode_box_autoadd_xmpp_config(SseDeserializer deserializer);
 
   @protected
   ChannelListing sse_decode_channel_listing(SseDeserializer deserializer);
@@ -538,6 +547,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   WhoisInfo sse_decode_whois_info(SseDeserializer deserializer);
 
   @protected
+  XmppConfig sse_decode_xmpp_config(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
@@ -660,6 +672,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_whois_info(
     WhoisInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_xmpp_config(
+    XmppConfig self,
     SseSerializer serializer,
   );
 
@@ -884,6 +902,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_whois_info(WhoisInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_xmpp_config(XmppConfig self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);

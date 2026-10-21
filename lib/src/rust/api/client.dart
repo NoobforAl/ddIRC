@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 import 'types.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connections`, `dev_root_cert`, `prepare`, `runtime`, `send`, `with_connection`
+// These functions are ignored because they are not marked as `pub`: `android_dev_ca`, `connections`, `dev_root_cert`, `prepare_xmpp`, `prepare`, `register`, `runtime`, `send`, `with_connection`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Connection`
 
 /// Connect, register, report what happened, and hang up.
@@ -28,6 +28,30 @@ Future<ProbeReport> testConnection({required ServerConfig config}) =>
 
 Future<BigInt> connect({required ServerConfig config}) =>
     RustLib.instance.api.crateApiClientConnect(config: config);
+
+/// Log in to an XMPP account, report, and hang up.
+///
+/// For the "Test connection" button in the account editor: the same journey a
+/// real connection makes up to and including the login, so a wrong password or
+/// an unreachable server is reported where it was typed. The session is never
+/// opened - no resource is bound and no presence sent - so a test does not
+/// announce the account to anyone. The `Err` side is already a sentence for
+/// the user.
+Future<ProbeReport> testConnectionXmpp({required XmppConfig config}) =>
+    RustLib.instance.api.crateApiClientTestConnectionXmpp(config: config);
+
+/// Open a connection to an XMPP account and return its id.
+///
+/// The id is the same kind of id [`connect`] returns, and everything below -
+/// `event_stream`, `join`, `send_message`, `disconnect` - takes it the same
+/// way, because the XMPP actor takes the same commands and reports the same
+/// events. The caller chooses the protocol once, here.
+///
+/// Validated up front, so a bad address, the plaintext-start port 5222 or a
+/// blank password fail here with a sentence rather than as an opaque error
+/// later.
+Future<BigInt> connectXmpp({required XmppConfig config}) =>
+    RustLib.instance.api.crateApiClientConnectXmpp(config: config);
 
 /// Subscribe to a connection's events. In Dart this returns a `Stream`.
 ///

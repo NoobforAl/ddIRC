@@ -18,7 +18,7 @@ use flutter_rust_bridge::frb;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-use crate::api::types::{CleanOutcome, IrcEvent, ProbeReport, ReplyRef, ServerConfig};
+use crate::api::types::{CleanOutcome, IrcEvent, ProbeReport, ReplyRef, ServerConfig, XmppConfig};
 use crate::frb_generated::StreamSink;
 
 /// The runtime the connection actors live on.
@@ -179,6 +179,66 @@ pub fn connect(config: ServerConfig) -> Result<u64, String> {
     let (handle, events) = actor::spawn(config);
     drop(guard);
 
+    Ok(register(handle, events))
+}
+
+/// Settle the trust anchors for an XMPP account on its way in from Dart.
+///
+/// Shared by [`connect_xmpp`] and [`test_connection_xmpp`], for the reason
+/// [`prepare`] is shared on the IRC side.
+fn prepare_xmpp(config: XmppConfig) -> ddirc_core::xmpp::config::XmppConfig {
+    #[allow(unused_mut)]
+    let mut config: ddirc_core::xmpp::config::XmppConfig = config.into();
+    // The same debug-only extra root as for IRC, for the same reason: a dev
+    // server's certificate genuinely verifies rather than verification being
+    // skipped. See `dev_root_cert`.
+    #[cfg(debug_assertions)]
+    {
+        config.extra_root_cert = dev_root_cert();
+    }
+    config
+}
+
+/// Log in to an XMPP account, report, and hang up.
+///
+/// For the "Test connection" button in the account editor: the same journey a
+/// real connection makes up to and including the login, so a wrong password or
+/// an unreachable server is reported where it was typed. The session is never
+/// opened - no resource is bound and no presence sent - so a test does not
+/// announce the account to anyone. The `Err` side is already a sentence for
+/// the user.
+pub async fn test_connection_xmpp(config: XmppConfig) -> Result<ProbeReport, String> {
+    let config = prepare_xmpp(config);
+    runtime()
+        .spawn(async move { ddirc_core::xmpp::probe::probe(config).await })
+        .await
+        .map_err(|_| "the connection test could not be started".to_owned())?
+        .map(ProbeReport::from)
+}
+
+/// Open a connection to an XMPP account and return its id.
+///
+/// The id is the same kind of id [`connect`] returns, and everything below -
+/// `event_stream`, `join`, `send_message`, `disconnect` - takes it the same
+/// way, because the XMPP actor takes the same commands and reports the same
+/// events. The caller chooses the protocol once, here.
+///
+/// Validated up front, so a bad address, the plaintext-start port 5222 or a
+/// blank password fail here with a sentence rather than as an opaque error
+/// later.
+pub fn connect_xmpp(config: XmppConfig) -> Result<u64, String> {
+    let config = prepare_xmpp(config);
+    config.validate().map_err(|e| e.to_string())?;
+
+    let guard = runtime().enter();
+    let (handle, events) = ddirc_core::xmpp::actor::spawn(config);
+    drop(guard);
+
+    Ok(register(handle, events))
+}
+
+/// Remember a connection and give it an id.
+fn register(handle: ConnectionHandle, events: mpsc::Receiver<CoreEvent>) -> u64 {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
 
@@ -192,7 +252,7 @@ pub fn connect(config: ServerConfig) -> Result<u64, String> {
                 events: Some(events),
             },
         );
-    Ok(id)
+    id
 }
 
 /// Subscribe to a connection's events. In Dart this returns a `Stream`.

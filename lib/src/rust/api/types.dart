@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -755,4 +755,66 @@ class WhoisInfo {
           away == other.away &&
           operator_ == other.operator_ &&
           secure == other.secure;
+}
+
+/// How to reach an XMPP account.
+///
+/// Separate from [`ServerConfig`] rather than a variant of it, because they
+/// describe different things: an IRC network is a host and a nick, an XMPP
+/// account is an address whose server is usually worked out from it. TLS is not
+/// configurable here either. The password arrives as a plain string from Dart
+/// and is moved into zeroizing storage on the Rust side immediately.
+class XmppConfig {
+  /// The account, as `name@example.org`.
+  final String jid;
+  final String password;
+
+  /// Where to dial when that is not the address's own domain. TLS is still
+  /// verified against the domain in `jid`.
+  final String? host;
+  final int? port;
+
+  /// Rooms to join once online, as `room@conference.example.org`.
+  final List<String> rooms;
+
+  /// The nick to use in rooms. Defaults to the part of the address before
+  /// the `@`.
+  final String? nickname;
+
+  /// Dial through this proxy rather than connecting directly. There is no
+  /// fallback: if it is set and unreachable, the connection fails.
+  final ProxyConfig? proxy;
+
+  const XmppConfig({
+    required this.jid,
+    required this.password,
+    this.host,
+    this.port,
+    required this.rooms,
+    this.nickname,
+    this.proxy,
+  });
+
+  @override
+  int get hashCode =>
+      jid.hashCode ^
+      password.hashCode ^
+      host.hashCode ^
+      port.hashCode ^
+      rooms.hashCode ^
+      nickname.hashCode ^
+      proxy.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is XmppConfig &&
+          runtimeType == other.runtimeType &&
+          jid == other.jid &&
+          password == other.password &&
+          host == other.host &&
+          port == other.port &&
+          rooms == other.rooms &&
+          nickname == other.nickname &&
+          proxy == other.proxy;
 }
