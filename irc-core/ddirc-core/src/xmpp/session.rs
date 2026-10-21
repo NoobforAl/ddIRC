@@ -164,7 +164,7 @@ impl Session {
             default_nick,
             rooms: HashMap::new(),
             pending: HashMap::new(),
-            id_prefix: format!("ddirc{:08x}", rand::random::<u32>()),
+            id_prefix: format!("ddirc{:016x}", rand::random::<u64>()),
             counter: 0,
         };
         for room in &config.rooms {
@@ -590,16 +590,22 @@ impl Session {
             return false;
         };
         let Some(from) = from else {
-            // No `from` means the server itself, or our own account's server on
-            // its behalf.
-            return !matches!(pending, Pending::Kick { .. });
+            // No `from` means our own server speaking for itself. That is who
+            // answers about the roster and carbons, and it is not who answers
+            // for a room.
+            return matches!(pending, Pending::Roster | Pending::Carbons);
         };
-        let from = from.to_bare();
+        let bare = from.to_bare();
         match pending {
-            Pending::Kick { room } | Pending::CatchUp { room, .. } => &from == room,
+            // A room's answer is from the room itself - its address and no
+            // resource. A resource is an *occupant*, anyone who joined, and
+            // would otherwise be able to answer for the room by guessing an id.
+            Pending::Kick { room } | Pending::CatchUp { room, .. } => {
+                from.resource().is_none() && &bare == room
+            }
             Pending::Roster | Pending::Carbons => {
-                from == self.account
-                    || from.domain() == self.account.domain() && from.node().is_none()
+                bare == self.account
+                    || bare.domain() == self.account.domain() && bare.node().is_none()
             }
         }
     }
