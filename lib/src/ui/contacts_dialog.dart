@@ -297,33 +297,52 @@ class _RequestRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final address = Text(
+      jid,
+      style: TextStyle(color: t.text, fontSize: 14),
+      overflow: TextOverflow.ellipsis,
+    );
+    final buttons = [
+      TextButton(
+        onPressed: onDecline,
+        style: TextButton.styleFrom(foregroundColor: t.muted),
+        child: const Text('Decline'),
+      ),
+      FilledButton(
+        onPressed: onAccept,
+        style: FilledButton.styleFrom(
+          backgroundColor: t.accent,
+          foregroundColor: t.onAccent,
+          elevation: 0,
+        ),
+        child: const Text('Accept'),
+      ),
+    ];
+    // Side by side when there is room, and the buttons under the address when
+    // there is not: with text turned up, the two buttons alone are most of a
+    // phone's width, and an address squeezed between them and the edge is
+    // nothing but an ellipsis.
+    final large = MediaQuery.textScalerOf(context).scale(1) > 1.2;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 4, 12, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              jid,
-              style: TextStyle(color: t.text, fontSize: 14),
-              overflow: TextOverflow.ellipsis,
+      child: large
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                address,
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  children: buttons,
+                ),
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(child: address),
+                ...buttons,
+              ],
             ),
-          ),
-          TextButton(
-            onPressed: onDecline,
-            style: TextButton.styleFrom(foregroundColor: t.muted),
-            child: const Text('Decline'),
-          ),
-          FilledButton(
-            onPressed: onAccept,
-            style: FilledButton.styleFrom(
-              backgroundColor: t.accent,
-              foregroundColor: t.onAccent,
-              elevation: 0,
-            ),
-            child: const Text('Accept'),
-          ),
-        ],
-      ),
     );
   }
 }
