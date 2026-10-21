@@ -1,17 +1,14 @@
 # Lint only. The suites run in test.yml, so a formatting slip and a broken
 # test report as two different failures rather than one red tick.
+#
+# Called by ci.yml (and release.yml), never started by an event of its own: what
+# decides *when* anything runs, and in what order, is ci.yml, so that a build is
+# never started for a change that does not pass this.
 name: Lint
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-
-# A new push supersedes the run already in flight. Nothing here is worth
-# finishing twice.
-concurrency:
-  group: lint-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,29 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      # Both toolchains are pinned rather than floating. `make lint` runs clippy
-      # with `-D warnings`, so a lint newly added in a toolchain release would
-      # fail CI on code that has not changed — which is the project's stated
-      # posture for dependencies anyway.
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
+      # Both toolchains are pinned (see the setup action) rather than floating.
+      # `make lint` runs clippy with `-D warnings`, so a lint newly added in a
+      # toolchain release would fail CI on code that has not changed - which is
+      # the project's stated posture for dependencies anyway.
+      - uses: ./.github/actions/setup
         with:
-          toolchain: "1.99.1"
-          components: rustfmt, clippy
-
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: "3.47.7"
-          channel: stable
-          cache: true
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          # The Cargo workspace is one level down.
-          workspaces: core
-
-      - run: flutter pub get
+          rust-components: rustfmt, clippy
 
       # One target rather than three steps. The Makefile is the single source of
-      # truth for what "clean" means — its own comment says this is what CI
-      # should run — so a local check and CI cannot drift apart.
+      # truth for what "clean" means - its own comment says this is what CI
+      # should run - so a local check and CI cannot drift apart.
       - run: make lint

@@ -94,7 +94,8 @@ CLI       := $(CARGO) run $(MANIFEST) -p ddirc-cli --
 .DEFAULT_GOAL := help
 .PHONY: help outdated fix fmt lint test test-integration dev build build-release installer check-iscc \
         build-android build-android-release keystore keystore-secrets \
-        build-linux build-macos build-ios codegen icons clean \
+        build-linux build-linux-release installer-linux test-installer-linux \
+        build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
         dev-xmpp dev-xmpp-stop test-integration-xmpp \
         dev-proxy dev-tor dev-tor-logs dev-onion-cert \
@@ -116,6 +117,8 @@ help:
 	@echo "  make build-android-release   release APK — the thing that ships"
 	@echo "  make keystore          make a release signing key, under android/"
 	@echo "  make keystore-secrets  push that key to GitHub Actions secrets"
+	@echo "  make installer-linux   per-user Linux installer (.sh), on a Linux host"
+	@echo "  make test-installer-linux   install, upgrade and uninstall it in a temp home"
 	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
 	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
@@ -223,8 +226,11 @@ build:
 # above android/app/build.gradle.kts's signingConfigs block. Debug-signed is
 # fine for a beta people sideload and not fine for a store; `make keystore`
 # is the way off that.
+# ANDROID_TARGET narrows it to one ABI (android-arm64, android-arm,
+# android-x64). CI sets it: a compile check does not need Rust built three
+# times, and the Rust cross-compile is most of the time this takes.
 build-android:
-	$(FLUTTER) build apk --debug
+	$(FLUTTER) build apk --debug $(if $(ANDROID_TARGET),--target-platform $(ANDROID_TARGET))
 
 build-android-release:
 	$(FLUTTER) build apk --release
@@ -284,6 +290,26 @@ keystore-secrets:
 ## See docs/building.md: they are scaffolded and configured, not proven.
 build-linux:
 	$(FLUTTER) build linux --debug
+
+## A Linux release build, and a per-user installer around it.
+#
+# The installer is one self-extracting .sh: a stub plus the bundle. It installs
+# into ~/.local for the person running it, never asks for root, and refuses to
+# run as root - the Linux half of what windows/installer/ddirc.iss does. It is
+# not a portable archive on purpose: an install puts a menu entry, an icon and
+# an uninstaller where the desktop looks for them.
+LINUX_BUNDLE := build/linux/x64/release/bundle
+
+build-linux-release:
+	$(FLUTTER) build linux --release
+
+installer-linux: build-linux-release
+	linux/installer/build-installer.sh $(LINUX_BUNDLE) $(APP_VERSION) assets/icon/ddirc.png build/installer
+
+## Install, upgrade and uninstall an installer in a temp home. With no
+## INSTALLER it builds one around a fake app, so no Flutter build is needed.
+test-installer-linux:
+	bash linux/installer/smoke-test.sh $(INSTALLER)
 
 build-macos:
 	$(FLUTTER) build macos --debug

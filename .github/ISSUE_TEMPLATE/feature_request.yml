@@ -1,0 +1,61 @@
+name: Feature request
+description: Something the app should do, or do differently.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is a small project with a strong opinion about what it will and will
+        not send about you (see SECURITY.md and docs/privacy.md). A request that
+        starts from what you are trying to do — rather than from a particular
+        button — is easier to fit in.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation, not the solution. "I want to know when X without Y" rather than "add a Z button".
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you have in mind
+      description: How it might work, if you have thought about it. Rough is fine.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today
+      description: Another client, a workaround, or nothing.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol
+      options:
+        - IRC
+        - XMPP
+        - Both
+        - Not specific to one (app, installer, platform)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sends
+    attributes:
+      label: Would it send anything new, or to anyone new?
+      description: Presence, typing, receipts, a file, a request to a third party. Honest "not sure" is fine; it is the question that decides how a feature is built.
+      options:
+        - No, it is all on this device
+        - It sends something new to the server I am already connected to
+        - It involves a third party or a new kind of connection
+        - Not sure
+    validations:
+      required: true

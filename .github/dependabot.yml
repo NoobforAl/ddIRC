@@ -39,7 +39,12 @@ updates:
       - dependency-name: "rusqlite"
 
   - package-ecosystem: "github-actions"
-    directory: "/"
+    # The workflows, and the composite actions under .github/actions, which pin
+    # the toolchains: a pin in a file Dependabot does not read is one nobody
+    # is told is stale.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "cron"
       cronjob: "0 6 1 */2 *"

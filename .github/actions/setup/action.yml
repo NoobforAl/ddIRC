@@ -1,0 +1,55 @@
+# The toolchains every job needs, in one place.
+#
+# Rust and Flutter were pinned by hand in nine jobs across four workflows, each
+# with the same two SHAs and the same two version numbers. A bump meant nine
+# edits and a real chance of nine jobs on two different compilers - which is how
+# a lint passes in one job and fails in the next. Now the versions are written
+# here, once.
+#
+# Dependabot watches this directory as well as the workflows (see
+# dependabot.yml), so the pins below are kept fresh like any other.
+name: Set up toolchains
+description: Rust (pinned), its cache, Flutter (pinned) and `flutter pub get`.
+
+inputs:
+  rust-components:
+    description: "Extra Rust components, comma separated (rustfmt, clippy)."
+    default: ""
+  rust-targets:
+    description: "Extra Rust targets, comma separated."
+    default: ""
+  flutter:
+    description: "Install Flutter and fetch the Dart packages. 'false' for a Rust-only job."
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
+      with:
+        toolchain: "1.99.1"
+        components: ${{ inputs.rust-components }}
+        targets: ${{ inputs.rust-targets }}
+
+    # Saved only from `main` and from release tags. A pull request restores what
+    # main last saved and adds nothing: otherwise every PR writes a cache of its
+    # own, they evict each other and main's within the repository's 10 GB, and
+    # the builds that most need a warm cache - the next one on main - find it
+    # gone. The cost is that a PR which changes a dependency compiles that
+    # dependency again; the saving is that nothing else does.
+    - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        # The Cargo workspace is one level down.
+        workspaces: core
+        save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+
+    - if: inputs.flutter == 'true'
+      uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+      with:
+        flutter-version: "3.47.7"
+        channel: stable
+        cache: true
+
+    - if: inputs.flutter == 'true'
+      shell: bash
+      run: flutter pub get

@@ -1,18 +1,24 @@
 # The test suites. Lint is a separate workflow, so a formatting slip and a
 # broken test report as two different failures rather than one red tick.
+#
+# Called by ci.yml (and release.yml), never started by an event of its own: what
+# decides *when* anything runs, and in what order, is ci.yml, so that a build is
+# never started for a change that does not pass this.
 name: Test
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-
-concurrency:
-  group: test-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  # Line tables and no more. Full debuginfo for a test binary is most of what the
+  # linker is asked to write and nothing here reads a debugger's output, while a
+  # backtrace still names the line that panicked. Faster to link, and a smaller
+  # cache to save and restore.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   # Everything that needs no network and no Docker: the Dart widget tests and
@@ -23,27 +29,14 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
-        with:
-          toolchain: "1.99.1"
-
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: "3.47.7"
-          channel: stable
-          cache: true
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
+      - uses: ./.github/actions/setup
 
       # `flutter test` builds every dependency's native assets, and the tray
-      # package (tray_manager 0.8, through cnativeapi) compiles against GTK 3,
-      # X11 and Xi on Linux. Windows and Android do not need them, which is why
-      # only this job does.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev libx11-dev libxi-dev pkg-config
-
-      - run: flutter pub get
+      # package compiles against GTK 3, X11 and Xi on Linux. Windows and Android
+      # do not need them, which is why only this job does.
+      - uses: ./.github/actions/linux-deps
+        with:
+          build: "false"
 
       # The Makefile target, not the two commands it runs. Same reason `make
       # lint` is called rather than restated: a local check and CI cannot drift
@@ -62,13 +55,10 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
+      # Rust only: this suite never touches Dart.
+      - uses: ./.github/actions/setup
         with:
-          toolchain: "1.99.1"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
+          flutter: "false"
 
       # `--wait` blocks on the healthcheck, so the suite can start the instant
       # this returns.

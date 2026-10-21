@@ -1,0 +1,213 @@
+#!/bin/sh
+# ddIRC - installer for Linux.
+#
+# One file: this script, followed by the application as a compressed archive.
+# `make installer-linux` builds it; nothing here is generated at install time.
+#
+# It installs for the person running it, into their own home, and never asks for
+# administrator rights - the same decision the Windows installer makes, for the
+# same reason. ddIRC opens sockets and writes its own settings; an installer that
+# wants root is asking to be trusted with the whole machine in order to put a
+# chat client on it. Run as root it refuses, rather than quietly installing
+# somewhere only root can undo.
+#
+#   sh ddIRC-<version>-linux-x64-installer.sh               install or upgrade
+#   sh ddIRC-<version>-linux-x64-installer.sh --uninstall   remove it
+#   sh ddIRC-<version>-linux-x64-installer.sh --prefix DIR  somewhere other than ~/.local
+#   sh ddIRC-<version>-linux-x64-installer.sh --help
+#
+# Layout, all under the prefix (default ~/.local):
+#
+#   share/ddirc/                                 the application
+#   bin/ddirc                                    a link to it, for the shell
+#   bin/ddirc-uninstall                          a link to the uninstaller
+#   share/applications/dev.ddirc.ddirc.desktop   the menu entry
+#   share/icons/hicolor/512x512/apps/dev.ddirc.ddirc.png
+#
+# Settings, saved networks, history and logs live in the user's own data
+# directories and are not the installer's: uninstalling removes the program and
+# leaves them where they were, so reinstalling finds them. Anyone who wants them
+# gone can delete them, which is something they can see and decide about.
+set -eu
+
+VERSION="@VERSION@"
+PAYLOAD_SHA256="@PAYLOAD_SHA256@"
+APP_ID="dev.ddirc.ddirc"
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'ddIRC installer: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<EOF
+ddIRC $VERSION installer for Linux
+
+Usage: sh $(basename "$0") [--prefix DIR] [--uninstall] [--help]
+
+Installs ddIRC for the current user, without administrator rights, into
+\$HOME/.local (or DIR). Run it again to upgrade, or with --uninstall to remove
+it. Your settings and saved networks are never touched.
+EOF
+}
+
+PREFIX="${HOME:-}/.local"
+ACTION=install
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --prefix) [ $# -ge 2 ] || die "--prefix needs a directory"; PREFIX="$2"; shift 2 ;;
+    --prefix=*) PREFIX="${1#--prefix=}"; shift ;;
+    --uninstall) ACTION=uninstall; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "unknown option: $1 (try --help)" ;;
+  esac
+done
+
+[ "$(id -u)" -ne 0 ] || die "run this as your own user, not as root. It installs for you only, into your home."
+[ -n "$PREFIX" ] || die "no home directory: pass --prefix DIR"
+case "$PREFIX" in /*) ;; *) die "--prefix must be an absolute path" ;; esac
+# The paths are written into scripts and a menu entry inside quotes. One that
+# could end the quote is refused rather than escaped around.
+case "$PREFIX" in
+  *"'"* | *'"'* | *'`'* | *'$'* | *'
+'*) die "--prefix may not contain quotes, backticks, dollar signs or newlines." ;;
+esac
+
+APP_DIR="$PREFIX/share/ddirc"
+BIN_DIR="$PREFIX/bin"
+DESKTOP_DIR="$PREFIX/share/applications"
+ICON_DIR="$PREFIX/share/icons/hicolor/512x512/apps"
+DESKTOP_FILE="$DESKTOP_DIR/$APP_ID.desktop"
+ICON_FILE="$ICON_DIR/$APP_ID.png"
+
+refresh_caches() {
+  # Best effort: both only make the menu entry and icon show up sooner.
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+  command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -f -t "$PREFIX/share/icons/hicolor" >/dev/null 2>&1 || true
+}
+
+# Remove only what this installer put there. A link is removed only if it points
+# where ours does: something else of the same name is not ours to delete.
+uninstall() {
+  removed=0
+  if [ -L "$BIN_DIR/ddirc" ] && [ "$(readlink "$BIN_DIR/ddirc")" = "$APP_DIR/ddirc" ]; then rm -f "$BIN_DIR/ddirc"; removed=1; fi
+  if [ -L "$BIN_DIR/ddirc-uninstall" ] && [ "$(readlink "$BIN_DIR/ddirc-uninstall")" = "$APP_DIR/uninstall.sh" ]; then rm -f "$BIN_DIR/ddirc-uninstall"; removed=1; fi
+  if [ -f "$DESKTOP_FILE" ]; then rm -f "$DESKTOP_FILE"; removed=1; fi
+  if [ -f "$ICON_FILE" ]; then rm -f "$ICON_FILE"; removed=1; fi
+  if [ -d "$APP_DIR" ]; then rm -rf "$APP_DIR"; removed=1; fi
+  refresh_caches
+  if [ "$removed" -eq 1 ]; then
+    say "ddIRC removed from $PREFIX."
+    say "Your settings and saved networks were left alone."
+  else
+    say "ddIRC is not installed under $PREFIX."
+  fi
+}
+
+if [ "$ACTION" = uninstall ]; then
+  uninstall
+  exit 0
+fi
+
+# ---- install ---------------------------------------------------------------
+
+[ "$(uname -s)" = Linux ] || die "this installer is for Linux."
+[ "$(uname -m)" = x86_64 ] || die "this build is for x86_64; this machine is $(uname -m)."
+
+# Where the archive starts: the line after the marker, which is the last line of
+# the script proper. Found by search so a stray edit above cannot move it.
+PAYLOAD_LINE="$(awk '/^__DDIRC_PAYLOAD_BELOW__$/ { print NR + 1; exit }' "$0")"
+[ -n "$PAYLOAD_LINE" ] || die "this file is damaged: the application is missing from it."
+
+if command -v sha256sum >/dev/null 2>&1; then
+  actual="$(tail -n +"$PAYLOAD_LINE" "$0" | sha256sum | cut -d' ' -f1)"
+elif command -v shasum >/dev/null 2>&1; then
+  actual="$(tail -n +"$PAYLOAD_LINE" "$0" | shasum -a 256 | cut -d' ' -f1)"
+else
+  die "cannot check the download: no sha256sum on this machine."
+fi
+[ "$actual" = "$PAYLOAD_SHA256" ] || die "this file is damaged or was changed after it was built (checksum mismatch). Download it again."
+
+say "Installing ddIRC $VERSION into $PREFIX ..."
+
+# Unpacked beside the final place and moved in, so an interrupted install leaves
+# the previous version working rather than half of two.
+mkdir -p "$PREFIX/share" "$BIN_DIR" "$DESKTOP_DIR" "$ICON_DIR"
+STAGE="$(mktemp -d "$PREFIX/share/.ddirc-install.XXXXXX")"
+trap 'rm -rf "$STAGE"' EXIT INT TERM
+tail -n +"$PAYLOAD_LINE" "$0" | tar -xzf - -C "$STAGE" || die "could not unpack the application."
+[ -x "$STAGE/ddirc" ] || die "the application is missing its program file."
+
+# Libraries the system has to provide. Reported, not fatal: a missing one is
+# better named now than discovered as a window that never opens.
+if command -v ldd >/dev/null 2>&1; then
+  missing="$(ldd "$STAGE/ddirc" 2>/dev/null | awk '/not found/ { print $1 }' | sort -u | tr '\n' ' ')"
+  if [ -n "$missing" ]; then
+    say "Warning: this system is missing libraries ddIRC needs: $missing"
+    say "         Install them with your package manager (GTK 3 and its dependencies)."
+  fi
+fi
+
+# The uninstaller, with this prefix written into it.
+{
+  echo '#!/bin/sh'
+  echo "# Removes ddIRC from $PREFIX. Settings and saved networks are kept."
+  echo 'set -eu'
+  echo "PREFIX='$PREFIX'"
+  echo "APP_DIR='$APP_DIR'"
+  echo "BIN_DIR='$BIN_DIR'"
+  echo "DESKTOP_FILE='$DESKTOP_FILE'"
+  echo "ICON_FILE='$ICON_FILE'"
+  echo "DESKTOP_DIR='$DESKTOP_DIR'"
+  echo 'if [ -L "$BIN_DIR/ddirc" ] && [ "$(readlink "$BIN_DIR/ddirc")" = "$APP_DIR/ddirc" ]; then rm -f "$BIN_DIR/ddirc"; fi'
+  echo 'if [ -L "$BIN_DIR/ddirc-uninstall" ] && [ "$(readlink "$BIN_DIR/ddirc-uninstall")" = "$APP_DIR/uninstall.sh" ]; then rm -f "$BIN_DIR/ddirc-uninstall"; fi'
+  echo 'rm -f "$DESKTOP_FILE" "$ICON_FILE"'
+  echo 'command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true'
+  echo 'cd / && rm -rf "$APP_DIR"'
+  echo 'echo "ddIRC removed from $PREFIX. Your settings and saved networks were left alone."'
+} > "$STAGE/uninstall.sh"
+chmod 755 "$STAGE/uninstall.sh"
+
+# Put the new copy in place, keeping the old one until the new one is there.
+OLD=""
+if [ -e "$APP_DIR" ]; then
+  OLD="$APP_DIR.old.$$"
+  mv "$APP_DIR" "$OLD"
+fi
+if ! mv "$STAGE" "$APP_DIR"; then
+  [ -z "$OLD" ] || mv "$OLD" "$APP_DIR"
+  die "could not put the application in place."
+fi
+trap - EXIT INT TERM
+[ -z "$OLD" ] || rm -rf "$OLD"
+
+# The icon, then the menu entry that names it.
+cp "$APP_DIR/ddirc.png" "$ICON_FILE"
+cat > "$DESKTOP_FILE" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=ddIRC
+GenericName=Chat client
+Comment=A minimal chat client for IRC and XMPP
+Exec="$APP_DIR/ddirc"
+TryExec=$APP_DIR/ddirc
+Icon=$APP_ID
+Terminal=false
+Categories=Network;Chat;InstantMessaging;
+Keywords=irc;xmpp;chat;
+StartupWMClass=$APP_ID
+DESKTOP
+
+ln -sf "$APP_DIR/ddirc" "$BIN_DIR/ddirc"
+ln -sf "$APP_DIR/uninstall.sh" "$BIN_DIR/ddirc-uninstall"
+refresh_caches
+
+say "Installed ddIRC $VERSION."
+say "  Start it from the application menu, or run: ddirc"
+case ":${PATH:-}:" in
+  *":$BIN_DIR:"*) ;;
+  *) say "  Note: $BIN_DIR is not on your PATH, so 'ddirc' will not be found by name"
+     say "        until it is. The menu entry works regardless." ;;
+esac
+say "  To remove it: ddirc-uninstall  (your settings and saved networks are kept)"
+exit 0
+__DDIRC_PAYLOAD_BELOW__

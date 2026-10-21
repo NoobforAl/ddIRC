@@ -1,0 +1,112 @@
+# The pipeline: what runs, in what order, and what stops what.
+#
+# Lint, Test and Build are workflows of their own so each can be read, run by
+# hand and reused - and release.yml reuses them - but none of them starts on an
+# event. This file does, and it decides the order:
+#
+#       changes ──┬── lint ──┐
+#                 └── test ──┴── build ── ci
+#
+# **A build is never started for a change that does not pass lint and the
+# tests.** Build is the slow one - Rust cross-compiled, a Windows installer, a
+# Linux one - and a change that fails a formatter or a test would otherwise pay
+# for all of it before anyone read the first red mark. Lint and test run side by
+# side, so the wait for them is the longer of the two, not the sum.
+#
+# **A change that touches only documentation runs nothing.** `changes` reads
+# which files changed; when every one is prose, the three jobs are skipped, and
+# a skipped job counts as passing for a required check. (The workflow-level
+# `paths-ignore` is not used for this: it would leave a required check waiting
+# for ever on a change it skipped.)
+#
+# **`ci` is the one check to require.** It succeeds when everything that ran
+# succeeded and when what was skipped was meant to be, and fails when anything
+# failed or was cancelled. Branch protection can ask for it alone instead of a
+# list of jobs that changes whenever a job is added.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes the run already in flight. Nothing here is worth
+# finishing twice, and the slow part is exactly what is worth not paying for
+# twice. On `main` every push is kept, so a merge is never hidden by the next.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.which.outputs.code }}
+    steps:
+      # Asked of the API rather than computed from a checkout: a pull request's
+      # file list is one call, and nothing has to be fetched.
+      - id: which
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          PR: ${{ github.event.pull_request.number }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          files=""
+          if [ "$EVENT" = pull_request ]; then
+            files="$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' || true)"
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            files="$(gh api "repos/$REPO/compare/$BEFORE...$AFTER" --jq '.files[].filename' || true)"
+          fi
+          # Anything unknown is code: not being able to tell is not a reason to
+          # skip the checks. Prose is Markdown, the licence, the issue forms and
+          # Dependabot's own configuration.
+          if [ -z "$files" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; echo "no file list: running everything"; exit 0
+          fi
+          if printf '%s\n' "$files" | grep -Ev '(^docs/|\.md$|^LICENSE$|^\.github/ISSUE_TEMPLATE/|^\.github/dependabot\.yml$)' | grep -q .; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"; echo "only documentation changed: nothing to run"
+          fi
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/lint.yml
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/test.yml
+
+  # Only after both. If either fails this is skipped, not run: the default for a
+  # job whose `needs` did not succeed, and the whole point.
+  build:
+    needs: [changes, lint, test]
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/build.yml
+
+  ci:
+    if: always()
+    needs: [changes, lint, test, build]
+    runs-on: ubuntu-latest
+    steps:
+      # Skipped is fine - a documentation-only change skips all three - but a
+      # failure or a cancellation is not. `contains` over the results rather
+      # than a check per job, so a job added above is covered by adding it to
+      # `needs`.
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          case " $RESULTS " in *" failure "*|*" cancelled "*) exit 1 ;; esac
