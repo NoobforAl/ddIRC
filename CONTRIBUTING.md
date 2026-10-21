@@ -57,10 +57,10 @@ make test-integration
 Much of this codebase is load-bearing in ways that are not local. The parts
 where a small change reaches furthest:
 
-- **`irc-core/ddirc-core/src/conn/`** — the connection actor and its `select!`
+- **`core/ddirc-core/src/conn/`** — the connection actor and its `select!`
   loop. Ordering, cancellation and timeouts here decide whether a client hangs
   or recovers, and none of it is visible from the call site.
-- **The FFI boundary** (`irc-core/ddirc-bridge/`, and the generated Dart under
+- **The FFI boundary** (`core/ddirc-bridge/`, and the generated Dart under
   `lib/src/rust/`). Generated code is committed so CI needs no codegen
   toolchain; regenerate with `make codegen` and commit the result in the same
   change that caused it, never separately.

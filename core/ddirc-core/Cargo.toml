@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Reusable IRC client core for ddIRC (connection, TLS, protocol, state)."
+description = "Reusable chat client core for ddIRC: IRC and XMPP (connection, TLS, protocol, state)."
 
 [lib]
 crate-type = ["cdylib", "staticlib", "lib"]

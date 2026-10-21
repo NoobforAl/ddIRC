@@ -9,7 +9,7 @@ set(PROJECT_NAME "ddirc_bridge")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
 include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(${PROJECT_NAME} ../../irc-core/ddirc-bridge ddirc_bridge "")
+apply_cargokit(${PROJECT_NAME} ../../core/ddirc-bridge ddirc_bridge "")
 target_link_libraries(${BINARY_NAME} PRIVATE "${${PROJECT_NAME}_cargokit_lib}")
 
 # List of absolute paths to libraries that should be bundled with the plugin.
