@@ -181,6 +181,74 @@ Future<void> cancelTransfer({required BigInt id, required BigInt transferId}) =>
       transferId: transferId,
     );
 
+/// Ask to see when `jid` is online, and put them on the contact list. XMPP only.
+Future<void> addContact({
+  required BigInt id,
+  required String jid,
+  String? name,
+}) =>
+    RustLib.instance.api.crateApiClientAddContact(id: id, jid: jid, name: name);
+
+/// Take `jid` off the contact list. XMPP only.
+Future<void> removeContact({required BigInt id, required String jid}) =>
+    RustLib.instance.api.crateApiClientRemoveContact(id: id, jid: jid);
+
+/// Say yes or no to someone who asked to see when we are online. XMPP only.
+///
+/// The core answers only a request it reported: a yes to anyone else is
+/// refused, so this cannot be used to tell a stranger we are here.
+Future<void> answerSubscription({
+  required BigInt id,
+  required String jid,
+  required bool accept,
+}) => RustLib.instance.api.crateApiClientAnswerSubscription(
+  id: id,
+  jid: jid,
+  accept: accept,
+);
+
+/// Say how we are: here, away, busy. XMPP only.
+Future<void> setAvailability({
+  required BigInt id,
+  required Availability availability,
+  String? status,
+}) => RustLib.instance.api.crateApiClientSetAvailability(
+  id: id,
+  availability: availability,
+  status: status,
+);
+
+/// Replace the text of a message we sent. XMPP only.
+Future<void> editMessage({
+  required BigInt id,
+  required String target,
+  required String msgid,
+  required String text,
+}) => RustLib.instance.api.crateApiClientEditMessage(
+  id: id,
+  target: target,
+  msgid: msgid,
+  text: text,
+);
+
+/// Take back a message we sent. XMPP only.
+Future<void> retractMessage({
+  required BigInt id,
+  required String target,
+  required String msgid,
+}) => RustLib.instance.api.crateApiClientRetractMessage(
+  id: id,
+  target: target,
+  msgid: msgid,
+);
+
+/// Fetch chats from the server's archive since a time, in Unix milliseconds.
+/// XMPP only; ignored when the connection already knows where to resume.
+Future<void> catchUpChats({
+  required BigInt id,
+  required PlatformInt64 sinceMs,
+}) => RustLib.instance.api.crateApiClientCatchUpChats(id: id, sinceMs: sinceMs);
+
 /// Stop waiting out the reconnect backoff and try again now.
 ///
 /// Does nothing unless the connection is actually waiting, so it is safe to

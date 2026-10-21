@@ -18,7 +18,9 @@ use flutter_rust_bridge::frb;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 
-use crate::api::types::{CleanOutcome, IrcEvent, ProbeReport, ReplyRef, ServerConfig, XmppConfig};
+use crate::api::types::{
+    Availability, CleanOutcome, IrcEvent, ProbeReport, ReplyRef, ServerConfig, XmppConfig,
+};
 use crate::frb_generated::StreamSink;
 
 /// The runtime the connection actors live on.
@@ -390,6 +392,68 @@ pub fn accept_file(id: u64, transfer_id: u64, directory: String) -> Result<(), S
 /// what "reported, never answered" buys.
 pub fn cancel_transfer(id: u64, transfer_id: u64) -> Result<(), String> {
     send(id, ClientCommand::CancelTransfer { id: transfer_id })
+}
+
+/// Ask to see when `jid` is online, and put them on the contact list. XMPP only.
+pub fn add_contact(id: u64, jid: String, name: Option<String>) -> Result<(), String> {
+    send(
+        id,
+        ClientCommand::AddContact {
+            jid,
+            name: name.filter(|n| !n.trim().is_empty()),
+        },
+    )
+}
+
+/// Take `jid` off the contact list. XMPP only.
+pub fn remove_contact(id: u64, jid: String) -> Result<(), String> {
+    send(id, ClientCommand::RemoveContact { jid })
+}
+
+/// Say yes or no to someone who asked to see when we are online. XMPP only.
+///
+/// The core answers only a request it reported: a yes to anyone else is
+/// refused, so this cannot be used to tell a stranger we are here.
+pub fn answer_subscription(id: u64, jid: String, accept: bool) -> Result<(), String> {
+    send(id, ClientCommand::AnswerSubscription { jid, accept })
+}
+
+/// Say how we are: here, away, busy. XMPP only.
+pub fn set_availability(
+    id: u64,
+    availability: Availability,
+    status: Option<String>,
+) -> Result<(), String> {
+    send(
+        id,
+        ClientCommand::SetAvailability {
+            availability: availability.into(),
+            status: status.filter(|s| !s.trim().is_empty()),
+        },
+    )
+}
+
+/// Replace the text of a message we sent. XMPP only.
+pub fn edit_message(id: u64, target: String, msgid: String, text: String) -> Result<(), String> {
+    send(
+        id,
+        ClientCommand::EditMessage {
+            target,
+            msgid,
+            text,
+        },
+    )
+}
+
+/// Take back a message we sent. XMPP only.
+pub fn retract_message(id: u64, target: String, msgid: String) -> Result<(), String> {
+    send(id, ClientCommand::RetractMessage { target, msgid })
+}
+
+/// Fetch chats from the server's archive since a time, in Unix milliseconds.
+/// XMPP only; ignored when the connection already knows where to resume.
+pub fn catch_up_chats(id: u64, since_ms: i64) -> Result<(), String> {
+    send(id, ClientCommand::CatchUpChats { since_ms })
 }
 
 /// Stop waiting out the reconnect backoff and try again now.

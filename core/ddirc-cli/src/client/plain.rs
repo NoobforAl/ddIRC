@@ -279,6 +279,29 @@ fn render(event: &IrcEvent) {
             println!("-- {direction} \"{filename}\"{size} --");
         }
         IrcEvent::FileTransferProgress { .. } => {}
+        IrcEvent::Contact(_)
+        | IrcEvent::ContactRemoved { .. }
+        | IrcEvent::UploadAvailable { .. } => {}
+        IrcEvent::SubscriptionRequest { jid } => {
+            println!(
+                "-- {jid} asks to see when you are online: /accept {jid} or /decline {jid} --"
+            );
+        }
+        IrcEvent::MessageEdited {
+            target,
+            sender,
+            message,
+            ..
+        } => {
+            println!(
+                "({}) * {sender} corrected a message: {}",
+                target.name(),
+                plain(&message.spans)
+            );
+        }
+        IrcEvent::MessageRetracted { target, sender, .. } => {
+            println!("({}) * {sender} deleted a message", target.name());
+        }
         IrcEvent::FileTransferEnded {
             filename,
             path,

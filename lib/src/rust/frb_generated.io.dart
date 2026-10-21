@@ -41,6 +41,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AuthOutcome dco_decode_auth_outcome(dynamic raw);
 
   @protected
+  Availability dco_decode_availability(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
@@ -51,6 +54,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ConnectionStatus dco_decode_box_autoadd_connection_status(dynamic raw);
+
+  @protected
+  ContactView dco_decode_box_autoadd_contact_view(dynamic raw);
 
   @protected
   ConversationState dco_decode_box_autoadd_conversation_state(dynamic raw);
@@ -89,6 +95,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ServerConfig dco_decode_box_autoadd_server_config(dynamic raw);
 
   @protected
+  Target dco_decode_box_autoadd_target(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_16(dynamic raw);
 
   @protected
@@ -116,6 +125,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ConnectionStatus dco_decode_connection_status(dynamic raw);
 
   @protected
+  ContactView dco_decode_contact_view(dynamic raw);
+
+  @protected
   ConversationState dco_decode_conversation_state(dynamic raw);
 
   @protected
@@ -123,6 +135,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   double dco_decode_f_32(dynamic raw);
+
+  @protected
+  int dco_decode_i_32(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_i_64(dynamic raw);
@@ -245,6 +260,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   StoredLine dco_decode_stored_line(dynamic raw);
 
   @protected
+  Subscription dco_decode_subscription(dynamic raw);
+
+  @protected
   Target dco_decode_target(dynamic raw);
 
   @protected
@@ -294,6 +312,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AuthOutcome sse_decode_auth_outcome(SseDeserializer deserializer);
 
   @protected
+  Availability sse_decode_availability(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
@@ -306,6 +327,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ConnectionStatus sse_decode_box_autoadd_connection_status(
     SseDeserializer deserializer,
   );
+
+  @protected
+  ContactView sse_decode_box_autoadd_contact_view(SseDeserializer deserializer);
 
   @protected
   ConversationState sse_decode_box_autoadd_conversation_state(
@@ -350,6 +374,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Target sse_decode_box_autoadd_target(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
@@ -377,6 +404,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ConnectionStatus sse_decode_connection_status(SseDeserializer deserializer);
 
   @protected
+  ContactView sse_decode_contact_view(SseDeserializer deserializer);
+
+  @protected
   ConversationState sse_decode_conversation_state(SseDeserializer deserializer);
 
   @protected
@@ -384,6 +414,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   double sse_decode_f_32(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
@@ -518,6 +551,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   StoredLine sse_decode_stored_line(SseDeserializer deserializer);
 
   @protected
+  Subscription sse_decode_subscription(SseDeserializer deserializer);
+
+  @protected
   Target sse_decode_target(SseDeserializer deserializer);
 
   @protected
@@ -548,9 +584,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   XmppConfig sse_decode_xmpp_config(SseDeserializer deserializer);
 
   @protected
-  int sse_decode_i_32(SseDeserializer deserializer);
-
-  @protected
   void sse_encode_AnyhowException(
     AnyhowException self,
     SseSerializer serializer,
@@ -575,6 +608,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_auth_outcome(AuthOutcome self, SseSerializer serializer);
 
   @protected
+  void sse_encode_availability(Availability self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
@@ -592,6 +628,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_connection_status(
     ConnectionStatus self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_contact_view(
+    ContactView self,
     SseSerializer serializer,
   );
 
@@ -659,6 +701,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_target(Target self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer);
 
   @protected
@@ -698,6 +743,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_contact_view(ContactView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_conversation_state(
     ConversationState self,
     SseSerializer serializer,
@@ -708,6 +756,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_f_32(double self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
@@ -875,6 +926,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_stored_line(StoredLine self, SseSerializer serializer);
 
   @protected
+  void sse_encode_subscription(Subscription self, SseSerializer serializer);
+
+  @protected
   void sse_encode_target(Target self, SseSerializer serializer);
 
   @protected
@@ -903,9 +957,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_xmpp_config(XmppConfig self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_i_32(int self, SseSerializer serializer);
 }
 
 // Section: wire_class

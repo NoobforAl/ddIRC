@@ -333,6 +333,54 @@ pub struct MemberView {
     pub sort_key: String,
 }
 
+/// Whether someone is there, as far as they have said.
+///
+/// What XMPP calls `show`, folded to the five states a person can act on. IRC
+/// has only "away", which is a [`MemberView`] flag and not this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Availability {
+    /// Not signed in anywhere we can see, or never said.
+    #[default]
+    Offline,
+    Available,
+    Away,
+    /// Signed in and asked not to be disturbed.
+    Dnd,
+    /// Away for a long time.
+    ExtendedAway,
+}
+
+/// What the two of us have agreed about seeing each other's presence.
+///
+/// RFC 6121 section 3.1: it is two one-way grants, not one two-way one, which
+/// is why "they follow me but I do not follow them" is a state with a name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Subscription {
+    /// Neither of us sees the other.
+    #[default]
+    None,
+    /// We see them.
+    To,
+    /// They see us.
+    From,
+    Both,
+}
+
+/// One person on the contact list, as the UI needs to draw them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContactView {
+    /// Their bare address. The key.
+    pub jid: String,
+    /// What we call them, when we have given a name, cleaned.
+    pub name: Option<String>,
+    pub subscription: Subscription,
+    /// We have asked to see them and they have not answered.
+    pub asked: bool,
+    pub availability: Availability,
+    /// What they say they are doing, cleaned and bounded. Empty when nothing.
+    pub status: String,
+}
+
 /// One channel as it appears in the server's directory.
 ///
 /// The answer to `LIST`, and deliberately not a `Conversation`: this is a room

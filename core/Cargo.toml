@@ -120,6 +120,17 @@ rustls-native-certs = "0.8"
 # `ChannelBinding` is in the signature of `ServerConnector`, and `tokio-xmpp`
 # does not re-export it. Already resolved by `tokio-xmpp` itself.
 sasl = "0.5"
+# Uploading a file (XEP-0363) is an HTTPS `PUT` to an address the server hands
+# over, and that address is checked before anything is sent to it: parsed, then
+# refused if it is not `https`, carries credentials, or names a machine by
+# address. The response head is read with `httparse`, which stops at the end of
+# the head and allocates nothing. Both are already compiled into the app - Tor's
+# directory client depends on them - at the versions it resolves to, so this
+# adds no code to the binary. Nor is an HTTP client added: `reqwest` would dial
+# by itself, past the SOCKS5 path every other byte this client sends goes
+# through, which is the reason the high-level XMPP crate was rejected above.
+url = "2"
+httparse = "1"
 
 # A one-condition fix to `saturating-time`, until upstream carries it.
 #

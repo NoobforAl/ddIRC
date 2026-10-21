@@ -140,6 +140,9 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:5223:5223"
+      # File upload (XEP-0363). The slot the server hands out points here, and the
+      # client uploads to it over HTTPS on its own connection, not over 5223.
+      - "127.0.0.1:5443:5443"
     volumes:
       # Made by xmpp/gen-certs.sh before the first start. The tests trust the
       # sibling localhost.crt directly.

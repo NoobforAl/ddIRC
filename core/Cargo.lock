@@ -1053,6 +1053,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
+ "httparse",
  "irc",
  "log",
  "rand 0.10.3",
@@ -1067,6 +1068,7 @@ dependencies = [
  "tokio-socks",
  "tokio-xmpp",
  "tracing",
+ "url",
  "webpki-roots 0.26.11",
  "zeroize",
 ]
