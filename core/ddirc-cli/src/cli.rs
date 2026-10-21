@@ -459,6 +459,15 @@ fn resolve_data_dir(
 mod tests {
     use super::*;
 
+    /// The tests that set or read `DDIRC_XMPP_PASSWORD` share one process-wide
+    /// variable, and parsing *removes* it after reading (so it is not left in the
+    /// environment). Run side by side, one test's removal lands between another's
+    /// set and read, and the second finds no password. They take turns.
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        ENV.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn parse_str(line: &str) -> Result<Parsed, String> {
         parse(line.split_whitespace().map(str::to_owned))
     }
@@ -504,6 +513,7 @@ mod tests {
 
     #[test]
     fn an_xmpp_account_is_an_address_and_a_password_from_the_environment() {
+        let _env = env_guard();
         std::env::set_var("DDIRC_XMPP_PASSWORD", "hunter2");
         let Ok(Parsed::Client(args)) = parse_str(
             "client --xmpp alice@example.org --channel lobby@conference.example.org --no-tui",
@@ -531,6 +541,7 @@ mod tests {
 
     #[test]
     fn an_xmpp_server_and_port_are_overrides() {
+        let _env = env_guard();
         std::env::set_var("DDIRC_XMPP_PASSWORD", "hunter2");
         let Ok(Parsed::Client(args)) =
             parse_str("client --xmpp alice@example.org --server xmpp.host.example --port 5443")
@@ -546,6 +557,7 @@ mod tests {
 
     #[test]
     fn an_xmpp_account_needs_its_password_and_refuses_irc_flags() {
+        let _env = env_guard();
         std::env::remove_var("DDIRC_XMPP_PASSWORD");
         assert!(parse_str("client --xmpp alice@example.org").is_err());
 
