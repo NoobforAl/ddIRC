@@ -3,9 +3,9 @@ use super::*;
 use tokio_xmpp::parsers::presence::Presence;
 use zeroize::Zeroizing;
 
-const MUC: &str = "lobby@conference.example.org";
+pub(super) const MUC: &str = "lobby@conference.example.org";
 
-fn config() -> XmppConfig {
+pub(super) fn config() -> XmppConfig {
     XmppConfig {
         jid: "alice@example.org".to_owned(),
         password: Zeroizing::new("hunter2".to_owned()),
@@ -18,16 +18,16 @@ fn config() -> XmppConfig {
     }
 }
 
-fn session() -> Session {
+pub(super) fn session() -> Session {
     Session::new(&config()).expect("the config is valid")
 }
 
-fn bound() -> FullJid {
+pub(super) fn bound() -> FullJid {
     "alice@example.org/ddirc".parse().unwrap()
 }
 
 /// Parse the XML a server would send into the stanza the library would hand us.
-fn stanza(xml: &str) -> Stanza {
+pub(super) fn stanza(xml: &str) -> Stanza {
     let element: Element = xml.parse().expect("the test XML is well formed");
     match element.name() {
         "message" => Stanza::Message(Message::try_from(element).expect("a message")),
@@ -37,12 +37,12 @@ fn stanza(xml: &str) -> Stanza {
     }
 }
 
-fn feed(session: &mut Session, xml: &str) -> Effects {
+pub(super) fn feed(session: &mut Session, xml: &str) -> Effects {
     session.on_stanza(stanza(xml))
 }
 
 /// A room presence, wrapped in the namespaces a server would use.
-fn muc_presence(nick: &str, kind: Option<&str>, item: &str, status: &[u16]) -> String {
+pub(super) fn muc_presence(nick: &str, kind: Option<&str>, item: &str, status: &[u16]) -> String {
     let kind = kind.map(|k| format!(" type='{k}'")).unwrap_or_default();
     let status: String = status
         .iter()
@@ -54,13 +54,13 @@ fn muc_presence(nick: &str, kind: Option<&str>, item: &str, status: &[u16]) -> S
     )
 }
 
-fn item(affiliation: &str, role: &str) -> String {
+pub(super) fn item(affiliation: &str, role: &str) -> String {
     format!("<item affiliation='{affiliation}' role='{role}'/>")
 }
 
 /// A session that has logged in and been let into the room, with `bob`
 /// (a moderator) already there.
-fn in_room() -> Session {
+pub(super) fn in_room() -> Session {
     let mut s = session();
     s.on_online(&bound());
     feed(
@@ -74,7 +74,7 @@ fn in_room() -> Session {
     s
 }
 
-fn messages(fx: &Effects) -> Vec<&ChatMessage> {
+pub(super) fn messages(fx: &Effects) -> Vec<&ChatMessage> {
     fx.events
         .iter()
         .filter_map(|e| match e {
@@ -84,11 +84,11 @@ fn messages(fx: &Effects) -> Vec<&ChatMessage> {
         .collect()
 }
 
-fn text(message: &ChatMessage) -> String {
+pub(super) fn text(message: &ChatMessage) -> String {
     format::strip(&format::encode(&message.spans))
 }
 
-fn sent_kinds(fx: &Effects) -> Vec<&'static str> {
+pub(super) fn sent_kinds(fx: &Effects) -> Vec<&'static str> {
     fx.send
         .iter()
         .map(|s| match s {
@@ -121,10 +121,10 @@ fn going_online_reports_the_account_and_sets_the_session_up() {
         }
         other => panic!("expected Registered, got {other:?}"),
     }
-    // Carbons, roster, our presence, then the room.
+    // Carbons, roster, what else the server has, our presence, then the room.
     assert_eq!(
         sent_kinds(&fx),
-        ["iq-set", "iq-get", "presence", "presence"]
+        ["iq-set", "iq-get", "iq-get", "presence", "presence"]
     );
 }
 
@@ -132,8 +132,8 @@ fn going_online_reports_the_account_and_sets_the_session_up() {
 fn our_presence_says_nothing_about_us() {
     let mut s = session();
     let fx = s.on_online(&bound());
-    let Stanza::Presence(p) = &fx.send[2] else {
-        panic!("third stanza is our presence");
+    let Stanza::Presence(p) = &fx.send[3] else {
+        panic!("fourth stanza is our presence");
     };
     assert!(p.payloads.is_empty(), "no capabilities, no client name");
     assert!(p.statuses.is_empty(), "no status text");
@@ -144,8 +144,8 @@ fn our_presence_says_nothing_about_us() {
 fn joining_a_room_asks_for_no_history_and_uses_our_nick() {
     let mut s = session();
     let fx = s.on_online(&bound());
-    let Stanza::Presence(p) = &fx.send[3] else {
-        panic!("fourth stanza is the join");
+    let Stanza::Presence(p) = &fx.send[4] else {
+        panic!("fifth stanza is the join");
     };
     assert_eq!(p.to.as_ref().unwrap().to_string(), format!("{MUC}/alice"));
     let muc = p
@@ -881,16 +881,18 @@ fn everything_else_asked_of_us_is_declined_without_a_word() {
 }
 
 #[test]
-fn a_subscription_request_is_shown_and_never_accepted_for_us() {
+fn a_subscription_request_is_reported_and_never_accepted_for_us() {
     let mut s = in_room();
     let fx = feed(
         &mut s,
         "<presence xmlns='jabber:client' type='subscribe' from='stranger@example.net'/>",
     );
     assert!(fx.send.is_empty(), "accepting is the user's to do");
-    let m = messages(&fx)[0];
-    assert!(m.is_notice);
-    assert_eq!(m.target, Target::Direct("stranger@example.net".to_owned()));
+    assert!(messages(&fx).is_empty(), "it is a request, not a message");
+    assert!(matches!(
+        fx.events.as_slice(),
+        [IrcEvent::SubscriptionRequest { jid }] if jid == "stranger@example.net"
+    ));
 }
 
 #[test]
@@ -1150,7 +1152,7 @@ fn logging_in_again_rejoins_every_room_from_scratch() {
     let fx = s.on_online(&bound());
     assert_eq!(
         sent_kinds(&fx),
-        ["iq-set", "iq-get", "presence", "presence"]
+        ["iq-set", "iq-get", "iq-get", "presence", "presence"]
     );
     // And the room is not considered joined until it says so again.
     let fx = feed(

@@ -35,6 +35,21 @@ pub fn clean_name(name: &str) -> String {
         .collect()
 }
 
+/// A line of free text from the network - a status, a reason - made safe to
+/// show on one line: control characters become spaces, layout characters go,
+/// and it is cut at `max` characters.
+///
+/// [`clean_name`] with the bound of a sentence rather than of a nickname.
+pub fn clean_line(text: &str, max: usize) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .filter(|c| !is_layout_control(*c))
+        .take(max)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
 /// True if `text` mentions `nick` as a whole word, ignoring case.
 ///
 /// Substring matching would make the nick "sam" light up on "same".

@@ -33,6 +33,39 @@ bool storeIsOpen() => RustLib.instance.api.crateApiStoreStoreIsOpen();
 Future<List<PlatformInt64?>> storeAppend({required List<StoredLine> lines}) =>
     RustLib.instance.api.crateApiStoreStoreAppend(lines: lines);
 
+/// Replace the text of a stored message its author corrected, if the author is
+/// who is named. Returns whether there was such a line.
+Future<bool> storeEditLine({
+  required String profileId,
+  required String conversation,
+  required String msgid,
+  required String sender,
+  required List<TextSpan> spans,
+}) => RustLib.instance.api.crateApiStoreStoreEditLine(
+  profileId: profileId,
+  conversation: conversation,
+  msgid: msgid,
+  sender: sender,
+  spans: spans,
+);
+
+/// Delete a stored message its author took back, if the author is who is named.
+Future<bool> storeRemoveLine({
+  required String profileId,
+  required String conversation,
+  required String msgid,
+  required String sender,
+}) => RustLib.instance.api.crateApiStoreStoreRemoveLine(
+  profileId: profileId,
+  conversation: conversation,
+  msgid: msgid,
+  sender: sender,
+);
+
+/// When the newest stored line of a network was said, in ms since the epoch.
+Future<PlatformInt64?> storeLastSeenMs({required String profileId}) =>
+    RustLib.instance.api.crateApiStoreStoreLastSeenMs(profileId: profileId);
+
 /// The last `limit` lines of one conversation, oldest first.
 Future<List<StoredLine>> storeRecent({
   required String profileId,

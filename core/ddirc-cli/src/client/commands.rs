@@ -5,6 +5,7 @@
 //! do — open a conversation, close one, clear it — come back as their own
 //! [`Action`]s, and the plain client says so rather than pretending.
 
+use ddirc_core::api::types::Availability;
 use ddirc_core::conn::actor::ClientCommand;
 
 pub enum Action {
@@ -40,6 +41,20 @@ pub const HELP: &[(&str, &str)] = &[
     ),
     ("/whois <nick>", "who is this?"),
     ("/list", "browse the server's channels"),
+    (
+        "/accept <address>",
+        "XMPP: let someone who asked see when you are online",
+    ),
+    ("/decline <address>", "XMPP: refuse someone who asked"),
+    (
+        "/addcontact <address> [name]",
+        "XMPP: add a contact and ask to see them",
+    ),
+    ("/rmcontact <address>", "XMPP: remove a contact"),
+    ("/away [text]", "XMPP: say you are away"),
+    ("/dnd [text]", "XMPP: say you are busy"),
+    ("/back", "XMPP: say you are here again"),
+    ("/file <path>", "XMPP: send a file to this conversation"),
     ("/close", "close this conversation"),
     ("/clear", "empty this conversation's scrollback"),
     ("/quit [reason]", "disconnect and exit"),
@@ -179,6 +194,41 @@ pub fn command_for_with(
                 None => Action::Notice("not in a channel".to_owned()),
             }
         }
+        // XMPP's: contacts, how we are, a file. On IRC the core says so.
+        "accept" | "decline" if !argument.is_empty() => {
+            Action::Send(ClientCommand::AnswerSubscription {
+                jid: argument.to_owned(),
+                accept: command.eq_ignore_ascii_case("accept"),
+            })
+        }
+        "addcontact" if !argument.is_empty() => {
+            let (jid, name) = match argument.split_once(' ') {
+                Some((jid, name)) => (jid, reason(name.trim())),
+                None => (argument, None),
+            };
+            Action::Send(ClientCommand::AddContact {
+                jid: jid.to_owned(),
+                name,
+            })
+        }
+        "rmcontact" if !argument.is_empty() => Action::Send(ClientCommand::RemoveContact {
+            jid: argument.to_owned(),
+        }),
+        "away" | "dnd" | "back" => Action::Send(ClientCommand::SetAvailability {
+            availability: match command.to_ascii_lowercase().as_str() {
+                "away" => Availability::Away,
+                "dnd" => Availability::Dnd,
+                _ => Availability::Available,
+            },
+            status: reason(argument),
+        }),
+        "file" if !argument.is_empty() => match current {
+            Some(target) => Action::Send(ClientCommand::SendFile {
+                target: target.to_owned(),
+                path: argument.to_owned(),
+            }),
+            None => Action::Notice("no current conversation".to_owned()),
+        },
         "list" => Action::Send(ClientCommand::ListChannels),
         "whois" if !argument.is_empty() => Action::Send(ClientCommand::Whois {
             nick: argument.to_owned(),

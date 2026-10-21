@@ -1149,7 +1149,7 @@ extension IrcEventPatterns on IrcEvent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IrcEvent_Status value)?  status,TResult Function( IrcEvent_Registered value)?  registered,TResult Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult Function( IrcEvent_Message value)?  message,TResult Function( IrcEvent_Joined value)?  joined,TResult Function( IrcEvent_Parted value)?  parted,TResult Function( IrcEvent_Quit value)?  quit,TResult Function( IrcEvent_NickChanged value)?  nickChanged,TResult Function( IrcEvent_TopicChanged value)?  topicChanged,TResult Function( IrcEvent_MemberList value)?  memberList,TResult Function( IrcEvent_MemberChanged value)?  memberChanged,TResult Function( IrcEvent_ModeChanged value)?  modeChanged,TResult Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult Function( IrcEvent_FileOffered value)?  fileOffered,TResult Function( IrcEvent_FileTransferStarted value)?  fileTransferStarted,TResult Function( IrcEvent_FileTransferProgress value)?  fileTransferProgress,TResult Function( IrcEvent_FileTransferEnded value)?  fileTransferEnded,TResult Function( IrcEvent_ChannelList value)?  channelList,TResult Function( IrcEvent_Whois value)?  whois,TResult Function( IrcEvent_Error value)?  error,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( IrcEvent_Status value)?  status,TResult Function( IrcEvent_Registered value)?  registered,TResult Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult Function( IrcEvent_Message value)?  message,TResult Function( IrcEvent_Joined value)?  joined,TResult Function( IrcEvent_Parted value)?  parted,TResult Function( IrcEvent_Quit value)?  quit,TResult Function( IrcEvent_NickChanged value)?  nickChanged,TResult Function( IrcEvent_TopicChanged value)?  topicChanged,TResult Function( IrcEvent_MemberList value)?  memberList,TResult Function( IrcEvent_MemberChanged value)?  memberChanged,TResult Function( IrcEvent_ModeChanged value)?  modeChanged,TResult Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult Function( IrcEvent_FileOffered value)?  fileOffered,TResult Function( IrcEvent_FileTransferStarted value)?  fileTransferStarted,TResult Function( IrcEvent_FileTransferProgress value)?  fileTransferProgress,TResult Function( IrcEvent_FileTransferEnded value)?  fileTransferEnded,TResult Function( IrcEvent_ChannelList value)?  channelList,TResult Function( IrcEvent_Whois value)?  whois,TResult Function( IrcEvent_Contact value)?  contact,TResult Function( IrcEvent_ContactRemoved value)?  contactRemoved,TResult Function( IrcEvent_SubscriptionRequest value)?  subscriptionRequest,TResult Function( IrcEvent_MessageEdited value)?  messageEdited,TResult Function( IrcEvent_MessageRetracted value)?  messageRetracted,TResult Function( IrcEvent_UploadAvailable value)?  uploadAvailable,TResult Function( IrcEvent_Error value)?  error,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
@@ -1171,7 +1171,13 @@ return fileTransferStarted(_that);case IrcEvent_FileTransferProgress() when file
 return fileTransferProgress(_that);case IrcEvent_FileTransferEnded() when fileTransferEnded != null:
 return fileTransferEnded(_that);case IrcEvent_ChannelList() when channelList != null:
 return channelList(_that);case IrcEvent_Whois() when whois != null:
-return whois(_that);case IrcEvent_Error() when error != null:
+return whois(_that);case IrcEvent_Contact() when contact != null:
+return contact(_that);case IrcEvent_ContactRemoved() when contactRemoved != null:
+return contactRemoved(_that);case IrcEvent_SubscriptionRequest() when subscriptionRequest != null:
+return subscriptionRequest(_that);case IrcEvent_MessageEdited() when messageEdited != null:
+return messageEdited(_that);case IrcEvent_MessageRetracted() when messageRetracted != null:
+return messageRetracted(_that);case IrcEvent_UploadAvailable() when uploadAvailable != null:
+return uploadAvailable(_that);case IrcEvent_Error() when error != null:
 return error(_that);case _:
   return orElse();
 
@@ -1190,7 +1196,7 @@ return error(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IrcEvent_Status value)  status,required TResult Function( IrcEvent_Registered value)  registered,required TResult Function( IrcEvent_NetworkNamed value)  networkNamed,required TResult Function( IrcEvent_Message value)  message,required TResult Function( IrcEvent_Joined value)  joined,required TResult Function( IrcEvent_Parted value)  parted,required TResult Function( IrcEvent_Quit value)  quit,required TResult Function( IrcEvent_NickChanged value)  nickChanged,required TResult Function( IrcEvent_TopicChanged value)  topicChanged,required TResult Function( IrcEvent_MemberList value)  memberList,required TResult Function( IrcEvent_MemberChanged value)  memberChanged,required TResult Function( IrcEvent_ModeChanged value)  modeChanged,required TResult Function( IrcEvent_MessagesDropped value)  messagesDropped,required TResult Function( IrcEvent_FileOffered value)  fileOffered,required TResult Function( IrcEvent_FileTransferStarted value)  fileTransferStarted,required TResult Function( IrcEvent_FileTransferProgress value)  fileTransferProgress,required TResult Function( IrcEvent_FileTransferEnded value)  fileTransferEnded,required TResult Function( IrcEvent_ChannelList value)  channelList,required TResult Function( IrcEvent_Whois value)  whois,required TResult Function( IrcEvent_Error value)  error,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( IrcEvent_Status value)  status,required TResult Function( IrcEvent_Registered value)  registered,required TResult Function( IrcEvent_NetworkNamed value)  networkNamed,required TResult Function( IrcEvent_Message value)  message,required TResult Function( IrcEvent_Joined value)  joined,required TResult Function( IrcEvent_Parted value)  parted,required TResult Function( IrcEvent_Quit value)  quit,required TResult Function( IrcEvent_NickChanged value)  nickChanged,required TResult Function( IrcEvent_TopicChanged value)  topicChanged,required TResult Function( IrcEvent_MemberList value)  memberList,required TResult Function( IrcEvent_MemberChanged value)  memberChanged,required TResult Function( IrcEvent_ModeChanged value)  modeChanged,required TResult Function( IrcEvent_MessagesDropped value)  messagesDropped,required TResult Function( IrcEvent_FileOffered value)  fileOffered,required TResult Function( IrcEvent_FileTransferStarted value)  fileTransferStarted,required TResult Function( IrcEvent_FileTransferProgress value)  fileTransferProgress,required TResult Function( IrcEvent_FileTransferEnded value)  fileTransferEnded,required TResult Function( IrcEvent_ChannelList value)  channelList,required TResult Function( IrcEvent_Whois value)  whois,required TResult Function( IrcEvent_Contact value)  contact,required TResult Function( IrcEvent_ContactRemoved value)  contactRemoved,required TResult Function( IrcEvent_SubscriptionRequest value)  subscriptionRequest,required TResult Function( IrcEvent_MessageEdited value)  messageEdited,required TResult Function( IrcEvent_MessageRetracted value)  messageRetracted,required TResult Function( IrcEvent_UploadAvailable value)  uploadAvailable,required TResult Function( IrcEvent_Error value)  error,}){
 final _that = this;
 switch (_that) {
 case IrcEvent_Status():
@@ -1212,7 +1218,13 @@ return fileTransferStarted(_that);case IrcEvent_FileTransferProgress():
 return fileTransferProgress(_that);case IrcEvent_FileTransferEnded():
 return fileTransferEnded(_that);case IrcEvent_ChannelList():
 return channelList(_that);case IrcEvent_Whois():
-return whois(_that);case IrcEvent_Error():
+return whois(_that);case IrcEvent_Contact():
+return contact(_that);case IrcEvent_ContactRemoved():
+return contactRemoved(_that);case IrcEvent_SubscriptionRequest():
+return subscriptionRequest(_that);case IrcEvent_MessageEdited():
+return messageEdited(_that);case IrcEvent_MessageRetracted():
+return messageRetracted(_that);case IrcEvent_UploadAvailable():
+return uploadAvailable(_that);case IrcEvent_Error():
 return error(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
@@ -1227,7 +1239,7 @@ return error(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IrcEvent_Status value)?  status,TResult? Function( IrcEvent_Registered value)?  registered,TResult? Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult? Function( IrcEvent_Message value)?  message,TResult? Function( IrcEvent_Joined value)?  joined,TResult? Function( IrcEvent_Parted value)?  parted,TResult? Function( IrcEvent_Quit value)?  quit,TResult? Function( IrcEvent_NickChanged value)?  nickChanged,TResult? Function( IrcEvent_TopicChanged value)?  topicChanged,TResult? Function( IrcEvent_MemberList value)?  memberList,TResult? Function( IrcEvent_MemberChanged value)?  memberChanged,TResult? Function( IrcEvent_ModeChanged value)?  modeChanged,TResult? Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult? Function( IrcEvent_FileOffered value)?  fileOffered,TResult? Function( IrcEvent_FileTransferStarted value)?  fileTransferStarted,TResult? Function( IrcEvent_FileTransferProgress value)?  fileTransferProgress,TResult? Function( IrcEvent_FileTransferEnded value)?  fileTransferEnded,TResult? Function( IrcEvent_ChannelList value)?  channelList,TResult? Function( IrcEvent_Whois value)?  whois,TResult? Function( IrcEvent_Error value)?  error,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( IrcEvent_Status value)?  status,TResult? Function( IrcEvent_Registered value)?  registered,TResult? Function( IrcEvent_NetworkNamed value)?  networkNamed,TResult? Function( IrcEvent_Message value)?  message,TResult? Function( IrcEvent_Joined value)?  joined,TResult? Function( IrcEvent_Parted value)?  parted,TResult? Function( IrcEvent_Quit value)?  quit,TResult? Function( IrcEvent_NickChanged value)?  nickChanged,TResult? Function( IrcEvent_TopicChanged value)?  topicChanged,TResult? Function( IrcEvent_MemberList value)?  memberList,TResult? Function( IrcEvent_MemberChanged value)?  memberChanged,TResult? Function( IrcEvent_ModeChanged value)?  modeChanged,TResult? Function( IrcEvent_MessagesDropped value)?  messagesDropped,TResult? Function( IrcEvent_FileOffered value)?  fileOffered,TResult? Function( IrcEvent_FileTransferStarted value)?  fileTransferStarted,TResult? Function( IrcEvent_FileTransferProgress value)?  fileTransferProgress,TResult? Function( IrcEvent_FileTransferEnded value)?  fileTransferEnded,TResult? Function( IrcEvent_ChannelList value)?  channelList,TResult? Function( IrcEvent_Whois value)?  whois,TResult? Function( IrcEvent_Contact value)?  contact,TResult? Function( IrcEvent_ContactRemoved value)?  contactRemoved,TResult? Function( IrcEvent_SubscriptionRequest value)?  subscriptionRequest,TResult? Function( IrcEvent_MessageEdited value)?  messageEdited,TResult? Function( IrcEvent_MessageRetracted value)?  messageRetracted,TResult? Function( IrcEvent_UploadAvailable value)?  uploadAvailable,TResult? Function( IrcEvent_Error value)?  error,}){
 final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
@@ -1249,7 +1261,13 @@ return fileTransferStarted(_that);case IrcEvent_FileTransferProgress() when file
 return fileTransferProgress(_that);case IrcEvent_FileTransferEnded() when fileTransferEnded != null:
 return fileTransferEnded(_that);case IrcEvent_ChannelList() when channelList != null:
 return channelList(_that);case IrcEvent_Whois() when whois != null:
-return whois(_that);case IrcEvent_Error() when error != null:
+return whois(_that);case IrcEvent_Contact() when contact != null:
+return contact(_that);case IrcEvent_ContactRemoved() when contactRemoved != null:
+return contactRemoved(_that);case IrcEvent_SubscriptionRequest() when subscriptionRequest != null:
+return subscriptionRequest(_that);case IrcEvent_MessageEdited() when messageEdited != null:
+return messageEdited(_that);case IrcEvent_MessageRetracted() when messageRetracted != null:
+return messageRetracted(_that);case IrcEvent_UploadAvailable() when uploadAvailable != null:
+return uploadAvailable(_that);case IrcEvent_Error() when error != null:
 return error(_that);case _:
   return null;
 
@@ -1267,7 +1285,7 @@ return error(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( ConnectionStatus status,  String? detail)?  status,TResult Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult Function( String network)?  networkNamed,TResult Function( ChatMessage message)?  message,TResult Function( String channel,  String nick,  bool isSelf)?  joined,TResult Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult Function( String channel,  String nick,  String? reason)?  quit,TResult Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult Function( String channel,  List<MemberView> members)?  memberList,TResult Function( String channel,  String previous,  MemberView? member)?  memberChanged,TResult Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult Function( String? channel,  BigInt count)?  messagesDropped,TResult Function( BigInt id,  String channel,  String from,  DccOffer offer)?  fileOffered,TResult Function( BigInt id,  String channel,  String filename,  bool incoming,  BigInt? total)?  fileTransferStarted,TResult Function( BigInt id,  BigInt transferred)?  fileTransferProgress,TResult Function( BigInt id,  String channel,  String filename,  String? path,  String? error)?  fileTransferEnded,TResult Function( List<ChannelListing> channels,  bool done,  bool truncated)?  channelList,TResult Function( WhoisInfo field0)?  whois,TResult Function( String message,  bool fatal)?  error,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( ConnectionStatus status,  String? detail)?  status,TResult Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult Function( String network)?  networkNamed,TResult Function( ChatMessage message)?  message,TResult Function( String channel,  String nick,  bool isSelf)?  joined,TResult Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult Function( String channel,  String nick,  String? reason)?  quit,TResult Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult Function( String channel,  List<MemberView> members)?  memberList,TResult Function( String channel,  String previous,  MemberView? member)?  memberChanged,TResult Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult Function( String? channel,  BigInt count)?  messagesDropped,TResult Function( BigInt id,  String channel,  String from,  DccOffer offer)?  fileOffered,TResult Function( BigInt id,  String channel,  String filename,  bool incoming,  BigInt? total)?  fileTransferStarted,TResult Function( BigInt id,  BigInt transferred)?  fileTransferProgress,TResult Function( BigInt id,  String channel,  String filename,  String? path,  String? error)?  fileTransferEnded,TResult Function( List<ChannelListing> channels,  bool done,  bool truncated)?  channelList,TResult Function( WhoisInfo field0)?  whois,TResult Function( ContactView field0)?  contact,TResult Function( String jid)?  contactRemoved,TResult Function( String jid)?  subscriptionRequest,TResult Function( Target target,  String msgid,  String sender,  ChatMessage message)?  messageEdited,TResult Function( Target target,  String msgid,  String sender)?  messageRetracted,TResult Function( BigInt? maxBytes)?  uploadAvailable,TResult Function( String message,  bool fatal)?  error,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
 return status(_that.status,_that.detail);case IrcEvent_Registered() when registered != null:
@@ -1288,7 +1306,13 @@ return fileTransferStarted(_that.id,_that.channel,_that.filename,_that.incoming,
 return fileTransferProgress(_that.id,_that.transferred);case IrcEvent_FileTransferEnded() when fileTransferEnded != null:
 return fileTransferEnded(_that.id,_that.channel,_that.filename,_that.path,_that.error);case IrcEvent_ChannelList() when channelList != null:
 return channelList(_that.channels,_that.done,_that.truncated);case IrcEvent_Whois() when whois != null:
-return whois(_that.field0);case IrcEvent_Error() when error != null:
+return whois(_that.field0);case IrcEvent_Contact() when contact != null:
+return contact(_that.field0);case IrcEvent_ContactRemoved() when contactRemoved != null:
+return contactRemoved(_that.jid);case IrcEvent_SubscriptionRequest() when subscriptionRequest != null:
+return subscriptionRequest(_that.jid);case IrcEvent_MessageEdited() when messageEdited != null:
+return messageEdited(_that.target,_that.msgid,_that.sender,_that.message);case IrcEvent_MessageRetracted() when messageRetracted != null:
+return messageRetracted(_that.target,_that.msgid,_that.sender);case IrcEvent_UploadAvailable() when uploadAvailable != null:
+return uploadAvailable(_that.maxBytes);case IrcEvent_Error() when error != null:
 return error(_that.message,_that.fatal);case _:
   return orElse();
 
@@ -1307,7 +1331,7 @@ return error(_that.message,_that.fatal);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( ConnectionStatus status,  String? detail)  status,required TResult Function( String nick,  String? network,  AuthOutcome auth)  registered,required TResult Function( String network)  networkNamed,required TResult Function( ChatMessage message)  message,required TResult Function( String channel,  String nick,  bool isSelf)  joined,required TResult Function( String channel,  String nick,  bool isSelf,  String? reason)  parted,required TResult Function( String channel,  String nick,  String? reason)  quit,required TResult Function( String channel,  String old,  String new_,  bool isSelf)  nickChanged,required TResult Function( String channel,  String topic,  String? setBy)  topicChanged,required TResult Function( String channel,  List<MemberView> members)  memberList,required TResult Function( String channel,  String previous,  MemberView? member)  memberChanged,required TResult Function( String channel,  String? by,  List<String> affected)  modeChanged,required TResult Function( String? channel,  BigInt count)  messagesDropped,required TResult Function( BigInt id,  String channel,  String from,  DccOffer offer)  fileOffered,required TResult Function( BigInt id,  String channel,  String filename,  bool incoming,  BigInt? total)  fileTransferStarted,required TResult Function( BigInt id,  BigInt transferred)  fileTransferProgress,required TResult Function( BigInt id,  String channel,  String filename,  String? path,  String? error)  fileTransferEnded,required TResult Function( List<ChannelListing> channels,  bool done,  bool truncated)  channelList,required TResult Function( WhoisInfo field0)  whois,required TResult Function( String message,  bool fatal)  error,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( ConnectionStatus status,  String? detail)  status,required TResult Function( String nick,  String? network,  AuthOutcome auth)  registered,required TResult Function( String network)  networkNamed,required TResult Function( ChatMessage message)  message,required TResult Function( String channel,  String nick,  bool isSelf)  joined,required TResult Function( String channel,  String nick,  bool isSelf,  String? reason)  parted,required TResult Function( String channel,  String nick,  String? reason)  quit,required TResult Function( String channel,  String old,  String new_,  bool isSelf)  nickChanged,required TResult Function( String channel,  String topic,  String? setBy)  topicChanged,required TResult Function( String channel,  List<MemberView> members)  memberList,required TResult Function( String channel,  String previous,  MemberView? member)  memberChanged,required TResult Function( String channel,  String? by,  List<String> affected)  modeChanged,required TResult Function( String? channel,  BigInt count)  messagesDropped,required TResult Function( BigInt id,  String channel,  String from,  DccOffer offer)  fileOffered,required TResult Function( BigInt id,  String channel,  String filename,  bool incoming,  BigInt? total)  fileTransferStarted,required TResult Function( BigInt id,  BigInt transferred)  fileTransferProgress,required TResult Function( BigInt id,  String channel,  String filename,  String? path,  String? error)  fileTransferEnded,required TResult Function( List<ChannelListing> channels,  bool done,  bool truncated)  channelList,required TResult Function( WhoisInfo field0)  whois,required TResult Function( ContactView field0)  contact,required TResult Function( String jid)  contactRemoved,required TResult Function( String jid)  subscriptionRequest,required TResult Function( Target target,  String msgid,  String sender,  ChatMessage message)  messageEdited,required TResult Function( Target target,  String msgid,  String sender)  messageRetracted,required TResult Function( BigInt? maxBytes)  uploadAvailable,required TResult Function( String message,  bool fatal)  error,}) {final _that = this;
 switch (_that) {
 case IrcEvent_Status():
 return status(_that.status,_that.detail);case IrcEvent_Registered():
@@ -1328,7 +1352,13 @@ return fileTransferStarted(_that.id,_that.channel,_that.filename,_that.incoming,
 return fileTransferProgress(_that.id,_that.transferred);case IrcEvent_FileTransferEnded():
 return fileTransferEnded(_that.id,_that.channel,_that.filename,_that.path,_that.error);case IrcEvent_ChannelList():
 return channelList(_that.channels,_that.done,_that.truncated);case IrcEvent_Whois():
-return whois(_that.field0);case IrcEvent_Error():
+return whois(_that.field0);case IrcEvent_Contact():
+return contact(_that.field0);case IrcEvent_ContactRemoved():
+return contactRemoved(_that.jid);case IrcEvent_SubscriptionRequest():
+return subscriptionRequest(_that.jid);case IrcEvent_MessageEdited():
+return messageEdited(_that.target,_that.msgid,_that.sender,_that.message);case IrcEvent_MessageRetracted():
+return messageRetracted(_that.target,_that.msgid,_that.sender);case IrcEvent_UploadAvailable():
+return uploadAvailable(_that.maxBytes);case IrcEvent_Error():
 return error(_that.message,_that.fatal);}
 }
 /// A variant of `when` that fallback to returning `null`
@@ -1343,7 +1373,7 @@ return error(_that.message,_that.fatal);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( ConnectionStatus status,  String? detail)?  status,TResult? Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult? Function( String network)?  networkNamed,TResult? Function( ChatMessage message)?  message,TResult? Function( String channel,  String nick,  bool isSelf)?  joined,TResult? Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult? Function( String channel,  String nick,  String? reason)?  quit,TResult? Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult? Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult? Function( String channel,  List<MemberView> members)?  memberList,TResult? Function( String channel,  String previous,  MemberView? member)?  memberChanged,TResult? Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult? Function( String? channel,  BigInt count)?  messagesDropped,TResult? Function( BigInt id,  String channel,  String from,  DccOffer offer)?  fileOffered,TResult? Function( BigInt id,  String channel,  String filename,  bool incoming,  BigInt? total)?  fileTransferStarted,TResult? Function( BigInt id,  BigInt transferred)?  fileTransferProgress,TResult? Function( BigInt id,  String channel,  String filename,  String? path,  String? error)?  fileTransferEnded,TResult? Function( List<ChannelListing> channels,  bool done,  bool truncated)?  channelList,TResult? Function( WhoisInfo field0)?  whois,TResult? Function( String message,  bool fatal)?  error,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( ConnectionStatus status,  String? detail)?  status,TResult? Function( String nick,  String? network,  AuthOutcome auth)?  registered,TResult? Function( String network)?  networkNamed,TResult? Function( ChatMessage message)?  message,TResult? Function( String channel,  String nick,  bool isSelf)?  joined,TResult? Function( String channel,  String nick,  bool isSelf,  String? reason)?  parted,TResult? Function( String channel,  String nick,  String? reason)?  quit,TResult? Function( String channel,  String old,  String new_,  bool isSelf)?  nickChanged,TResult? Function( String channel,  String topic,  String? setBy)?  topicChanged,TResult? Function( String channel,  List<MemberView> members)?  memberList,TResult? Function( String channel,  String previous,  MemberView? member)?  memberChanged,TResult? Function( String channel,  String? by,  List<String> affected)?  modeChanged,TResult? Function( String? channel,  BigInt count)?  messagesDropped,TResult? Function( BigInt id,  String channel,  String from,  DccOffer offer)?  fileOffered,TResult? Function( BigInt id,  String channel,  String filename,  bool incoming,  BigInt? total)?  fileTransferStarted,TResult? Function( BigInt id,  BigInt transferred)?  fileTransferProgress,TResult? Function( BigInt id,  String channel,  String filename,  String? path,  String? error)?  fileTransferEnded,TResult? Function( List<ChannelListing> channels,  bool done,  bool truncated)?  channelList,TResult? Function( WhoisInfo field0)?  whois,TResult? Function( ContactView field0)?  contact,TResult? Function( String jid)?  contactRemoved,TResult? Function( String jid)?  subscriptionRequest,TResult? Function( Target target,  String msgid,  String sender,  ChatMessage message)?  messageEdited,TResult? Function( Target target,  String msgid,  String sender)?  messageRetracted,TResult? Function( BigInt? maxBytes)?  uploadAvailable,TResult? Function( String message,  bool fatal)?  error,}) {final _that = this;
 switch (_that) {
 case IrcEvent_Status() when status != null:
 return status(_that.status,_that.detail);case IrcEvent_Registered() when registered != null:
@@ -1364,7 +1394,13 @@ return fileTransferStarted(_that.id,_that.channel,_that.filename,_that.incoming,
 return fileTransferProgress(_that.id,_that.transferred);case IrcEvent_FileTransferEnded() when fileTransferEnded != null:
 return fileTransferEnded(_that.id,_that.channel,_that.filename,_that.path,_that.error);case IrcEvent_ChannelList() when channelList != null:
 return channelList(_that.channels,_that.done,_that.truncated);case IrcEvent_Whois() when whois != null:
-return whois(_that.field0);case IrcEvent_Error() when error != null:
+return whois(_that.field0);case IrcEvent_Contact() when contact != null:
+return contact(_that.field0);case IrcEvent_ContactRemoved() when contactRemoved != null:
+return contactRemoved(_that.jid);case IrcEvent_SubscriptionRequest() when subscriptionRequest != null:
+return subscriptionRequest(_that.jid);case IrcEvent_MessageEdited() when messageEdited != null:
+return messageEdited(_that.target,_that.msgid,_that.sender,_that.message);case IrcEvent_MessageRetracted() when messageRetracted != null:
+return messageRetracted(_that.target,_that.msgid,_that.sender);case IrcEvent_UploadAvailable() when uploadAvailable != null:
+return uploadAvailable(_that.maxBytes);case IrcEvent_Error() when error != null:
 return error(_that.message,_that.fatal);case _:
   return null;
 
@@ -2773,6 +2809,442 @@ class _$IrcEvent_WhoisCopyWithImpl<$Res>
   return _then(IrcEvent_Whois(
 null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
 as WhoisInfo,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class IrcEvent_Contact extends IrcEvent {
+  const IrcEvent_Contact(this.field0): super._();
+  
+
+ final  ContactView field0;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_ContactCopyWith<IrcEvent_Contact> get copyWith => _$IrcEvent_ContactCopyWithImpl<IrcEvent_Contact>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_Contact&&(identical(other.field0, field0) || other.field0 == field0));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
+
+@override
+String toString() {
+    return 'IrcEvent.contact(field0: $field0)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_ContactCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_ContactCopyWith(IrcEvent_Contact value, $Res Function(IrcEvent_Contact) _then) = _$IrcEvent_ContactCopyWithImpl;
+@useResult
+$Res call({
+ ContactView field0
+});
+
+
+
+
+}
+/// @nodoc
+class _$IrcEvent_ContactCopyWithImpl<$Res>
+    implements $IrcEvent_ContactCopyWith<$Res> {
+  _$IrcEvent_ContactCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_Contact _self;
+  final $Res Function(IrcEvent_Contact) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
+  return _then(IrcEvent_Contact(
+null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
+as ContactView,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class IrcEvent_ContactRemoved extends IrcEvent {
+  const IrcEvent_ContactRemoved({required this.jid}): super._();
+  
+
+ final  String jid;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_ContactRemovedCopyWith<IrcEvent_ContactRemoved> get copyWith => _$IrcEvent_ContactRemovedCopyWithImpl<IrcEvent_ContactRemoved>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_ContactRemoved&&(identical(other.jid, jid) || other.jid == jid));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,jid);
+}
+
+@override
+String toString() {
+    return 'IrcEvent.contactRemoved(jid: $jid)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_ContactRemovedCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_ContactRemovedCopyWith(IrcEvent_ContactRemoved value, $Res Function(IrcEvent_ContactRemoved) _then) = _$IrcEvent_ContactRemovedCopyWithImpl;
+@useResult
+$Res call({
+ String jid
+});
+
+
+
+
+}
+/// @nodoc
+class _$IrcEvent_ContactRemovedCopyWithImpl<$Res>
+    implements $IrcEvent_ContactRemovedCopyWith<$Res> {
+  _$IrcEvent_ContactRemovedCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_ContactRemoved _self;
+  final $Res Function(IrcEvent_ContactRemoved) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? jid = null,}) {
+  return _then(IrcEvent_ContactRemoved(
+jid: null == jid ? _self.jid : jid // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class IrcEvent_SubscriptionRequest extends IrcEvent {
+  const IrcEvent_SubscriptionRequest({required this.jid}): super._();
+  
+
+ final  String jid;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_SubscriptionRequestCopyWith<IrcEvent_SubscriptionRequest> get copyWith => _$IrcEvent_SubscriptionRequestCopyWithImpl<IrcEvent_SubscriptionRequest>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_SubscriptionRequest&&(identical(other.jid, jid) || other.jid == jid));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,jid);
+}
+
+@override
+String toString() {
+    return 'IrcEvent.subscriptionRequest(jid: $jid)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_SubscriptionRequestCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_SubscriptionRequestCopyWith(IrcEvent_SubscriptionRequest value, $Res Function(IrcEvent_SubscriptionRequest) _then) = _$IrcEvent_SubscriptionRequestCopyWithImpl;
+@useResult
+$Res call({
+ String jid
+});
+
+
+
+
+}
+/// @nodoc
+class _$IrcEvent_SubscriptionRequestCopyWithImpl<$Res>
+    implements $IrcEvent_SubscriptionRequestCopyWith<$Res> {
+  _$IrcEvent_SubscriptionRequestCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_SubscriptionRequest _self;
+  final $Res Function(IrcEvent_SubscriptionRequest) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? jid = null,}) {
+  return _then(IrcEvent_SubscriptionRequest(
+jid: null == jid ? _self.jid : jid // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class IrcEvent_MessageEdited extends IrcEvent {
+  const IrcEvent_MessageEdited({required this.target, required this.msgid, required this.sender, required this.message}): super._();
+  
+
+ final  Target target;
+ final  String msgid;
+ final  String sender;
+ final  ChatMessage message;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_MessageEditedCopyWith<IrcEvent_MessageEdited> get copyWith => _$IrcEvent_MessageEditedCopyWithImpl<IrcEvent_MessageEdited>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MessageEdited&&(identical(other.target, target) || other.target == target)&&(identical(other.msgid, msgid) || other.msgid == msgid)&&(identical(other.sender, sender) || other.sender == sender)&&(identical(other.message, message) || other.message == message));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,target,msgid,sender,message);
+}
+
+@override
+String toString() {
+    return 'IrcEvent.messageEdited(target: $target, msgid: $msgid, sender: $sender, message: $message)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_MessageEditedCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_MessageEditedCopyWith(IrcEvent_MessageEdited value, $Res Function(IrcEvent_MessageEdited) _then) = _$IrcEvent_MessageEditedCopyWithImpl;
+@useResult
+$Res call({
+ Target target, String msgid, String sender, ChatMessage message
+});
+
+
+$TargetCopyWith<$Res> get target;
+
+}
+/// @nodoc
+class _$IrcEvent_MessageEditedCopyWithImpl<$Res>
+    implements $IrcEvent_MessageEditedCopyWith<$Res> {
+  _$IrcEvent_MessageEditedCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_MessageEdited _self;
+  final $Res Function(IrcEvent_MessageEdited) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? target = null,Object? msgid = null,Object? sender = null,Object? message = null,}) {
+  return _then(IrcEvent_MessageEdited(
+target: null == target ? _self.target : target // ignore: cast_nullable_to_non_nullable
+as Target,msgid: null == msgid ? _self.msgid : msgid // ignore: cast_nullable_to_non_nullable
+as String,sender: null == sender ? _self.sender : sender // ignore: cast_nullable_to_non_nullable
+as String,message: null == message ? _self.message : message // ignore: cast_nullable_to_non_nullable
+as ChatMessage,
+  ));
+}
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$TargetCopyWith<$Res> get target {
+  
+  return $TargetCopyWith<$Res>(_self.target, (value) {
+    return _then(_self.copyWith(target: value));
+  });
+}
+}
+
+/// @nodoc
+
+
+class IrcEvent_MessageRetracted extends IrcEvent {
+  const IrcEvent_MessageRetracted({required this.target, required this.msgid, required this.sender}): super._();
+  
+
+ final  Target target;
+ final  String msgid;
+ final  String sender;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_MessageRetractedCopyWith<IrcEvent_MessageRetracted> get copyWith => _$IrcEvent_MessageRetractedCopyWithImpl<IrcEvent_MessageRetracted>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_MessageRetracted&&(identical(other.target, target) || other.target == target)&&(identical(other.msgid, msgid) || other.msgid == msgid)&&(identical(other.sender, sender) || other.sender == sender));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,target,msgid,sender);
+}
+
+@override
+String toString() {
+    return 'IrcEvent.messageRetracted(target: $target, msgid: $msgid, sender: $sender)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_MessageRetractedCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_MessageRetractedCopyWith(IrcEvent_MessageRetracted value, $Res Function(IrcEvent_MessageRetracted) _then) = _$IrcEvent_MessageRetractedCopyWithImpl;
+@useResult
+$Res call({
+ Target target, String msgid, String sender
+});
+
+
+$TargetCopyWith<$Res> get target;
+
+}
+/// @nodoc
+class _$IrcEvent_MessageRetractedCopyWithImpl<$Res>
+    implements $IrcEvent_MessageRetractedCopyWith<$Res> {
+  _$IrcEvent_MessageRetractedCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_MessageRetracted _self;
+  final $Res Function(IrcEvent_MessageRetracted) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? target = null,Object? msgid = null,Object? sender = null,}) {
+  return _then(IrcEvent_MessageRetracted(
+target: null == target ? _self.target : target // ignore: cast_nullable_to_non_nullable
+as Target,msgid: null == msgid ? _self.msgid : msgid // ignore: cast_nullable_to_non_nullable
+as String,sender: null == sender ? _self.sender : sender // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$TargetCopyWith<$Res> get target {
+  
+  return $TargetCopyWith<$Res>(_self.target, (value) {
+    return _then(_self.copyWith(target: value));
+  });
+}
+}
+
+/// @nodoc
+
+
+class IrcEvent_UploadAvailable extends IrcEvent {
+  const IrcEvent_UploadAvailable({this.maxBytes}): super._();
+  
+
+ final  BigInt? maxBytes;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$IrcEvent_UploadAvailableCopyWith<IrcEvent_UploadAvailable> get copyWith => _$IrcEvent_UploadAvailableCopyWithImpl<IrcEvent_UploadAvailable>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is IrcEvent_UploadAvailable&&(identical(other.maxBytes, maxBytes) || other.maxBytes == maxBytes));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,maxBytes);
+}
+
+@override
+String toString() {
+    return 'IrcEvent.uploadAvailable(maxBytes: $maxBytes)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $IrcEvent_UploadAvailableCopyWith<$Res> implements $IrcEventCopyWith<$Res> {
+  factory $IrcEvent_UploadAvailableCopyWith(IrcEvent_UploadAvailable value, $Res Function(IrcEvent_UploadAvailable) _then) = _$IrcEvent_UploadAvailableCopyWithImpl;
+@useResult
+$Res call({
+ BigInt? maxBytes
+});
+
+
+
+
+}
+/// @nodoc
+class _$IrcEvent_UploadAvailableCopyWithImpl<$Res>
+    implements $IrcEvent_UploadAvailableCopyWith<$Res> {
+  _$IrcEvent_UploadAvailableCopyWithImpl(this._self, this._then);
+
+  final IrcEvent_UploadAvailable _self;
+  final $Res Function(IrcEvent_UploadAvailable) _then;
+
+/// Create a copy of IrcEvent
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? maxBytes = freezed,}) {
+  return _then(IrcEvent_UploadAvailable(
+maxBytes: freezed == maxBytes ? _self.maxBytes : maxBytes // ignore: cast_nullable_to_non_nullable
+as BigInt?,
   ));
 }
 

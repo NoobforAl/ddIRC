@@ -509,6 +509,43 @@ impl App {
                 self.server_line(LineKind::Info, format!("{verb} \"{filename}\""));
             }
             IrcEvent::FileTransferProgress { .. } => {}
+
+            // The contact list has no pane here, and presence changes are not
+            // worth a line each. A request to see us is: it is waiting on an
+            // answer, and nothing else tells the user it is there.
+            IrcEvent::Contact(_) | IrcEvent::ContactRemoved { .. } => {}
+            IrcEvent::UploadAvailable { .. } => {}
+            IrcEvent::SubscriptionRequest { jid } => {
+                self.buffers[0].push(Line::system(
+                    LineKind::Info,
+                    format!(
+                        "{jid} asks to see when you are online: /accept {jid} or /decline {jid}"
+                    ),
+                ));
+            }
+            IrcEvent::MessageEdited {
+                target,
+                sender,
+                message,
+                ..
+            } => {
+                let name = target.name().to_owned();
+                let text: String = message.spans.iter().map(|s| s.text.as_str()).collect();
+                self.line_in(
+                    &name,
+                    Line::system(
+                        LineKind::Info,
+                        format!("{sender} corrected a message: {text}"),
+                    ),
+                );
+            }
+            IrcEvent::MessageRetracted { target, sender, .. } => {
+                let name = target.name().to_owned();
+                self.line_in(
+                    &name,
+                    Line::system(LineKind::Info, format!("{sender} deleted a message")),
+                );
+            }
             IrcEvent::FileTransferEnded {
                 filename,
                 path,

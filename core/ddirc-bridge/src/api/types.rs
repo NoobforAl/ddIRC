@@ -153,6 +153,88 @@ pub struct ChatMessage {
     pub reply_to: Option<ReplyRef>,
 }
 
+/// Whether a contact is there, as far as they have said. XMPP only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Availability {
+    Offline,
+    Available,
+    Away,
+    Dnd,
+    ExtendedAway,
+}
+
+impl From<types::Availability> for Availability {
+    fn from(a: types::Availability) -> Self {
+        match a {
+            types::Availability::Offline => Self::Offline,
+            types::Availability::Available => Self::Available,
+            types::Availability::Away => Self::Away,
+            types::Availability::Dnd => Self::Dnd,
+            types::Availability::ExtendedAway => Self::ExtendedAway,
+        }
+    }
+}
+
+impl From<Availability> for types::Availability {
+    fn from(a: Availability) -> Self {
+        match a {
+            Availability::Offline => Self::Offline,
+            Availability::Available => Self::Available,
+            Availability::Away => Self::Away,
+            Availability::Dnd => Self::Dnd,
+            Availability::ExtendedAway => Self::ExtendedAway,
+        }
+    }
+}
+
+/// Who sees whose presence between us and a contact. XMPP only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Subscription {
+    /// Neither of us sees the other.
+    Unlinked,
+    /// We see them.
+    To,
+    /// They see us.
+    From,
+    Both,
+}
+
+impl From<types::Subscription> for Subscription {
+    fn from(s: types::Subscription) -> Self {
+        match s {
+            types::Subscription::None => Self::Unlinked,
+            types::Subscription::To => Self::To,
+            types::Subscription::From => Self::From,
+            types::Subscription::Both => Self::Both,
+        }
+    }
+}
+
+/// One person on the contact list. XMPP only.
+#[derive(Debug, Clone)]
+pub struct ContactView {
+    pub jid: String,
+    pub name: Option<String>,
+    pub subscription: Subscription,
+    /// We asked to see them and they have not answered.
+    pub asked: bool,
+    pub availability: Availability,
+    pub status: String,
+}
+
+impl From<types::ContactView> for ContactView {
+    fn from(c: types::ContactView) -> Self {
+        Self {
+            jid: c.jid,
+            name: c.name,
+            subscription: c.subscription.into(),
+            asked: c.asked,
+            availability: c.availability.into(),
+            status: c.status,
+        }
+    }
+}
+
 /// What a reply answers. See `ddirc_core::text::reply`.
 ///
 /// Any of it can be missing: a reply by tag alone has an id and nothing else,
@@ -311,6 +393,38 @@ pub enum IrcEvent {
     },
     /// The answer to `whois`.
     Whois(WhoisInfo),
+
+    /// Someone on the contact list appeared or changed. An upsert, keyed by the
+    /// address. XMPP only.
+    Contact(ContactView),
+    /// Someone left the contact list. XMPP only.
+    ContactRemoved {
+        jid: String,
+    },
+    /// Someone asks to see when we are online. Reported, never answered for the
+    /// user: answer it with `answer_subscription`. XMPP only.
+    SubscriptionRequest {
+        jid: String,
+    },
+    /// A message already shown was corrected by its author. `msgid` is the id
+    /// the line was shown under. XMPP only.
+    MessageEdited {
+        target: Target,
+        msgid: String,
+        sender: String,
+        message: ChatMessage,
+    },
+    /// A message already shown was taken back by its author, and is to be
+    /// removed. XMPP only.
+    MessageRetracted {
+        target: Target,
+        msgid: String,
+        sender: String,
+    },
+    /// The server takes file uploads, up to this many bytes. XMPP only.
+    UploadAvailable {
+        max_bytes: Option<u64>,
+    },
 
     Error {
         message: String,
@@ -666,6 +780,30 @@ impl From<events::IrcEvent> for IrcEvent {
             events::IrcEvent::MessagesDropped { channel, count } => {
                 Self::MessagesDropped { channel, count }
             }
+            events::IrcEvent::Contact(contact) => Self::Contact((*contact).into()),
+            events::IrcEvent::ContactRemoved { jid } => Self::ContactRemoved { jid },
+            events::IrcEvent::SubscriptionRequest { jid } => Self::SubscriptionRequest { jid },
+            events::IrcEvent::MessageEdited {
+                target,
+                msgid,
+                sender,
+                message,
+            } => Self::MessageEdited {
+                target: target.into(),
+                msgid,
+                sender,
+                message: (*message).into(),
+            },
+            events::IrcEvent::MessageRetracted {
+                target,
+                msgid,
+                sender,
+            } => Self::MessageRetracted {
+                target: target.into(),
+                msgid,
+                sender,
+            },
+            events::IrcEvent::UploadAvailable { max_bytes } => Self::UploadAvailable { max_bytes },
             events::IrcEvent::ChannelList {
                 channels,
                 done,

@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'types.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`
 
 @freezed
 sealed class AuthOutcome with _$AuthOutcome {
@@ -24,6 +24,9 @@ sealed class AuthOutcome with _$AuthOutcome {
       AuthOutcome_NickServFallback;
   const factory AuthOutcome.anonymous() = AuthOutcome_Anonymous;
 }
+
+/// Whether a contact is there, as far as they have said. XMPP only.
+enum Availability { offline, available, away, dnd, extendedAway }
 
 /// One channel in the server's directory.
 class ChannelListing {
@@ -169,6 +172,48 @@ sealed class ConnectionStatus with _$ConnectionStatus {
     required BigInt retryInSecs,
     required int attempt,
   }) = ConnectionStatus_Reconnecting;
+}
+
+/// One person on the contact list. XMPP only.
+class ContactView {
+  final String jid;
+  final String? name;
+  final Subscription subscription;
+
+  /// We asked to see them and they have not answered.
+  final bool asked;
+  final Availability availability;
+  final String status;
+
+  const ContactView({
+    required this.jid,
+    this.name,
+    required this.subscription,
+    required this.asked,
+    required this.availability,
+    required this.status,
+  });
+
+  @override
+  int get hashCode =>
+      jid.hashCode ^
+      name.hashCode ^
+      subscription.hashCode ^
+      asked.hashCode ^
+      availability.hashCode ^
+      status.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContactView &&
+          runtimeType == other.runtimeType &&
+          jid == other.jid &&
+          name == other.name &&
+          subscription == other.subscription &&
+          asked == other.asked &&
+          availability == other.availability &&
+          status == other.status;
 }
 
 /// A file someone has offered to send.
@@ -363,6 +408,40 @@ sealed class IrcEvent with _$IrcEvent {
 
   /// The answer to `whois`.
   const factory IrcEvent.whois(WhoisInfo field0) = IrcEvent_Whois;
+
+  /// Someone on the contact list appeared or changed. An upsert, keyed by the
+  /// address. XMPP only.
+  const factory IrcEvent.contact(ContactView field0) = IrcEvent_Contact;
+
+  /// Someone left the contact list. XMPP only.
+  const factory IrcEvent.contactRemoved({required String jid}) =
+      IrcEvent_ContactRemoved;
+
+  /// Someone asks to see when we are online. Reported, never answered for the
+  /// user: answer it with `answer_subscription`. XMPP only.
+  const factory IrcEvent.subscriptionRequest({required String jid}) =
+      IrcEvent_SubscriptionRequest;
+
+  /// A message already shown was corrected by its author. `msgid` is the id
+  /// the line was shown under. XMPP only.
+  const factory IrcEvent.messageEdited({
+    required Target target,
+    required String msgid,
+    required String sender,
+    required ChatMessage message,
+  }) = IrcEvent_MessageEdited;
+
+  /// A message already shown was taken back by its author, and is to be
+  /// removed. XMPP only.
+  const factory IrcEvent.messageRetracted({
+    required Target target,
+    required String msgid,
+    required String sender,
+  }) = IrcEvent_MessageRetracted;
+
+  /// The server takes file uploads, up to this many bytes. XMPP only.
+  const factory IrcEvent.uploadAvailable({BigInt? maxBytes}) =
+      IrcEvent_UploadAvailable;
   const factory IrcEvent.error({required String message, required bool fatal}) =
       IrcEvent_Error;
 }
@@ -649,6 +728,19 @@ class SpanStyle {
           inverse == other.inverse &&
           fg == other.fg &&
           bg == other.bg;
+}
+
+/// Who sees whose presence between us and a contact. XMPP only.
+enum Subscription {
+  /// Neither of us sees the other.
+  unlinked,
+
+  /// We see them.
+  to,
+
+  /// They see us.
+  from,
+  both,
 }
 
 @freezed

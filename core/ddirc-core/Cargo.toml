@@ -28,6 +28,8 @@ rustls.workspace = true
 webpki-roots.workspace = true
 rustls-native-certs.workspace = true
 sasl.workspace = true
+url.workspace = true
+httparse.workspace = true
 
 [dev-dependencies]
 # A throwaway CA and leaf, to run the XMPP connector against a real TLS server.

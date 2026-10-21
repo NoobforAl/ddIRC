@@ -22,7 +22,8 @@
 //! refusal that waiting cannot cure stops and says so.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -47,7 +48,8 @@ use crate::xmpp::auth;
 use crate::xmpp::config::XmppConfig;
 use crate::xmpp::connector::DirectTlsConnector;
 use crate::xmpp::diagnose::{self, Diagnosis};
-use crate::xmpp::session::{Effects, Session};
+use crate::xmpp::session::{Effects, Session, UploadJob};
+use crate::xmpp::upload;
 
 /// How many events may queue up before we start dropping them.
 const EVENT_QUEUE: usize = 1024;
@@ -108,6 +110,110 @@ pub fn spawn(config: XmppConfig) -> (ConnectionHandle, mpsc::Receiver<IrcEvent>)
     });
 
     (ConnectionHandle::new(command_tx), event_rx)
+}
+
+/// What an upload task tells the actor, since it cannot emit events itself.
+#[derive(Debug)]
+enum UploadReport {
+    Progress {
+        ticket: u64,
+        sent: u64,
+    },
+    Finished {
+        ticket: u64,
+        result: Result<(), String>,
+    },
+}
+
+/// How much more must be sent before progress is reported again. A report per
+/// chunk would be thousands of events for a large file, about a number nobody
+/// reads that fast.
+const PROGRESS_EVERY: u64 = 64 * 1024;
+
+/// The files on their way out.
+///
+/// The bytes travel on a connection of their own, to a web server and not to the
+/// XMPP server, so an upload runs as a task beside the stream and reports back
+/// to it. Nothing here decides *whether* a file may be sent; the session did,
+/// and handed over a checked slot.
+struct Uploads {
+    connector: DirectTlsConnector,
+    /// Files waiting for a slot: where they are, and how large they were said
+    /// to be when the slot was asked for.
+    staged: HashMap<u64, (PathBuf, u64)>,
+    running: HashMap<u64, tokio::task::AbortHandle>,
+    reports: mpsc::UnboundedSender<UploadReport>,
+}
+
+impl Uploads {
+    fn new(connector: DirectTlsConnector, reports: mpsc::UnboundedSender<UploadReport>) -> Self {
+        Self {
+            connector,
+            staged: HashMap::new(),
+            running: HashMap::new(),
+            reports,
+        }
+    }
+
+    /// A slot has been granted: send the file.
+    fn start(&mut self, job: UploadJob) {
+        let Some((path, size)) = self.staged.remove(&job.ticket) else {
+            return;
+        };
+        let connector = self.connector.clone();
+        let reports = self.reports.clone();
+        let ticket = job.ticket;
+        let task = tokio::spawn(async move {
+            let result = send_file(&connector, &job, &path, size, &reports).await;
+            let _ = reports.send(UploadReport::Finished {
+                ticket,
+                result: result.map_err(|e| e.to_string()),
+            });
+        });
+        self.running.insert(ticket, task.abort_handle());
+    }
+
+    /// Stop one, wherever it has got to. True if there was one to stop.
+    fn cancel(&mut self, ticket: u64) -> bool {
+        let staged = self.staged.remove(&ticket).is_some();
+        let running = self.running.remove(&ticket).map(|h| h.abort()).is_some();
+        staged || running
+    }
+}
+
+impl Drop for Uploads {
+    /// A connection that is closed takes its uploads with it: a file still
+    /// going out after the user disconnected is a thing nobody would expect.
+    fn drop(&mut self) {
+        for handle in self.running.values() {
+            handle.abort();
+        }
+    }
+}
+
+/// Connect to the upload address, and send the file to it.
+async fn send_file(
+    connector: &DirectTlsConnector,
+    job: &UploadJob,
+    path: &std::path::Path,
+    size: u64,
+    reports: &mpsc::UnboundedSender<UploadReport>,
+) -> Result<(), upload::UploadError> {
+    let host = job.slot.put.host_str().unwrap_or_default();
+    let port = job.slot.put.port_or_known_default().unwrap_or(443);
+    let stream = connector
+        .https_stream(host, port)
+        .await
+        .map_err(upload::UploadError::Connection)?;
+    let ticket = job.ticket;
+    let mut reported = 0u64;
+    upload::put(stream, &job.slot, path, size, job.content_type, |sent| {
+        if sent == size || sent - reported >= PROGRESS_EVERY {
+            reported = sent;
+            let _ = reports.send(UploadReport::Progress { ticket, sent });
+        }
+    })
+    .await
 }
 
 /// What the login task tells the actor, since it cannot emit events itself.
@@ -442,6 +548,8 @@ impl Actor {
             retry_now: Notify::new(),
         });
         let (report_tx, mut reports) = mpsc::unbounded_channel();
+        let (upload_tx, mut upload_reports) = mpsc::unbounded_channel();
+        let mut uploads = Uploads::new(connector.clone(), upload_tx);
 
         let password = self.config.password.to_string();
         let mut stream = {
@@ -484,9 +592,19 @@ impl Actor {
                             break Ended::Quit;
                         }
                         ClientCommand::Reconnect => shared.retry_now.notify_one(),
+                        ClientCommand::SendFile { target, path } => {
+                            let fx = self.begin_upload(&mut session, &mut uploads, &target, &path).await;
+                            self.apply(fx, &stream, &mut paced, &mut uploads).await;
+                        }
+                        ClientCommand::CancelTransfer { id } => {
+                            if uploads.cancel(id) {
+                                let fx = session.upload_finished(id, Err("Cancelled.".to_owned()));
+                                self.apply(fx, &stream, &mut paced, &mut uploads).await;
+                            }
+                        }
                         other => {
                             let fx = session.on_command(other);
-                            self.apply(fx, &stream, &mut paced).await;
+                            self.apply(fx, &stream, &mut paced, &mut uploads).await;
                         }
                     }
                 }
@@ -504,7 +622,7 @@ impl Actor {
                             self.status(ConnectionStatus::Connected, None);
                             if let Ok(bound) = bound_jid.try_into_full() {
                                 let fx = session.on_online(&bound);
-                                self.apply(fx, &stream, &mut paced).await;
+                                self.apply(fx, &stream, &mut paced, &mut uploads).await;
                             }
                         }
                         Event::Stream(StreamEvent::Suspended) => {
@@ -526,8 +644,24 @@ impl Actor {
                                 continue;
                             }
                             let fx = session.on_stanza(stanza);
-                            self.apply(fx, &stream, &mut paced).await;
+                            self.apply(fx, &stream, &mut paced, &mut uploads).await;
                         }
+                    }
+                }
+                report = upload_reports.recv() => {
+                    match report {
+                        Some(UploadReport::Progress { ticket, sent }) => {
+                            self.emit(IrcEvent::FileTransferProgress {
+                                id: ticket,
+                                transferred: sent,
+                            });
+                        }
+                        Some(UploadReport::Finished { ticket, result }) => {
+                            uploads.running.remove(&ticket);
+                            let fx = session.upload_finished(ticket, result);
+                            self.apply(fx, &stream, &mut paced, &mut uploads).await;
+                        }
+                        None => {}
                     }
                 }
                 report = reports.recv() => {
@@ -587,8 +721,56 @@ impl Actor {
         }
     }
 
+    /// Start sharing a file: read what is needed to ask for a slot, and ask.
+    ///
+    /// Done here and not in the session because the session has no file system:
+    /// it is told the name and the size, and decides. The file is held by path
+    /// until a slot is granted and read from disk as it is sent, never held
+    /// whole in memory.
+    async fn begin_upload(
+        &mut self,
+        session: &mut Session,
+        uploads: &mut Uploads,
+        target: &str,
+        path: &str,
+    ) -> Effects {
+        let refuse = |message: &str| {
+            let mut fx = Effects::default();
+            fx.events.push(IrcEvent::Error {
+                message: message.to_owned(),
+                fatal: false,
+            });
+            fx
+        };
+        let metadata = match tokio::fs::metadata(path).await {
+            Ok(metadata) if metadata.is_file() => metadata,
+            Ok(_) => return refuse("That is not a file."),
+            Err(_) => return refuse("Could not read that file."),
+        };
+        let name = std::path::Path::new(path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "file".to_owned());
+        let (ticket, fx) = session.begin_upload(target, &name, metadata.len());
+        if let Some(ticket) = ticket {
+            uploads
+                .staged
+                .insert(ticket, (PathBuf::from(path), metadata.len()));
+        }
+        fx
+    }
+
     /// Carry out what the session decided.
-    async fn apply(&mut self, fx: Effects, stream: &StanzaStream, paced: &mut VecDeque<Stanza>) {
+    async fn apply(
+        &mut self,
+        fx: Effects,
+        stream: &StanzaStream,
+        paced: &mut VecDeque<Stanza>,
+        uploads: &mut Uploads,
+    ) {
+        for job in fx.uploads {
+            uploads.start(job);
+        }
         for event in fx.events {
             self.emit(event);
         }

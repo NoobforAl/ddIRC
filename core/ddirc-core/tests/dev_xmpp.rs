@@ -640,3 +640,536 @@ async fn catches_up_on_what_was_said_while_the_connection_was_down() {
         .await;
     assert!(!live.is_self);
 }
+
+// ---- contacts, corrections and files -----------------------------------------------
+
+use ddirc_core::api::types::{Availability, Subscription};
+
+/// The text of a message, the way the UI would read it.
+fn plain(m: &ddirc_core::api::types::ChatMessage) -> String {
+    ddirc_core::text::format::strip(&ddirc_core::text::format::encode(&m.spans))
+}
+
+/// Take `a` and `b` off each other's contact lists, whatever state an earlier
+/// run left them in. Errors from the server for a contact that is not there are
+/// expected and ignored; what matters is that the lists are empty afterwards.
+async fn clear_contacts(a: &mut Client, b: &mut Client) {
+    for (client, other) in [(&*a, "bob@localhost"), (&*b, "alice@localhost")] {
+        client
+            .send(ClientCommand::RemoveContact {
+                jid: other.to_owned(),
+            })
+            .await;
+    }
+    // Let the server finish, and drain what it said about it.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    for client in [a, b] {
+        while let Ok(event) = client.events.try_recv() {
+            client.seen.push(event);
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn contacts_are_asked_for_accepted_and_seen_online() {
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    let mut bob = Client::start(account("bob", "hunter2", &[]));
+    alice.connected().await;
+    bob.connected().await;
+    clear_contacts(&mut alice, &mut bob).await;
+
+    // Alice asks to see bob. Bob is told, and nothing is granted by itself.
+    alice
+        .send(ClientCommand::AddContact {
+            jid: "bob@localhost".to_owned(),
+            name: Some("Bob".to_owned()),
+        })
+        .await;
+    let asked = alice
+        .wait("bob on alice's list", |e| match e {
+            IrcEvent::Contact(c) if c.jid == "bob@localhost" => Some((**c).clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(asked.name.as_deref(), Some("Bob"));
+    assert_eq!(asked.subscription, Subscription::None);
+    bob.wait("alice's request", |e| {
+        matches!(e, IrcEvent::SubscriptionRequest { jid } if jid == "alice@localhost").then_some(())
+    })
+    .await;
+
+    // Bob says yes. Alice can now see bob; bob cannot yet see alice.
+    bob.send(ClientCommand::AnswerSubscription {
+        jid: "alice@localhost".to_owned(),
+        accept: true,
+    })
+    .await;
+    let seen = alice
+        .wait("alice seeing bob", |e| match e {
+            IrcEvent::Contact(c)
+                if c.jid == "bob@localhost" && c.subscription == Subscription::To =>
+            {
+                Some((**c).clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert!(!seen.asked);
+
+    // Bob's presence now reaches alice, with what he chose to say.
+    bob.send(ClientCommand::SetAvailability {
+        availability: Availability::Away,
+        status: Some("at lunch".to_owned()),
+    })
+    .await;
+    let away = alice
+        .wait("bob away", |e| match e {
+            IrcEvent::Contact(c)
+                if c.jid == "bob@localhost" && c.availability == Availability::Away =>
+            {
+                Some((**c).clone())
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(away.status, "at lunch");
+
+    // Bob asks to see alice back, and she answers.
+    bob.send(ClientCommand::AddContact {
+        jid: "alice@localhost".to_owned(),
+        name: None,
+    })
+    .await;
+    alice
+        .wait("bob's request", |e| {
+            matches!(e, IrcEvent::SubscriptionRequest { jid } if jid == "bob@localhost")
+                .then_some(())
+        })
+        .await;
+    alice
+        .send(ClientCommand::AnswerSubscription {
+            jid: "bob@localhost".to_owned(),
+            accept: true,
+        })
+        .await;
+    alice
+        .wait("seeing each other", |e| {
+            matches!(e, IrcEvent::Contact(c)
+                if c.jid == "bob@localhost" && c.subscription == Subscription::Both)
+            .then_some(())
+        })
+        .await;
+
+    // Leaving the list ends it for both.
+    alice
+        .send(ClientCommand::RemoveContact {
+            jid: "bob@localhost".to_owned(),
+        })
+        .await;
+    alice
+        .wait("bob removed", |e| {
+            matches!(e, IrcEvent::ContactRemoved { jid } if jid == "bob@localhost").then_some(())
+        })
+        .await;
+    clear_contacts(&mut alice, &mut bob).await;
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn a_request_that_is_declined_grants_nothing() {
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    let mut bob = Client::start(account("bob", "hunter2", &[]));
+    alice.connected().await;
+    bob.connected().await;
+    clear_contacts(&mut alice, &mut bob).await;
+
+    alice
+        .send(ClientCommand::AddContact {
+            jid: "bob@localhost".to_owned(),
+            name: None,
+        })
+        .await;
+    bob.wait("alice's request", |e| {
+        matches!(e, IrcEvent::SubscriptionRequest { .. }).then_some(())
+    })
+    .await;
+    bob.send(ClientCommand::AnswerSubscription {
+        jid: "alice@localhost".to_owned(),
+        accept: false,
+    })
+    .await;
+    bob.send(ClientCommand::SetAvailability {
+        availability: Availability::Dnd,
+        status: Some("should not be seen".to_owned()),
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    while let Ok(event) = alice.events.try_recv() {
+        alice.seen.push(event);
+    }
+    assert!(
+        !alice.seen.iter().any(|e| matches!(e,
+            IrcEvent::Contact(c) if c.availability != Availability::Offline)),
+        "bob's presence reached someone he declined: {:#?}",
+        alice.seen
+    );
+    clear_contacts(&mut alice, &mut bob).await;
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn a_message_to_a_person_is_corrected_and_taken_back() {
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    let mut bob = Client::start(account("bob", "hunter2", &[]));
+    alice.connected().await;
+    bob.connected().await;
+
+    alice.say("bob@localhost", "teh plan").await;
+    let mine = alice
+        .message(Target::Direct("bob@localhost".to_owned()), "teh plan")
+        .await;
+    let id = mine.msgid.clone().expect("our own message has an id");
+    let theirs = bob
+        .message(Target::Direct("alice@localhost".to_owned()), "teh plan")
+        .await;
+    assert_eq!(theirs.msgid.as_deref(), Some(id.as_str()));
+
+    alice
+        .send(ClientCommand::EditMessage {
+            target: "bob@localhost".to_owned(),
+            msgid: id.clone(),
+            text: "the plan".to_owned(),
+        })
+        .await;
+    let edited = bob
+        .wait("the correction", |e| match e {
+            IrcEvent::MessageEdited { msgid, message, .. } => {
+                Some((msgid.clone(), message.clone()))
+            }
+            _ => None,
+        })
+        .await;
+    assert_eq!(edited.0, id);
+    assert_eq!(plain(&edited.1), "the plan");
+    assert!(
+        !bob.seen
+            .iter()
+            .any(|e| matches!(e, IrcEvent::Message(m) if plain(m).starts_with("(edited)"))),
+        "a correction is not a second message"
+    );
+
+    alice
+        .send(ClientCommand::RetractMessage {
+            target: "bob@localhost".to_owned(),
+            msgid: id.clone(),
+        })
+        .await;
+    let retracted = bob
+        .wait("the retraction", |e| match e {
+            IrcEvent::MessageRetracted { msgid, .. } => Some(msgid.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(retracted, id);
+    assert!(
+        !bob.seen.iter().any(
+            |e| matches!(e, IrcEvent::Message(m) if plain(m).contains("retracted a previous"))
+        ),
+        "the fallback text must not be shown as a message"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn a_message_in_a_room_is_corrected_and_taken_back() {
+    let room = unique_room("edit");
+    let mut alice = Client::start(account("alice", "hunter2", &[&room]));
+    alice.joined(&room).await;
+    let mut bob = Client::start(account("bob", "hunter2", &[&room]));
+    bob.joined(&room).await;
+
+    bob.say(&room, "teh room").await;
+    let heard = alice
+        .message(Target::Channel(room.clone()), "teh room")
+        .await;
+    let id = heard.msgid.clone().expect("the room gave it an id");
+    bob.message(Target::Channel(room.clone()), "teh room").await;
+
+    bob.send(ClientCommand::EditMessage {
+        target: room.clone(),
+        msgid: id.clone(),
+        text: "the room".to_owned(),
+    })
+    .await;
+    let edited = alice
+        .wait("the correction", |e| match e {
+            IrcEvent::MessageEdited { msgid, sender, .. } => Some((msgid.clone(), sender.clone())),
+            _ => None,
+        })
+        .await;
+    assert_eq!(edited, (id.clone(), "bob".to_owned()));
+
+    // Alice cannot edit bob's message, and the core says so rather than sending.
+    alice
+        .send(ClientCommand::EditMessage {
+            target: room.clone(),
+            msgid: id.clone(),
+            text: "words in his mouth".to_owned(),
+        })
+        .await;
+    alice
+        .wait("a refusal", |e| {
+            matches!(e, IrcEvent::Error { message, .. } if message.contains("edited")).then_some(())
+        })
+        .await;
+
+    bob.send(ClientCommand::RetractMessage {
+        target: room.clone(),
+        msgid: id.clone(),
+    })
+    .await;
+    let retracted = alice
+        .wait("the retraction", |e| match e {
+            IrcEvent::MessageRetracted { msgid, .. } => Some(msgid.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(retracted, id);
+}
+
+/// Fetch `url` over HTTPS the way the client would reach it, and return the body.
+async fn fetch(url: &str) -> Vec<u8> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let parsed = url::Url::parse(url).unwrap();
+    let connector =
+        ddirc_core::xmpp::connector::DirectTlsConnector::new(&account("alice", "hunter2", &[]))
+            .unwrap();
+    let mut stream = connector
+        .https_stream(parsed.host_str().unwrap(), parsed.port().unwrap_or(443))
+        .await
+        .unwrap();
+    let request = format!(
+        "GET {} HTTP/1.1\r\nHost: {}:{}\r\nConnection: close\r\n\r\n",
+        parsed.path(),
+        parsed.host_str().unwrap(),
+        parsed.port().unwrap_or(443)
+    );
+    stream.write_all(request.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    let _ = stream.read_to_end(&mut response).await;
+    let split = response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("an HTTP response");
+    assert!(
+        response.starts_with(b"HTTP/1.1 200"),
+        "{}",
+        String::from_utf8_lossy(&response[..split])
+    );
+    response[split + 4..].to_vec()
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn a_file_is_uploaded_and_the_link_reaches_the_other_person() {
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    let mut bob = Client::start(account("bob", "hunter2", &[]));
+    alice.connected().await;
+    bob.connected().await;
+    let max = alice
+        .wait("the upload service", |e| match e {
+            IrcEvent::UploadAvailable { max_bytes } => Some(*max_bytes),
+            _ => None,
+        })
+        .await;
+    assert!(max.is_some());
+
+    // Enough to need several chunks, and not something that could be
+    // mistaken for the right answer by accident.
+    let content: Vec<u8> = (0..300_000u32)
+        .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+        .collect();
+    let path = std::env::temp_dir().join(format!(
+        "ddirc-dev-upload-{}.bin",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(&path, &content).unwrap();
+
+    alice
+        .send(ClientCommand::SendFile {
+            target: "bob@localhost".to_owned(),
+            path: path.to_string_lossy().into_owned(),
+        })
+        .await;
+    alice
+        .wait("the transfer starting", |e| {
+            matches!(
+                e,
+                IrcEvent::FileTransferStarted {
+                    incoming: false,
+                    total: Some(300_000),
+                    ..
+                }
+            )
+            .then_some(())
+        })
+        .await;
+    let ended = alice
+        .wait("the transfer ending", |e| match e {
+            IrcEvent::FileTransferEnded { error, .. } => Some(error.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(ended, None, "{:#?}", alice.seen);
+    assert!(
+        alice
+            .seen
+            .iter()
+            .any(|e| matches!(e, IrcEvent::FileTransferProgress { .. })),
+        "progress was reported"
+    );
+
+    let link = bob
+        .message(Target::Direct("alice@localhost".to_owned()), "https://")
+        .await;
+    let link_text = plain(&link);
+    assert!(
+        link_text.starts_with("https://localhost:5443/upload/"),
+        "{link_text}"
+    );
+
+    // What was uploaded is what is at the link.
+    assert_eq!(fetch(link_text.trim()).await, content);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn a_file_that_does_not_exist_is_refused_without_asking_the_server() {
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    alice.connected().await;
+    alice
+        .wait("the upload service", |e| {
+            matches!(e, IrcEvent::UploadAvailable { .. }).then_some(())
+        })
+        .await;
+    alice
+        .send(ClientCommand::SendFile {
+            target: "bob@localhost".to_owned(),
+            path: "/no/such/file.bin".to_owned(),
+        })
+        .await;
+    alice
+        .wait("a refusal", |e| {
+            matches!(e, IrcEvent::Error { fatal: false, .. }).then_some(())
+        })
+        .await;
+    assert!(!alice
+        .seen
+        .iter()
+        .any(|e| matches!(e, IrcEvent::FileTransferStarted { .. })));
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn catches_up_on_chats_said_while_the_connection_was_down() {
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    let mut bob = Client::start(account("bob", "hunter2", &[]));
+    alice.connected().await;
+    bob.connected().await;
+
+    // Something alice sees live: the archive's id for it is her place to resume.
+    bob.say("alice@localhost", "chat before the drop").await;
+    alice
+        .message(
+            Target::Direct("bob@localhost".to_owned()),
+            "chat before the drop",
+        )
+        .await;
+
+    kick("alice");
+    bob.say("alice@localhost", "chat while you were away").await;
+    bob.say("alice@localhost", "chat, are you there?").await;
+
+    let missed = alice
+        .message(
+            Target::Direct("bob@localhost".to_owned()),
+            "chat while you were away",
+        )
+        .await;
+    assert!(!missed.is_self);
+    alice
+        .message(Target::Direct("bob@localhost".to_owned()), "are you there")
+        .await;
+
+    // Give the archive's copy time to arrive too: it must not be a second line.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    while let Ok(event) = alice.events.try_recv() {
+        alice.seen.push(event);
+    }
+    for needle in [
+        "chat before the drop",
+        "chat while you were away",
+        "are you there",
+    ] {
+        let shown = alice
+            .seen
+            .iter()
+            .filter(|e| matches!(e, IrcEvent::Message(m) if plain(m).contains(needle)))
+            .count();
+        assert_eq!(shown, 1, "{needle:?} was shown {shown} times");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn the_app_can_ask_for_chats_since_a_time_it_remembers() {
+    let mut bob = Client::start(account("bob", "hunter2", &[]));
+    bob.connected().await;
+    let before = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+
+    // Said while alice is online, so it is delivered to her live and is *not*
+    // held for her as an offline message - the only way to get it again is the
+    // archive.
+    let mut earlier = Client::start(account("alice", "hunter2", &[]));
+    earlier.connected().await;
+    bob.say("alice@localhost", "said while she was here").await;
+    earlier
+        .message(
+            Target::Direct("bob@localhost".to_owned()),
+            "said while she was here",
+        )
+        .await;
+    earlier
+        .send(ClientCommand::Disconnect { reason: None })
+        .await;
+    drop(earlier);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // A new run of the app: nothing seen, so nothing to resume from but a time.
+    let mut alice = Client::start(account("alice", "hunter2", &[]));
+    alice.connected().await;
+    alice
+        .send(ClientCommand::CatchUpChats {
+            since_ms: before - 5_000,
+        })
+        .await;
+    let heard = alice
+        .message(
+            Target::Direct("bob@localhost".to_owned()),
+            "said while she was here",
+        )
+        .await;
+    assert_eq!(heard.sender, "bob@localhost");
+    assert!(
+        heard.server_time_ms.is_some_and(|t| t >= before - 5_000),
+        "it carries the time it was said"
+    );
+}

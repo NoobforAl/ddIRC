@@ -102,6 +102,9 @@ pub struct DirectTlsConnector {
     port: u16,
     proxy: Option<ProxyConfig>,
     tls: Arc<ClientConfig>,
+    /// The same trust, for a server speaking HTTP: the difference is the
+    /// protocol the handshake offers.
+    http_tls: Arc<ClientConfig>,
 }
 
 impl fmt::Debug for DirectTlsConnector {
@@ -134,12 +137,15 @@ impl DirectTlsConnector {
         .map_err(|e| ConnectorError::Certificate(e.to_string()))?
         .with_root_certificates(roots)
         .with_no_client_auth();
+        let mut http_tls = tls.clone();
         tls.alpn_protocols = vec![ALPN.to_vec()];
+        http_tls.alpn_protocols = vec![b"http/1.1".to_vec()];
         Ok(Self {
             host: config.dial_host()?,
             port: config.dial_port(),
             proxy: config.proxy.clone(),
             tls: Arc::new(tls),
+            http_tls: Arc::new(http_tls),
         })
     }
 
@@ -147,8 +153,8 @@ impl DirectTlsConnector {
     ///
     /// The proxy is given the host as a *name*. Resolving it here first would
     /// be a lookup the proxy exists to prevent.
-    async fn dial(&self) -> io::Result<TcpStream> {
-        let target = (self.host.as_str(), self.port);
+    async fn dial(&self, host: &str, port: u16) -> io::Result<TcpStream> {
+        let target = (host, port);
         let Some(proxy) = &self.proxy else {
             return TcpStream::connect(target).await;
         };
@@ -165,12 +171,41 @@ impl DirectTlsConnector {
         Ok(stream.into_inner())
     }
 
-    async fn establish(&self, domain: &str) -> io::Result<(TlsStream<TcpStream>, ChannelBinding)> {
-        let name = ServerName::try_from(domain.to_owned())
+    /// A TLS connection to `host:port`, verified against `verify`, through the
+    /// proxy when there is one. Two names because the account's server may be
+    /// dialled at one and hold a certificate for another.
+    async fn tls_stream(
+        &self,
+        host: &str,
+        port: u16,
+        verify: &str,
+        config: &Arc<ClientConfig>,
+    ) -> io::Result<TlsStream<TcpStream>> {
+        let name = ServerName::try_from(verify.to_owned())
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
-        let tcp = self.dial().await?;
-        let tls = TlsConnector::from(self.tls.clone())
-            .connect(name, tcp)
+        let tcp = self.dial(host, port).await?;
+        TlsConnector::from(config.clone()).connect(name, tcp).await
+    }
+
+    /// A TLS connection to a web server, for uploading a file to the address
+    /// the account's server gave.
+    ///
+    /// By the same road as the XMPP connection and trusting the same
+    /// authorities: through the proxy when there is one, the name handed over
+    /// unresolved. Never a second way out of the application that a proxy
+    /// setting does not cover.
+    pub async fn https_stream(&self, host: &str, port: u16) -> io::Result<TlsStream<TcpStream>> {
+        timeout(
+            CONNECT_TIMEOUT,
+            self.tls_stream(host, port, host, &self.http_tls),
+        )
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connecting timed out"))?
+    }
+
+    async fn establish(&self, domain: &str) -> io::Result<(TlsStream<TcpStream>, ChannelBinding)> {
+        let tls = self
+            .tls_stream(&self.host, self.port, domain, &self.tls)
             .await?;
         // RFC 9266 `tls-exporter`, which SCRAM-PLUS binds the login to the
         // connection with. TLS 1.3 only; with 1.2 there is none, and the

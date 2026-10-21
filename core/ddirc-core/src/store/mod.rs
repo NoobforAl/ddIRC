@@ -691,6 +691,89 @@ pub fn append(lines: &[StoredLine]) -> Result<Vec<Option<i64>>, StoreError> {
     })
 }
 
+/// Replace the text of a stored message its author corrected.
+///
+/// Found by the id it was stored under *and* by who said it: a correction is
+/// believed from the author of the original and nobody else, and the store is
+/// the last place that could still be told otherwise. The search index is
+/// brought along, so searching finds what the message says now and not what it
+/// said before. Returns whether there was such a line to change.
+pub fn edit_line(
+    profile_id: &str,
+    conversation: &str,
+    msgid: &str,
+    sender: &str,
+    text: &str,
+) -> Result<bool, StoreError> {
+    with(|connection| {
+        let transaction = connection.unchecked_transaction()?;
+        let id: Option<i64> = transaction
+            .query_row(
+                "SELECT id FROM lines
+                 WHERE profile_id = ?1 AND conversation = ?2 AND msgid = ?3 AND sender = ?4",
+                params![profile_id, conversation, msgid, sender],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(id) = id else {
+            return Ok(false);
+        };
+        transaction.execute(
+            "UPDATE lines SET text = ?2 WHERE id = ?1",
+            params![id, text],
+        )?;
+        transaction.execute("DELETE FROM lines_fts WHERE rowid = ?1", [id])?;
+        transaction.execute(
+            "INSERT INTO lines_fts (rowid, sender, body) VALUES (?1, ?2, ?3)",
+            params![id, sender, crate::text::format::strip(text)],
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    })
+}
+
+/// Delete a stored message its author took back.
+///
+/// Gone, and not marked: retracting a message is asking for it not to be there,
+/// and a history that keeps it has not done what was asked. The same author
+/// check as [`edit_line`]. Pins and saved messages hold a copy of their own
+/// (see [`Mark`]) and are the user's choice; they are not touched.
+pub fn remove_line(
+    profile_id: &str,
+    conversation: &str,
+    msgid: &str,
+    sender: &str,
+) -> Result<bool, StoreError> {
+    with(|connection| {
+        // The search index follows by the trigger on delete.
+        let removed = connection.execute(
+            "DELETE FROM lines
+             WHERE profile_id = ?1 AND conversation = ?2 AND msgid = ?3 AND sender = ?4",
+            params![profile_id, conversation, msgid, sender],
+        )?;
+        Ok(removed > 0)
+    })
+}
+
+/// When the most recent line of one network was said, if there is one.
+///
+/// Where a client that has just started can resume from. The newest *written*
+/// line, by id, rather than the newest by time: the index is by id, so this
+/// is the cheap answer, and a replayed old message arriving last would only
+/// ever make the answer older, which fetches a little more than needed and
+/// loses nothing.
+pub fn last_seen_ms(profile_id: &str) -> Result<Option<i64>, StoreError> {
+    read(|connection| {
+        Ok(connection
+            .query_row(
+                "SELECT at_ms FROM lines WHERE profile_id = ?1 ORDER BY id DESC LIMIT 1",
+                [profile_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    })
+}
+
 /// Drop the oldest lines once the file is over its ceiling.
 ///
 /// By rowid rather than by timestamp: the id is the order things were written
@@ -1464,6 +1547,93 @@ mod tests {
             reply_nick: None,
             reply_excerpt: None,
         }
+    }
+
+    fn with_id(
+        conversation: &str,
+        at_ms: i64,
+        sender: &str,
+        text: &str,
+        msgid: &str,
+    ) -> StoredLine {
+        let mut line = said(conversation, at_ms, sender, text);
+        line.msgid = Some(msgid.to_owned());
+        line
+    }
+
+    #[test]
+    fn a_corrected_message_is_stored_as_corrected_and_found_as_such() {
+        let _store = TempStore::new("edit-line");
+        append(&[with_id("#one", 1, "bob", "teh plan", "m1")]).unwrap();
+
+        assert!(edit_line("p1", "#one", "m1", "bob", "the plan").unwrap());
+
+        let rows = tail("p1", "#one", 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].line.text, "the plan");
+        // Search sees the new words and no longer the old.
+        assert_eq!(search(Some("p1"), None, "plan", 10, None).unwrap().len(), 1);
+        assert!(search(Some("p1"), None, "teh", 10, None)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn only_the_author_can_have_a_stored_message_corrected() {
+        let _store = TempStore::new("edit-author");
+        append(&[with_id("#one", 1, "bob", "agreed", "m1")]).unwrap();
+
+        assert!(!edit_line("p1", "#one", "m1", "mallory", "disagreed").unwrap());
+        assert_eq!(tail("p1", "#one", 10).unwrap()[0].line.text, "agreed");
+    }
+
+    #[test]
+    fn a_correction_finds_only_its_own_network_and_conversation() {
+        let _store = TempStore::new("edit-scope");
+        append(&[with_id("#one", 1, "bob", "one", "m1")]).unwrap();
+        assert!(!edit_line("other-network", "#one", "m1", "bob", "x").unwrap());
+        assert!(!edit_line("p1", "#two", "m1", "bob", "x").unwrap());
+        assert!(!edit_line("p1", "#one", "nope", "bob", "x").unwrap());
+    }
+
+    #[test]
+    fn a_retracted_message_is_gone_from_the_history_and_from_search() {
+        let _store = TempStore::new("remove-line");
+        append(&[
+            with_id("#one", 1, "bob", "oops wrong chat", "m1"),
+            with_id("#one", 2, "bob", "fine", "m2"),
+        ])
+        .unwrap();
+
+        assert!(remove_line("p1", "#one", "m1", "bob").unwrap());
+
+        let rows = tail("p1", "#one", 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].line.text, "fine");
+        assert!(search(Some("p1"), None, "oops", 10, None)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn only_the_author_can_have_a_stored_message_removed() {
+        let _store = TempStore::new("remove-author");
+        append(&[with_id("#one", 1, "bob", "keep me", "m1")]).unwrap();
+        assert!(!remove_line("p1", "#one", "m1", "mallory").unwrap());
+        assert_eq!(tail("p1", "#one", 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_last_thing_seen_on_a_network_is_known() {
+        let _store = TempStore::new("last-seen");
+        assert_eq!(last_seen_ms("p1").unwrap(), None);
+        append(&[
+            said("#one", 1000, "bob", "a"),
+            said("#two", 2000, "bob", "b"),
+        ])
+        .unwrap();
+        assert_eq!(last_seen_ms("p1").unwrap(), Some(2000));
+        assert_eq!(last_seen_ms("someone-else").unwrap(), None);
     }
 
     #[test]

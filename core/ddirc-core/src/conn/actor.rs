@@ -151,6 +151,58 @@ pub enum ClientCommand {
         nick: String,
     },
 
+    /// Ask to see when someone is online, and put them on the contact list.
+    /// XMPP only.
+    AddContact {
+        jid: String,
+        name: Option<String>,
+    },
+
+    /// Take someone off the contact list, which also ends both directions of
+    /// seeing each other. XMPP only.
+    RemoveContact {
+        jid: String,
+    },
+
+    /// Say yes or no to someone who asked to see when we are online. XMPP only.
+    AnswerSubscription {
+        jid: String,
+        accept: bool,
+    },
+
+    /// Tell everyone who can see us how we are: here, away, busy. XMPP only.
+    ///
+    /// The status text is whatever the user typed and is sent as typed; it is
+    /// the one thing the client says about the user on its own account that the
+    /// user wrote.
+    SetAvailability {
+        availability: crate::api::types::Availability,
+        status: Option<String>,
+    },
+
+    /// Fetch what was said to us in one-to-one chats since `since_ms` (Unix
+    /// milliseconds), from the server's archive. XMPP only.
+    ///
+    /// For the first login of a run, when this connection has seen nothing to
+    /// catch up from. Once it has, it asks for what came after the last thing it
+    /// saw and this is ignored. Bounded like a room's catch-up.
+    CatchUpChats {
+        since_ms: i64,
+    },
+
+    /// Replace the text of a message we sent. XMPP only.
+    EditMessage {
+        target: String,
+        msgid: String,
+        text: String,
+    },
+
+    /// Take back a message we sent. XMPP only.
+    RetractMessage {
+        target: String,
+        msgid: String,
+    },
+
     /// Stop waiting out the backoff and attempt the next connection now.
     ///
     /// Only meaningful while reconnecting; ignored at any other time, which is
@@ -936,6 +988,20 @@ impl Actor {
             ClientCommand::SendFile { .. }
             | ClientCommand::AcceptFile { .. }
             | ClientCommand::CancelTransfer { .. } => {}
+            // Contacts, presence and corrections are XMPP's. Said so rather
+            // than ignored: a button that does nothing is the worse failure.
+            ClientCommand::AddContact { .. }
+            | ClientCommand::RemoveContact { .. }
+            | ClientCommand::AnswerSubscription { .. }
+            | ClientCommand::SetAvailability { .. }
+            | ClientCommand::CatchUpChats { .. }
+            | ClientCommand::EditMessage { .. }
+            | ClientCommand::RetractMessage { .. } => {
+                self.emit(IrcEvent::Error {
+                    message: "That is not available on IRC.".to_owned(),
+                    fatal: false,
+                });
+            }
         }
     }
 

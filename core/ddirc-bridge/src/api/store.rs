@@ -163,6 +163,34 @@ pub fn store_append(lines: Vec<StoredLine>) -> Result<Vec<Option<i64>>, String> 
     store::append(&lines).map_err(|e| e.to_string())
 }
 
+/// Replace the text of a stored message its author corrected, if the author is
+/// who is named. Returns whether there was such a line.
+pub fn store_edit_line(
+    profile_id: String,
+    conversation: String,
+    msgid: String,
+    sender: String,
+    spans: Vec<TextSpan>,
+) -> Result<bool, String> {
+    let text = format::encode(&spans.into_iter().map(Into::into).collect::<Vec<_>>());
+    store::edit_line(&profile_id, &conversation, &msgid, &sender, &text).map_err(|e| e.to_string())
+}
+
+/// Delete a stored message its author took back, if the author is who is named.
+pub fn store_remove_line(
+    profile_id: String,
+    conversation: String,
+    msgid: String,
+    sender: String,
+) -> Result<bool, String> {
+    store::remove_line(&profile_id, &conversation, &msgid, &sender).map_err(|e| e.to_string())
+}
+
+/// When the newest stored line of a network was said, in ms since the epoch.
+pub fn store_last_seen_ms(profile_id: String) -> Result<Option<i64>, String> {
+    store::last_seen_ms(&profile_id).map_err(|e| e.to_string())
+}
+
 fn rows(result: Result<Vec<store::Row>, store::StoreError>) -> Result<Vec<StoredLine>, String> {
     result
         .map(|rows| rows.into_iter().map(Into::into).collect())

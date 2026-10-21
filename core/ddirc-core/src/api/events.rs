@@ -5,7 +5,8 @@
 //! later does not change the API surface.
 
 use crate::api::types::{
-    AuthOutcome, ChannelListing, ChatMessage, ConnectionStatus, MemberView, WhoisInfo,
+    AuthOutcome, ChannelListing, ChatMessage, ConnectionStatus, ContactView, MemberView, Target,
+    WhoisInfo,
 };
 use crate::dcc::DccOffer;
 
@@ -201,6 +202,56 @@ pub enum IrcEvent {
     /// answers one with, and sent once it says it has finished.
     Whois(Box<WhoisInfo>),
 
+    /// A person on the contact list appeared, or something about them changed:
+    /// a name, who sees whom, whether they are online. XMPP only.
+    ///
+    /// An upsert, one person at a time: the UI files it under the address. A
+    /// roster arrives as one of these per contact, and a presence change as one
+    /// more, which keeps a contact list of hundreds from being re-sent whole
+    /// each time somebody goes for lunch.
+    Contact(Box<ContactView>),
+
+    /// Someone is no longer on the contact list. XMPP only.
+    ContactRemoved { jid: String },
+
+    /// Someone asks to see when we are online. XMPP only.
+    ///
+    /// Reported and never answered: accepting tells them we exist and are
+    /// reading, which is the user's to give. Answered by
+    /// [`crate::conn::actor::ClientCommand::AnswerSubscription`].
+    SubscriptionRequest { jid: String },
+
+    /// A message already shown was corrected by its author. XMPP only.
+    ///
+    /// `msgid` is the id the UI was given for the original, so it finds the
+    /// line without knowing how the protocol names it. `sender` is who made the
+    /// correction, who the core has already checked is who wrote the original;
+    /// it is here so the UI can check again rather than trust a bare id.
+    MessageEdited {
+        target: Target,
+        msgid: String,
+        sender: String,
+        message: Box<ChatMessage>,
+    },
+
+    /// A message already shown was taken back by its author. XMPP only.
+    ///
+    /// The line is to be removed, and not merely hidden: retracting a message
+    /// is asking for it to be gone, and a client that keeps it in its history
+    /// has not done what was asked.
+    MessageRetracted {
+        target: Target,
+        msgid: String,
+        sender: String,
+    },
+
+    /// The server offers somewhere to upload a file to, and says how large one
+    /// may be. XMPP only.
+    ///
+    /// Sent when it is known, which is some time after login, so the UI can
+    /// offer attaching a file only where it will work.
+    UploadAvailable { max_bytes: Option<u64> },
+
     /// A server error or a protocol-level problem worth showing the user.
     Error { message: String, fatal: bool },
 }
@@ -227,9 +278,17 @@ impl IrcEvent {
             // step for no gain.
             Self::FileTransferProgress { .. } => None,
             Self::MessagesDropped { channel, .. } => channel.as_deref(),
+            Self::MessageEdited { target, .. } | Self::MessageRetracted { target, .. } => {
+                Some(target.name())
+            }
             // Belongs to the network, not to any one conversation: it is a
             // list of rooms the user is precisely not in.
             Self::ChannelList { .. } => None,
+            // About a person or about the account, not about a conversation.
+            Self::Contact(_)
+            | Self::ContactRemoved { .. }
+            | Self::SubscriptionRequest { .. }
+            | Self::UploadAvailable { .. } => None,
             // About a person, and shown about them rather than in a room.
             Self::Whois(_) => None,
             Self::Status { .. }
