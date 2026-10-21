@@ -374,7 +374,25 @@ impl Session {
             return;
         };
         let room = to.to_bare();
-        let in_room = self.rooms.get(&room).is_some_and(|r| r.joined);
+        // Who this is for is decided by the address alone, and the three cases
+        // must not be confused. A room's own address, with no resource, is the
+        // room: everyone in it hears. The same address *with* a resource is one
+        // person in it, and what is said is private. Anything else is a person.
+        // Treating the second as the first would send a private reply to the
+        // whole room.
+        let known_room = self.rooms.get(&room);
+        let in_room = known_room.is_some() && to.resource().is_none();
+        if known_room.is_some_and(|r| !r.joined) {
+            fx.error(format!("You are not in {room} yet."));
+            return;
+        }
+        // A private message to someone in a room is filed under their address in
+        // it, as one received from them is; anyone else under their account.
+        let conversation = if known_room.is_some() {
+            to.to_string()
+        } else {
+            room.to_string()
+        };
         for part in sanitize_outgoing(text) {
             let body = if action {
                 format!("/me {part}")
@@ -401,7 +419,7 @@ impl Session {
                     split_reply(&part)
                 };
                 fx.event(IrcEvent::Message(Box::new(ChatMessage {
-                    target: Target::Direct(to.to_bare().to_string()),
+                    target: Target::Direct(conversation.clone()),
                     sender: self.account.to_string(),
                     sender_prefix: None,
                     spans: format::parse(shown),
