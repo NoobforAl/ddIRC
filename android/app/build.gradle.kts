@@ -90,6 +90,9 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // What R8 must not rename. Without it a release build cannot read
+            // its own preferences; see the file for why.
+            proguardFile("proguard-rules.pro")
         }
     }
 }
