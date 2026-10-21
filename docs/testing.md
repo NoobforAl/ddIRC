@@ -105,6 +105,50 @@ a fresh session for it by time - the only way to get it is the archive. These
 tests share two accounts, so they leave the contact list empty when they finish
 and clear it when they start.
 
+## Memory and speed
+
+Two things are measured, because both were once guessed at and wrong.
+
+**The Rust session** has a counting allocator and a stopwatch around it:
+
+```bash
+cargo test -p ddirc-core --test xmpp_perf --release -- --ignored --nocapture --test-threads=1
+```
+
+It feeds the XMPP session a busy room (100,000 messages), a thousand-message
+stream of private chats, a 2,000-contact roster with 200,000 presence changes
+and 20,000 corrections, and prints time per stanza, allocations per stanza, the
+memory still held afterwards and the high-water mark. Two assertions make it
+more than a stopwatch: **memory held after 100,000 messages must not be more
+than after 20,000** (the session holds a bounded amount of anything the network
+can make it hold, and this is the test that says so at scale rather than with
+three messages), and **a stanza must cost under 200 microseconds**, a ceiling
+that exists so an accidental linear scan fails loudly. One did: the message
+index and the room's recent-id window were walked in full for every message,
+which was 2,000 and 512 string comparisons to record one, and a room message
+cost 56 microseconds for it. Both are hashed now (10.5 microseconds), and a
+randomised test runs the new index against the old behaviour through twelve
+thousand mixed operations, holes and evictions included.
+
+**The app** is measured on a real phone against a real server. The flood
+generator puts a crowd in a room - sixty accounts each saying something every
+two seconds, a tenth of it addressed to you:
+
+```bash
+DDIRC_FLOOD_ROOM=room@conference.localhost DDIRC_FLOOD_SECS=90   cargo test -p ddirc-core --test dev_xmpp --release -- --ignored --nocapture flood
+```
+
+and `adb shell dumpsys meminfo <package>` before and after, `top` beside it, and
+`adb shell dumpsys gfxinfo <package>` for dropped frames. Use a **release**
+build: a debug one carries its own interpreter and asserts, and its numbers are
+about itself.
+
+The layout tests (`test/xmpp_layout_test.dart`) render the XMPP dialogs on a
+320x568 phone, at text twice the normal size, right to left, with names ninety
+characters long and three hundred contacts, and fail on any overflow stripe or
+exception. They found a real one: the buttons on a contact request were wider
+than the screen when text was turned up.
+
 ## Continuous integration
 
 One workflow starts everything, and it decides the order:

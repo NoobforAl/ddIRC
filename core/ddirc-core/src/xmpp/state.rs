@@ -6,7 +6,7 @@
 //! nick in it, and standing is two independent things - *affiliation*, which
 //! the room remembers, and *role*, which lasts as long as the visit.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 
 use tokio_xmpp::jid::BareJid;
 use tokio_xmpp::parsers::muc::user::{Affiliation, Role};
@@ -157,6 +157,8 @@ pub struct Room {
     /// The ids of the messages most recently shown, so one that arrives twice -
     /// live, and again from the archive - is shown once.
     recent: VecDeque<String>,
+    /// The same ids, for asking whether one is there.
+    recent_set: HashSet<String>,
     occupants: BTreeMap<String, Occupant>,
 }
 
@@ -176,6 +178,7 @@ impl Room {
             renaming: BTreeMap::new(),
             last_id: None,
             recent: VecDeque::new(),
+            recent_set: HashSet::new(),
             occupants: BTreeMap::new(),
         }
     }
@@ -192,13 +195,19 @@ impl Room {
     /// Note that a message with this id is being shown. False if it already
     /// was, in which case it should not be shown again.
     pub fn remember(&mut self, id: &str) -> bool {
-        if self.recent.iter().any(|seen| seen == id) {
+        // Looked up in a set, not walked: this runs once for every message in a
+        // busy room, and a scan of 512 ids for each is most of what the rest of
+        // handling it costs.
+        if self.recent_set.contains(id) {
             return false;
         }
         if self.recent.len() >= RECENT_IDS {
-            self.recent.pop_front();
+            if let Some(old) = self.recent.pop_front() {
+                self.recent_set.remove(&old);
+            }
         }
         self.recent.push_back(id.to_owned());
+        self.recent_set.insert(id.to_owned());
         true
     }
 

@@ -1173,3 +1173,85 @@ async fn the_app_can_ask_for_chats_since_a_time_it_remembers() {
         "it carries the time it was said"
     );
 }
+
+// ---- a load generator ----------------------------------------------------------
+
+/// Many people talking in one room at once, for as long as asked.
+///
+/// Not a test: it asserts nothing, and exists to put a realistic crowd in front
+/// of a client under measurement (the phone, with `adb shell dumpsys meminfo`
+/// and `top` beside it). Each of `DDIRC_FLOOD_USERS` accounts (default 60) says
+/// something every two seconds - the most the core's own send pacing allows
+/// from one account - so the room hears about 30 messages a second, and every
+/// tenth is addressed to alice. The receiver's flood limit is 50 a second.
+///
+/// ```text
+/// DDIRC_FLOOD_ROOM=phone-test@conference.localhost DDIRC_FLOOD_SECS=90 \
+///   cargo test -p ddirc-core --test dev_xmpp --release -- --ignored --nocapture flood
+/// ```
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`; a load generator, not a test"]
+async fn flood_a_room_for_a_while() {
+    let room = std::env::var("DDIRC_FLOOD_ROOM")
+        .unwrap_or_else(|_| "phone-test@conference.localhost".to_owned());
+    let secs: u64 = std::env::var("DDIRC_FLOOD_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let users: usize = std::env::var("DDIRC_FLOOD_USERS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+
+    // Accounts are made through the server's own tool; one that exists already
+    // is not an error.
+    for n in 0..users {
+        let _ = std::process::Command::new("docker")
+            .args([
+                "exec",
+                "ddirc-dev-xmppd",
+                "ejabberdctl",
+                "register",
+                &format!("flood{n}"),
+                "localhost",
+                "hunter2",
+            ])
+            .output();
+    }
+
+    let mut handles = Vec::new();
+    for n in 0..users {
+        let (handle, mut events) = actor::spawn(account(&format!("flood{n}"), "hunter2", &[&room]));
+        tokio::spawn(async move { while events.recv().await.is_some() {} });
+        handles.push(handle);
+    }
+    println!("{users} people joining {room}...");
+    tokio::time::sleep(Duration::from_secs(10)).await;
+
+    println!("talking for {secs}s");
+    let end = tokio::time::Instant::now() + Duration::from_secs(secs);
+    let mut round = 0u64;
+    let mut sent = 0u64;
+    while tokio::time::Instant::now() < end {
+        for (n, handle) in handles.iter().enumerate() {
+            let text = if (round + n as u64).is_multiple_of(10) {
+                format!("alice, number {round} from person {n}: are you reading this?")
+            } else {
+                format!(
+                    "message {round} from person {n}: a line of the sort people write in a room"
+                )
+            };
+            let _ = handle
+                .send(ClientCommand::SendMessage {
+                    target: room.clone(),
+                    text,
+                })
+                .await;
+            sent += 1;
+        }
+        round += 1;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    println!("asked to send {sent} messages (the core paces them)");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+}
