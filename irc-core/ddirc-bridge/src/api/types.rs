@@ -390,6 +390,32 @@ pub struct ServerConfig {
     pub proxy: Option<ProxyConfig>,
 }
 
+/// How to reach an XMPP account.
+///
+/// Separate from [`ServerConfig`] rather than a variant of it, because they
+/// describe different things: an IRC network is a host and a nick, an XMPP
+/// account is an address whose server is usually worked out from it. TLS is not
+/// configurable here either. The password arrives as a plain string from Dart
+/// and is moved into zeroizing storage on the Rust side immediately.
+#[derive(Debug, Clone)]
+pub struct XmppConfig {
+    /// The account, as `name@example.org`.
+    pub jid: String,
+    pub password: String,
+    /// Where to dial when that is not the address's own domain. TLS is still
+    /// verified against the domain in `jid`.
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    /// Rooms to join once online, as `room@conference.example.org`.
+    pub rooms: Vec<String>,
+    /// The nick to use in rooms. Defaults to the part of the address before
+    /// the `@`.
+    pub nickname: Option<String>,
+    /// Dial through this proxy rather than connecting directly. There is no
+    /// fallback: if it is set and unreachable, the connection fails.
+    pub proxy: Option<ProxyConfig>,
+}
+
 /// What a connection test found, when it worked.
 ///
 /// A failure is not one of these: it is the `Err` side of the call, and it is
@@ -733,6 +759,22 @@ impl From<ServerConfig> for types::ServerConfig {
             // Not exposed to Dart on purpose: trusting an extra certificate is
             // a test-only affordance, and an app-settable one would be a way to
             // talk the client into trusting an attacker's certificate.
+            extra_root_cert: None,
+            proxy: config.proxy.map(Into::into),
+        }
+    }
+}
+
+impl From<XmppConfig> for ddirc_core::xmpp::config::XmppConfig {
+    fn from(config: XmppConfig) -> Self {
+        Self {
+            jid: config.jid,
+            password: zeroize::Zeroizing::new(config.password),
+            host: config.host.filter(|v| !v.trim().is_empty()),
+            port: config.port.filter(|p| *p != 0),
+            rooms: config.rooms,
+            nickname: config.nickname.filter(|v| !v.trim().is_empty()),
+            // Not exposed to Dart, for the reason it is not on `ServerConfig`.
             extra_root_cert: None,
             proxy: config.proxy.map(Into::into),
         }

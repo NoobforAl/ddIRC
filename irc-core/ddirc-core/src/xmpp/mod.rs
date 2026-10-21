@@ -15,5 +15,6 @@ pub mod auth;
 pub mod config;
 pub mod connector;
 pub mod diagnose;
+pub mod probe;
 pub mod session;
 pub mod state;
