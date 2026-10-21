@@ -49,6 +49,8 @@ class MessageView extends StatefulWidget {
     this.profileId,
     this.onPersonTap,
     this.onReply,
+    this.onEdit,
+    this.onDelete,
     this.onMention,
     this.onQuote,
     this.onLoadOlder,
@@ -98,6 +100,12 @@ class MessageView extends StatefulWidget {
   /// The user asked to reply to a line — by swiping it, or with the button
   /// beside it. Null offers neither.
   final ValueChanged<ChatLine>? onReply;
+
+  /// The user asked to change one of their own messages, or to take it back.
+  /// Null offers neither, which is every conversation on IRC: there, what was
+  /// said was said.
+  final ValueChanged<ChatLine>? onEdit;
+  final ValueChanged<ChatLine>? onDelete;
 
   /// The user asked to address someone — "Mention" in a message's menu.
   final ValueChanged<String>? onMention;
@@ -770,6 +778,8 @@ class _MessageViewState extends State<MessageView> {
         selection: () => _selected,
         onPersonTap: widget.onPersonTap,
         onReply: widget.onReply,
+        onEdit: widget.onEdit,
+        onDelete: widget.onDelete,
         onQuote: widget.onQuote,
         onMention: widget.onMention,
         onQuoteTap: reply == null ? null : () => _showOriginal(reply, g),
@@ -1290,6 +1300,8 @@ class _Bubble extends StatefulWidget {
     this.quoted,
     this.onPersonTap,
     this.onReply,
+    this.onEdit,
+    this.onDelete,
     this.onQuote,
     this.onMention,
     this.onQuoteTap,
@@ -1329,6 +1341,8 @@ class _Bubble extends StatefulWidget {
 
   final ValueChanged<String>? onPersonTap;
   final ValueChanged<ChatLine>? onReply;
+  final ValueChanged<ChatLine>? onEdit;
+  final ValueChanged<ChatLine>? onDelete;
   final ValueChanged<String>? onMention;
   final VoidCallback? onQuoteTap;
 
@@ -1489,6 +1503,11 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         canMark &&
         marks.isMarked(MarkKind.saved, profileId, conversation, line);
     const needsHistory = 'Turn on message history in Privacy';
+    // Ours, and named by an id the other end can find. A message with no id
+    // cannot be pointed at, and offering to change it would be offering
+    // something that cannot work.
+    final changeable =
+        message.isSelf && message.msgid != null && !message.isNotice;
 
     final choice = await showPointerMenu<String>(
       context,
@@ -1520,6 +1539,20 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
             child: MenuRow(
               icon: Icons.alternate_email_rounded,
               label: 'Mention ${message.sender}',
+            ),
+          ),
+        if (changeable && widget.onEdit != null)
+          const PopupMenuItem(
+            value: 'edit',
+            child: MenuRow(icon: Icons.edit_outlined, label: 'Edit'),
+          ),
+        if (changeable && widget.onDelete != null)
+          const PopupMenuItem(
+            value: 'delete',
+            child: MenuRow(
+              icon: Icons.delete_outline,
+              label: 'Delete',
+              danger: true,
             ),
           ),
         if (canMark) ...[
@@ -1570,6 +1603,10 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         say(excerpt == null ? 'Message copied' : 'Selection copied');
       case 'mention':
         widget.onMention?.call(message.sender);
+      case 'edit':
+        widget.onEdit?.call(line);
+      case 'delete':
+        widget.onDelete?.call(line);
       case 'pin':
         final now = await marks.toggle(
           MarkKind.pinned,
@@ -1647,9 +1684,15 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
       fontSize: 10.5,
       fontFeatures: const [FontFeature.tabularFigures()],
     );
-    final time = settings.showTimestamps
+    final stamp = settings.showTimestamps
         ? settings.formatTime(widget.lines.last.at)
         : null;
+    // Said when something was changed after it was first shown, because a
+    // message that quietly differs from what was read a minute ago is a way to
+    // be misled. Part of the stamp, so it takes no room of its own.
+    final time = widget.lines.last.edited
+        ? (stamp == null ? 'edited' : 'edited $stamp')
+        : stamp;
 
     final children = <Widget>[
       if (!mine && widget.startsRun)

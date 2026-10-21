@@ -72,9 +72,15 @@ class ChatLine {
       _system = null,
       kind = SystemKind.connection;
 
-  final ChatMessage? message;
+  /// What was said. Replaced, not rebuilt, when its author corrects it: the
+  /// line keeps its place in the conversation, its read marker and its stored
+  /// row, and only its words change.
+  ChatMessage? message;
   final String? _system;
   final SystemKind? kind;
+
+  /// Whether its author has changed it since it was first shown.
+  bool edited = false;
 
   /// The file this line is about, when it is one.
   final FileTransfer? transfer;
@@ -123,6 +129,14 @@ class Conversation {
   final List<ChatLine> lines = [];
   List<MemberView> members = const [];
   String? topic;
+
+  /// The line shown under [msgid], newest first, if there is one.
+  ChatLine? lineWithId(String msgid) {
+    for (var i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].message?.msgid == msgid) return lines[i];
+    }
+    return null;
+  }
 
   /// Messages since this conversation was last looked at.
   int unread = 0;
@@ -407,6 +421,22 @@ class SessionModel extends ChangeNotifier {
 
   final Map<String, Conversation> _conversations = {};
 
+  /// The contact list, by address. XMPP only; always empty on IRC.
+  final Map<String, ContactView> _contacts = {};
+
+  /// People who asked to see when we are online and are waiting to be
+  /// answered, in the order they asked.
+  final List<String> _requests = [];
+
+  /// How the user has said they are, as far as this session knows.
+  Availability _myAvailability = Availability.available;
+  String _myStatus = '';
+
+  /// The most the server takes in one uploaded file, once it has said it takes
+  /// any. Null until then, and for ever on a server with nowhere to put one.
+  BigInt? _uploadMax;
+  bool _uploadKnown = false;
+
   /// Every offer and transfer that is not over yet, by the core's id for it, so
   /// progress and the end find their card without searching the scrollback.
   /// An entry leaves when the transfer ends; the card stays in the
@@ -585,6 +615,34 @@ class SessionModel extends ChangeNotifier {
       raiseNotice(Notice.error(describeError(e)));
     }
   }
+
+  /// Everyone on the contact list: those who are there first, then the rest,
+  /// each group by the name they go by.
+  List<ContactView> get contacts {
+    final list = _contacts.values.toList();
+    String label(ContactView c) => (c.name ?? c.jid).toLowerCase();
+    list.sort((a, b) {
+      final here = (a.availability == Availability.offline ? 1 : 0).compareTo(
+        b.availability == Availability.offline ? 1 : 0,
+      );
+      return here != 0 ? here : label(a).compareTo(label(b));
+    });
+    return list;
+  }
+
+  /// Who is waiting for us to say whether they may see when we are online.
+  List<String> get subscriptionRequests => List.unmodifiable(_requests);
+
+  Availability get myAvailability => _myAvailability;
+  String get myStatus => _myStatus;
+
+  /// Whether a file can be sent to a conversation here: on XMPP, only once the
+  /// server has said it takes uploads. IRC's own file sending is a separate
+  /// switch and is not asked about here.
+  bool get canUpload => isXmpp && _uploadKnown;
+
+  /// The largest file the server takes, if it said.
+  BigInt? get uploadLimit => _uploadMax;
 
   int get totalUnread =>
       _conversations.values.fold(0, (sum, c) => sum + c.unread);
@@ -1159,6 +1217,106 @@ class SessionModel extends ChangeNotifier {
         if (auth is AuthOutcome_NickServFallback) {
           _logConnection('SASL unavailable (${auth.reason}) — used NickServ');
         }
+        // What was said to us while this app was not running, if there is a
+        // record of when it last was. A new login does not know the upload
+        // service until it has asked again.
+        if (isXmpp) {
+          _uploadKnown = false;
+          _uploadMax = null;
+          unawaited(_catchUpChats());
+        }
+
+      case IrcEvent_Contact(:final field0):
+        _contacts[field0.jid] = field0;
+
+      case IrcEvent_ContactRemoved(:final jid):
+        _contacts.remove(jid);
+        _requests.remove(jid);
+
+      case IrcEvent_SubscriptionRequest(:final jid):
+        // Never answered for the user: letting someone see when we are online
+        // tells them we exist and are reading, and that is theirs to give.
+        if (!_requests.contains(jid)) _requests.add(jid);
+        raiseNotice(
+          Notice.info(
+            '$jid asks to see when you are online',
+            detail: 'Open Contacts to answer.',
+          ),
+        );
+
+      case IrcEvent_MessageEdited(
+        :final target,
+        :final msgid,
+        :final sender,
+        :final message,
+      ):
+        final name = switch (target) {
+          Target_Channel(:final name) => name,
+          Target_Direct(:final nick) => nick,
+        };
+        final line = _conversations[_key(name)]?.lineWithId(msgid);
+        final original = line?.message;
+        // Believed only from whoever wrote the original. The core has checked,
+        // and this is the second lock: a bare id must never be enough to
+        // rewrite what somebody else said.
+        if (line == null || original == null || original.sender != sender) {
+          break;
+        }
+        line.message = message;
+        line.edited = true;
+        unawaited(
+          MessageHistory.instance.edit(
+            profileId: profileId,
+            conversation: name,
+            msgid: msgid,
+            sender: sender,
+            spans: message.spans,
+          ),
+        );
+
+      case IrcEvent_MessageRetracted(
+        :final target,
+        :final msgid,
+        :final sender,
+      ):
+        final name = switch (target) {
+          Target_Channel(:final name) => name,
+          Target_Direct(:final nick) => nick,
+        };
+        final conversation = _conversations[_key(name)];
+        final line = conversation?.lineWithId(msgid);
+        if (conversation == null ||
+            line == null ||
+            line.message?.sender != sender) {
+          break;
+        }
+        // Removed, not struck through: taking a message back is asking for it to
+        // be gone, and a client that keeps showing it has not done that. What
+        // replaces it says that something was, so a conversation does not just
+        // quietly lose a line.
+        conversation.lines.remove(line);
+        unawaited(
+          MessageHistory.instance.remove(
+            profileId: profileId,
+            conversation: name,
+            msgid: msgid,
+            sender: sender,
+          ),
+        );
+        _addLine(
+          name,
+          ChatLine.system(
+            '$sender deleted a message',
+            now,
+            SystemKind.presence,
+          ),
+          isChannel: conversation.isChannel,
+          openTab: false,
+        );
+
+      case IrcEvent_UploadAvailable(:final maxBytes):
+        _uploadKnown = true;
+        _uploadMax = maxBytes;
 
       case IrcEvent_NetworkNamed(:final network):
         _network = network;
@@ -1673,6 +1831,96 @@ class SessionModel extends ChangeNotifier {
       _transfers.remove(id);
     }
     return _run(() => core.cancelTransfer(id: connectionId, transferId: id));
+  }
+
+  // ---- XMPP: contacts, status, corrections ----------------------------------
+
+  /// Put [jid] on the contact list and ask to see when they are online.
+  Future<String?> addContact(String jid, {String? name}) => _run(
+    () => core.addContact(id: connectionId, jid: jid.trim(), name: name),
+  );
+
+  Future<String?> removeContact(String jid) =>
+      _run(() => core.removeContact(id: connectionId, jid: jid));
+
+  /// Say yes or no to someone who asked to see when we are online.
+  Future<String?> answerSubscription(String jid, {required bool accept}) async {
+    final error = await _run(
+      () => core.answerSubscription(id: connectionId, jid: jid, accept: accept),
+    );
+    if (error == null) {
+      _requests.remove(jid);
+      notifyListeners();
+    }
+    return error;
+  }
+
+  /// Say how we are, to everyone who can see us.
+  Future<String?> setAvailability(
+    Availability availability, {
+    String? status,
+  }) async {
+    final error = await _run(
+      () => core.setAvailability(
+        id: connectionId,
+        availability: availability,
+        status: status,
+      ),
+    );
+    if (error == null) {
+      _myAvailability = availability;
+      _myStatus = (status ?? '').trim();
+      notifyListeners();
+    }
+    return error;
+  }
+
+  /// Whether [line] is one of ours that can be corrected or taken back: on
+  /// XMPP, said by us, with an id to name it by.
+  bool canChange(ChatLine line) {
+    final message = line.message;
+    return isXmpp &&
+        message != null &&
+        message.isSelf &&
+        !message.isNotice &&
+        message.msgid != null;
+  }
+
+  /// Replace the text of one of our messages.
+  Future<String?> editMessage(
+    Conversation conversation,
+    ChatLine line,
+    String text,
+  ) {
+    final id = line.message?.msgid;
+    if (id == null) return Future.value('that message cannot be edited');
+    return _run(
+      () => core.editMessage(
+        id: connectionId,
+        target: conversation.name,
+        msgid: id,
+        text: text,
+      ),
+    );
+  }
+
+  /// Take back one of our messages.
+  Future<String?> retractMessage(Conversation conversation, ChatLine line) {
+    final id = line.message?.msgid;
+    if (id == null) return Future.value('that message cannot be deleted');
+    return _run(
+      () => core.retractMessage(
+        id: connectionId,
+        target: conversation.name,
+        msgid: id,
+      ),
+    );
+  }
+
+  Future<void> _catchUpChats() async {
+    final since = await MessageHistory.instance.lastSeenMs(profileId);
+    if (since == null || _disposed) return;
+    await _run(() => core.catchUpChats(id: connectionId, sinceMs: since));
   }
 
   /// Leave a channel. The conversation closes when the server confirms.

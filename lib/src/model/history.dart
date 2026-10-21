@@ -168,6 +168,98 @@ class MessageHistory extends ChangeNotifier {
     });
   }
 
+  /// Replace the text of a saved message its author corrected.
+  ///
+  /// Only if [sender] is who the store has as having said it: a correction is
+  /// believed from the author of the original, and the store is the last place
+  /// that could still be told otherwise. A line still waiting to be written is
+  /// written first, so the correction finds it.
+  Future<void> edit({
+    required String profileId,
+    required String conversation,
+    required String msgid,
+    required String sender,
+    required List<rust.TextSpan> spans,
+  }) async {
+    if (!_enabled) return;
+    await _settle();
+    try {
+      await store.storeEditLine(
+        profileId: profileId,
+        conversation: key(conversation),
+        msgid: msgid,
+        sender: sender,
+        spans: spans,
+      );
+    } catch (error) {
+      debugPrint('ddIRC: could not save a correction ($error)');
+    }
+  }
+
+  /// Delete a saved message its author took back.
+  ///
+  /// Gone from the file and not marked, because asking for a message to be
+  /// taken back is asking for it not to be kept. A copy still queued is
+  /// dropped, and one being written is waited for.
+  Future<void> remove({
+    required String profileId,
+    required String conversation,
+    required String msgid,
+    required String sender,
+  }) async {
+    for (var i = _pending.length - 1; i >= 0; i--) {
+      final queued = _pending[i];
+      if (queued.profileId == profileId &&
+          queued.conversation == key(conversation) &&
+          queued.msgid == msgid &&
+          queued.sender == sender) {
+        _pending.removeAt(i);
+        _pendingLines.removeAt(i);
+      }
+    }
+    if (!_enabled) return;
+    await _settle();
+    try {
+      await store.storeRemoveLine(
+        profileId: profileId,
+        conversation: key(conversation),
+        msgid: msgid,
+        sender: sender,
+      );
+    } catch (error) {
+      debugPrint('ddIRC: could not remove a retracted message ($error)');
+    }
+  }
+
+  /// When the newest saved line of a network was said, if history is on and
+  /// there is one. Where a freshly started connection can catch up from.
+  Future<int?> lastSeenMs(String profileId) async {
+    if (!_enabled) return null;
+    await _settle();
+    try {
+      return (await store.storeLastSeenMs(profileId: profileId))?.toInt();
+    } catch (error) {
+      debugPrint('ddIRC: could not read the last saved time ($error)');
+      return null;
+    }
+  }
+
+  /// Get whatever is queued, and being written, into the file.
+  ///
+  /// A correction or a retraction has to find the line it names, and a line
+  /// said a moment ago may not have been written yet.
+  Future<void> _settle() async {
+    Future<void> idle() async {
+      for (var i = 0; i < 40 && _writing; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
+
+    await idle();
+    await flush();
+    await idle();
+  }
+
   /// Write everything queued.
   ///
   /// Exposed so a test does not have to wait out the timer, and so turning
