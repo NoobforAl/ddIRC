@@ -32,4 +32,7 @@ sasl.workspace = true
 [dev-dependencies]
 # A throwaway CA and leaf, to run the XMPP connector against a real TLS server.
 rcgen.workspace = true
+# To read what tokio-xmpp says about itself while a test runs; already in the
+# tree underneath it.
+log = "0.4"
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }

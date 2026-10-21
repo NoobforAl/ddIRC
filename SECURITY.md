@@ -338,6 +338,32 @@ Everything above applies to XMPP accounts too, through a core of its own
   certificate, a proxy rejecting its credentials) stops, says why, and waits to
   be asked; an account that has never logged in is tried three times; one that
   has is resumed with backoff. A test asserts a refused password is tried once.
+- **A connection that does not last is not forgiven.** The backoff resets only
+  after a connection has stayed up for thirty seconds, never because a login
+  succeeded. A server that accepts logins and drops them at once - overloaded,
+  shutting down, or having just banned the address - succeeds every time by the
+  other measure, and a backoff reset on each success never grows: the client
+  logs in as fast as the network allows. That is the same rule IRC has ("resets
+  only on successful registration, not when the socket opens"), and it was
+  missing here until a real server showed it: see the next item.
+- **Stream management (XEP-0198) is switched off.** *A workaround, for a bug in
+  `xmpp-parsers` 0.23.0.* When a resume fails - the server restarted, or the
+  device was off for longer than the server keeps a session - the server
+  answers `<failed/>`, whose `h` attribute XEP-0198 makes optional and which
+  ejabberd omits. The library declares it required, cannot parse the answer,
+  tears the stream down and tries to resume again with the same stale state, for
+  ever. Against a real ejabberd restarted under a live session that was dozens
+  of logins in a second, with nothing to slow it. It is hit by anything that
+  loses a session, which for a phone is most reconnects. Not offering the
+  feature to the library means there is never state to resume. What is lost is
+  lossless resumption after a short drop; what covers for it is fetching
+  missed messages from the server's archive. The other way out is to vendor
+  `xmpp-parsers` and make that attribute optional (one line, about 1 MB of
+  vendored code, which restores resumption); this project vendors only for a
+  concrete bug and this is one, so it is a decision for the maintainer rather
+  than a default. `recovers_and_rejoins_when_the_server_restarts` in
+  `tests/dev_xmpp.rs` is the reproduction, and a scripted test asserts the
+  client never asks for the feature.
 - **A stanza that does not parse ends the connection.** *This is a limitation of
   `tokio-xmpp` 6.0.0, not a decision.* A stanza the library cannot parse - say,
   a room occupant whose nick fails resource preparation - is answered with a

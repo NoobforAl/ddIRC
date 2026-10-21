@@ -779,6 +779,16 @@ impl Session {
             // A subject with no body is the room's topic.
             if let Some((_, subject)) = message.get_best_subject_cloned(vec![""]) {
                 let topic = truncate(&clean_text(&subject).replace('\n', " "), limits::MAX_TOPIC);
+                // Nothing changed, nothing to say. A room with no topic still
+                // sends an empty subject when someone joins, and reporting
+                // that as the topic being cleared would be an event about
+                // something that did not happen; the same goes for a room
+                // repeating the topic we already hold. A topic that really is
+                // cleared arrives when we hold one, and is reported.
+                let held = room.topic.as_deref().unwrap_or("");
+                if topic == held {
+                    return;
+                }
                 room.topic = Some(topic.clone());
                 let set_by = room.joined.then_some(sender).flatten();
                 fx.event(IrcEvent::TopicChanged {

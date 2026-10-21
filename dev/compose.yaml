@@ -115,6 +115,42 @@ services:
       retries: 40
       start_period: 5s
 
+  # A throwaway XMPP server, for the other protocol. Behind its own profile, so
+  # it does not start with the IRC one:
+  #
+  #   make dev-xmpp          start it, with alice and bob registered
+  #   make dev-xmpp-stop     stop it
+  #
+  # ejabberd rather than Prosody: Prosody's Docker image has not been updated
+  # since 2021 and is version 0.11, which lacks stream management and the
+  # direct-TLS option. ejabberd's official image is current, and its stock
+  # config is what is wanted here - direct TLS on 5223, multi-user chat with
+  # server-side history, carbons, stream management, HTTP upload - so the only
+  # thing mounted is the certificate. That is also why there is no config in
+  # this directory to keep in step with a server that changes.
+  #
+  # Only 5223 is published, and only on loopback. The container also listens on
+  # 5222 (STARTTLS) and others inside, unreachable from the host and unused by
+  # the client, which has no STARTTLS in it. Open registration and a
+  # self-signed certificate must never be reachable from anywhere else.
+  xmppd:
+    image: ghcr.io/processone/ejabberd@sha256:ec5cf7bc85627fd9bde47309a34600d6c16895e9808807ec9ff57426f2508115
+    container_name: ddirc-dev-xmppd
+    profiles: ["xmpp"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5223:5223"
+    volumes:
+      # Made by xmpp/gen-certs.sh before the first start. The tests trust the
+      # sibling localhost.crt directly.
+      - ./xmpp/certs/server.pem:/opt/ejabberd/conf/server.pem:ro
+    healthcheck:
+      test: ["CMD", "/opt/ejabberd/bin/ejabberdctl", "status"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
 volumes:
   # Removed by `make dev-server-clean`, along with everything else here.
   tor-state:

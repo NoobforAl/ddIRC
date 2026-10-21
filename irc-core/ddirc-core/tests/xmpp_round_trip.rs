@@ -170,8 +170,9 @@ async fn log_in(tls: &mut Tls, buffer: &mut String, password: &str) -> Option<St
 
     expect(tls, buffer, "<stream:stream").await;
     expect(tls, buffer, ">").await;
-    let features =
-        "<stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/></stream:features>";
+    // Stream management is offered on purpose: the client must decline to use
+    // it (see `login` in xmpp/actor.rs), and the test asserts it did.
+    let features = "<stream:features><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/>                    <sm xmlns='urn:xmpp:sm:3'/></stream:features>";
     tls.write_all(format!("{}{features}", header("two")).as_bytes())
         .await
         .unwrap();
@@ -335,6 +336,11 @@ async fn logs_in_joins_a_room_and_talks() {
         "SCRAM would be preferred if offered"
     );
     assert!(seen.room_join.contains(&format!("{ROOM}/alice")));
+    assert!(
+        !seen.room_join.contains("urn:xmpp:sm:3") && !seen.said.contains("urn:xmpp:sm:3"),
+        "the client asked for stream management, which it does not use: {}",
+        seen.room_join
+    );
     assert!(
         seen.said.contains("type=\"groupchat\"") || seen.said.contains("type='groupchat'"),
         "{}",
