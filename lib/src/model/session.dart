@@ -350,6 +350,7 @@ class SessionModel extends ChangeNotifier {
     required this.profileId,
     required this.config,
     required this.settings,
+    this.isXmpp = false,
     this.onLine,
     this.onRead,
     Future<BigInt?> Function(String filename, String from, BigInt? size)?
@@ -392,6 +393,14 @@ class SessionModel extends ChangeNotifier {
   /// What we connected with. Held so the server dialog can show the user which
   /// host and port they are actually on, rather than what they last typed.
   final ServerConfig config;
+
+  /// Whether this is an XMPP account rather than an IRC network.
+  ///
+  /// The events and commands are the same for both - that is the point of the
+  /// core reporting through one shape - but a few things the app does with the
+  /// text of a conversation's *name* or of what the user types are IRC's, and
+  /// are wrong for the other. Those ask this.
+  final bool isXmpp;
 
   /// Consulted for per-channel notification levels; never mutated from here.
   final AppSettings settings;
@@ -1503,6 +1512,19 @@ class SessionModel extends ChangeNotifier {
   static bool _looksLikeChannel(String target) =>
       target.isNotEmpty && '#&+!'.contains(target[0]);
 
+  /// Whether [target] names a channel or room rather than a person.
+  ///
+  /// On IRC the first character says so. An XMPP room is an address like a
+  /// person's - `lobby@conference.example.org` against `alice@example.org` - so
+  /// nothing in the name can, and the answer is what this session knows: a
+  /// conversation it opened as a room. A room not yet joined is not known to be
+  /// one, which errs toward treating it as a person; the only commands that
+  /// ask are `/msg` and `/query`, and for a room that is not yet joined neither
+  /// can do anything harmful.
+  bool _isChannelName(String target) => isXmpp
+      ? (_conversations[_key(target)]?.isChannel ?? false)
+      : _looksLikeChannel(target);
+
   /// Mark an offer as one that would carry on from a partial file, if there is
   /// one. Quietly nothing if there is not, or the lookup fails.
   Future<void> _noteResumable(FileTransfer offer) async {
@@ -1711,7 +1733,13 @@ class SessionModel extends ChangeNotifier {
     // so every client on the other end sees bold rather than asterisks. Never
     // inside a command other than `/me`: a topic or a nick with formatting
     // codes in it is not what anybody typed `**` for.
-    final text = settings.markdown && !trimmed.startsWith('/')
+    //
+    // Not for XMPP. The conversion produces IRC control codes, which an XMPP
+    // body cannot carry - the core strips them, and what would arrive is the
+    // text with its asterisks gone and nothing in their place. Markdown is also
+    // already the shape XMPP clients read (XEP-0393 is modelled on it), so the
+    // text goes as it was typed.
+    final text = settings.markdown && !isXmpp && !trimmed.startsWith('/')
         ? markdownToMirc(trimmed)
         : trimmed;
 
@@ -1776,7 +1804,9 @@ class SessionModel extends ChangeNotifier {
           await core.sendAction(
             id: connectionId,
             target: target.name,
-            text: settings.markdown ? markdownToMirc(argument) : argument,
+            text: settings.markdown && !isXmpp
+                ? markdownToMirc(argument)
+                : argument,
           );
         case SlashCommand.topic:
           if (argument.isEmpty) return usage();
@@ -1796,7 +1826,7 @@ class SessionModel extends ChangeNotifier {
           // Saying something to someone is deciding about them, exactly as
           // `/query` is. Without this, messaging a blocked nick would send
           // fine and their reply would vanish.
-          if (!_looksLikeChannel(target)) {
+          if (!_isChannelName(target)) {
             settings.accept(profileId, target);
           }
           await core.sendMessage(
@@ -1810,7 +1840,7 @@ class SessionModel extends ChangeNotifier {
           // `/join` and would otherwise open a conversation with a channel
           // name, which the server would answer by ignoring us.
           final nick = argument.split(' ').first;
-          if (_looksLikeChannel(nick)) {
+          if (_isChannelName(nick)) {
             return '$nick is a channel — use /join';
           }
           openDirect(nick);
