@@ -75,3 +75,35 @@ jobs:
       # reason exists.
       - if: failure()
         run: docker compose -f dev/compose.yaml logs --tail=200
+
+  # The same for XMPP, against a real ejabberd.
+  #
+  # This is the job that exists because the scripted-server test cannot catch
+  # what the author did not think of: a login storm after a server restart, and
+  # the parse failure behind it, were found only by a real server. Two of the
+  # tests drive the server through the `docker` command - one kicks a session,
+  # one restarts the container under a live one - which the runner has.
+  #
+  # One test at a time (the make target passes --test-threads=1): they share two
+  # accounts, and one test's carbon would look like another's bug.
+  integration-xmpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
+        with:
+          toolchain: "1.99.1"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core
+
+      # Makes the certificate, starts ejabberd on loopback, waits for its
+      # healthcheck, and registers alice and bob.
+      - run: make dev-xmpp
+
+      - run: make test-integration-xmpp
+
+      - if: failure()
+        run: docker compose -f dev/compose.yaml --profile xmpp logs --tail=200
