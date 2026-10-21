@@ -1520,3 +1520,100 @@ fn a_catch_up_stops_at_its_limit_however_much_the_archive_has() {
     }
     assert_eq!(requests, 5, "500 messages in pages of 100, then enough");
 }
+
+#[test]
+fn an_archive_that_returns_empty_pages_for_ever_is_not_followed() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    // "Not finished, here is the next cursor" with nothing in the page: a
+    // misbehaving archive, or one trying to keep us asking.
+    let fx = feed(&mut s, &fin(&query, MUC, false, "S2"));
+    assert!(
+        catch_up_query(&fx).is_none(),
+        "an empty page is the end, whatever the archive says"
+    );
+}
+
+#[test]
+fn a_cursor_that_has_not_moved_ends_it() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    feed(
+        &mut s,
+        &archived(&query, MUC, "S2", "carol", "2026-10-21T08:00:00Z", "one"),
+    );
+    // The page ends where the request began: the archive has gone nowhere.
+    let fx = feed(&mut s, &fin(&query, MUC, false, "S1"));
+    assert!(catch_up_query(&fx).is_none());
+}
+
+#[test]
+fn requests_are_bounded_even_when_every_page_brings_something() {
+    let (mut s, fx) = rejoined_after("S0");
+    let (mut query, _) = catch_up_query(&fx).unwrap();
+    let mut requests = 1;
+    // One message a page, a fresh cursor each time, never finished: only the
+    // limit on requests can stop this, because the count of messages stays tiny.
+    for page in 0..50 {
+        feed(
+            &mut s,
+            &archived(
+                &query,
+                MUC,
+                &format!("P{page}"),
+                "carol",
+                "2026-10-21T08:00:00Z",
+                "x",
+            ),
+        );
+        let fx = feed(&mut s, &fin(&query, MUC, false, &format!("P{page}")));
+        match catch_up_query(&fx) {
+            Some((next, _)) => {
+                query = next;
+                requests += 1;
+            }
+            None => break,
+        }
+    }
+    assert_eq!(requests, CATCH_UP_PAGES, "asked {requests} times");
+}
+
+#[test]
+fn an_archive_id_is_bounded_as_a_live_one_is() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    // Large enough to be worth bounding, small enough to get past the XML
+    // parser, which refuses a value of 100 KB before this code ever sees it.
+    let huge = "x".repeat(5_000);
+    let fx = feed(
+        &mut s,
+        &archived(
+            &query,
+            MUC,
+            &huge,
+            "carol",
+            "2026-10-21T08:00:00Z",
+            "big id",
+        ),
+    );
+    let id = messages(&fx)[0].msgid.clone().unwrap();
+    assert!(
+        id.chars().count() <= 200,
+        "kept {} characters",
+        id.chars().count()
+    );
+
+    // And the place to catch up from is the bounded one too, not the huge one.
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        &muc_presence("alice", None, &item("none", "participant"), &[110]),
+    );
+    let (_, body) = catch_up_query(&fx).unwrap();
+    let after = body
+        .get_child("set", "http://jabber.org/protocol/rsm")
+        .and_then(|set| set.get_child("after", "http://jabber.org/protocol/rsm"))
+        .map(|a| a.text())
+        .unwrap();
+    assert!(after.chars().count() <= 200);
+}

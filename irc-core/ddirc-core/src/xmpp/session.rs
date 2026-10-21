@@ -71,6 +71,22 @@ const CATCH_UP_PAGE: usize = 100;
 /// bounded.
 const CATCH_UP_TOTAL: usize = 500;
 
+/// How many requests a catch-up makes in all.
+///
+/// A bound of its own, not a consequence of [`CATCH_UP_TOTAL`]: the archive
+/// decides whether there is another page, and one that returns empty pages, or
+/// the same cursor again, never advances a count of messages. It is exactly
+/// enough requests to fetch the total at the page size, and one more for the
+/// page that says it is finished.
+const CATCH_UP_PAGES: usize = CATCH_UP_TOTAL / CATCH_UP_PAGE + 1;
+
+/// The longest id from a room's archive that is kept, as for a live message.
+///
+/// The id is stored - as the place to catch up from and in the window of ids
+/// recently shown - and handed to the app, so one of unbounded length is memory
+/// the other end chooses to have us spend.
+const MAX_ARCHIVE_ID: usize = 200;
+
 /// How many times a room refusing our nick as taken is answered by trying
 /// another before giving up.
 const MAX_NICK_ATTEMPTS: u32 = 3;
@@ -114,7 +130,16 @@ enum Pending {
     /// a result is known to answer it.
     CatchUp {
         room: BareJid,
+        /// Archived messages received so far, across every page.
         fetched: usize,
+        /// Requests made so far, this one included.
+        pages: usize,
+        /// What this request asked for everything after. A page that ends where
+        /// it began has moved nowhere.
+        after: String,
+        /// `fetched` when this request was sent, so the page can be told to
+        /// have been empty.
+        fetched_at_start: usize,
     },
 }
 
@@ -501,14 +526,32 @@ impl Session {
                 if !self.came_from_expected(&id, from.as_ref()) {
                     return;
                 }
-                if let Some(Pending::CatchUp { room, fetched }) = self.pending.remove(&id) {
-                    // The end of a page. More, if the archive says there is and
-                    // we have not already had our fill.
+                if let Some(Pending::CatchUp {
+                    room,
+                    fetched,
+                    pages,
+                    after,
+                    fetched_at_start,
+                }) = self.pending.remove(&id)
+                {
+                    // The end of a page. Another only if the archive says there
+                    // is one *and* every limit we hold agrees. The archive's
+                    // word is the least of them: it is the one party that could
+                    // say "more" for ever.
                     let fin = payload.and_then(|p| mam::Fin::try_from(p).ok());
-                    if let Some(fin) = fin.filter(|f| !f.complete && fetched < CATCH_UP_TOTAL) {
-                        if let Some(last) = fin.set.last {
-                            self.send_catch_up(&room, last, fetched, fx);
-                        }
+                    let more =
+                        fin.filter(|f| !f.complete)
+                            .and_then(|f| f.set.last)
+                            .filter(|last| {
+                                // Nothing came in this page, or the cursor has not
+                                // moved: the archive is not getting anywhere.
+                                fetched > fetched_at_start
+                                    && *last != after
+                                    && fetched < CATCH_UP_TOTAL
+                                    && pages < CATCH_UP_PAGES
+                            });
+                    if let Some(last) = more {
+                        self.send_catch_up(&room, last, fetched, pages, fx);
                     }
                 }
             }
@@ -715,7 +758,7 @@ impl Session {
                     members: room.members(),
                 });
                 if let Some(after) = resume_from {
-                    self.send_catch_up(jid, after, 0, fx);
+                    self.send_catch_up(jid, after, 0, 0, fx);
                 }
             }
             return;
@@ -941,7 +984,7 @@ impl Session {
             return;
         };
         let room = match self.pending.get_mut(&query) {
-            Some(Pending::CatchUp { room, fetched }) if from.resource().is_none() => {
+            Some(Pending::CatchUp { room, fetched, .. }) if from.resource().is_none() => {
                 if from.to_bare() != *room {
                     return;
                 }
@@ -960,17 +1003,28 @@ impl Session {
         if said_by.to_bare() != room || inner.type_ != MessageType::Groupchat {
             return;
         }
-        self.show_room_message(&room, &said_by, inner, time, Some(result.id), fx);
+        let id = truncate(&result.id, MAX_ARCHIVE_ID);
+        self.show_room_message(&room, &said_by, inner, time, Some(id), fx);
     }
 
     /// Ask a room's archive for what came after `after`.
-    fn send_catch_up(&mut self, room: &BareJid, after: String, fetched: usize, fx: &mut Effects) {
+    fn send_catch_up(
+        &mut self,
+        room: &BareJid,
+        after: String,
+        fetched: usize,
+        pages: usize,
+        fx: &mut Effects,
+    ) {
         let id = self.next_id();
         self.pending.insert(
             id.clone(),
             Pending::CatchUp {
                 room: room.clone(),
                 fetched,
+                pages: pages + 1,
+                after: after.clone(),
+                fetched_at_start: fetched,
             },
         );
         let query = mam::Query {
