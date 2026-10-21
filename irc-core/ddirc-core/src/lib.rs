@@ -7,3 +7,4 @@ pub mod media;
 pub mod state;
 pub mod store;
 pub mod text;
+pub mod xmpp;

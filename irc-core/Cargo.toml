@@ -87,6 +87,37 @@ tracing = "0.1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 flutter_rust_bridge = "=2.13.0"
 zeroize = { version = "1", features = ["derive"] }
+# XMPP, the second protocol: the stream layer and the stanza types, and nothing
+# above them. 19 crates that were not already here.
+#
+# Not the high-level `xmpp` crate beside it. That one adds 42 more, among them
+# `reqwest` and `hyper`, because it does HTTP Upload itself - on sockets of its
+# own, which would walk straight past the SOCKS5/Tor path every other byte this
+# client sends goes through. The stanza handling it saves is the part that needs
+# to be ours anyway: what is answered, what is shown and what is withheld.
+#
+# Features: only `aws_lc_rs`, which is the provider the rest of the tree already
+# uses (see `rustls` above - a second one panics at the first handshake). The
+# defaults are off on purpose. `starttls` and `direct-tls` both switch on
+# `dns`, which brings `hickory-resolver` and a resolver of its own, and its
+# lookups are made by this process, not by the proxy: a hostname resolved here
+# is a hostname announced to whoever is watching the network. `xmpp::connector`
+# does the dialling, through `tokio-socks` when there is a proxy, so the name
+# goes to the far end unresolved. STARTTLS is left out for the same reason it
+# has no place here otherwise: the connection starts in plaintext. Direct TLS
+# (XEP-0368) is the only mode.
+tokio-xmpp = { version = "6", default-features = false, features = ["aws_lc_rs"] }
+# The trust store XMPP builds for itself, because it cannot use the one inside
+# `tokio-xmpp` (that one is behind the `dns` feature, see above). The same three
+# the `irc` crate uses to build its own, at the versions it already resolves to,
+# so the two protocols trust the same roots and nothing is added to the build:
+# the Mozilla list, the platform's store, and the PEM for `extra_root_cert`.
+webpki-roots = "0.26"
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+# `ChannelBinding` is in the signature of `ServerConnector`, and `tokio-xmpp`
+# does not re-export it. Already resolved by `tokio-xmpp` itself.
+sasl = "0.5"
 
 # A one-condition fix to `saturating-time`, until upstream carries it.
 #

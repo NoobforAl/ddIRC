@@ -275,6 +275,17 @@ will not open, whereas a certificate written slightly wrong is fed to a
 verifier that has to accept it *and* has to go on refusing what it should
 refuse. That is not the place to save a dependency.
 
+XMPP added **one direct dependency, `tokio-xmpp`, and 19 crates** (`rxml`,
+`xmpp-parsers`, `jid`, `sasl` and their helpers). The XML stream, the stanza
+types and the SASL mechanisms are exactly the part that is wrong in subtle ways
+when hand-rolled, and nothing already in the tree parsed XML. What was left out
+matters as much: the high-level `xmpp` crate would have added 42 more including
+`reqwest`, which does HTTP Upload on sockets of its own and so would bypass the
+proxy; and the crate's `dns`, `direct-tls` and `starttls` features would have
+added a DNS resolver that looks names up locally instead of handing them to the
+proxy. The connector is ours (`ddirc-core/src/xmpp/connector.rs`), and it uses
+the same single `aws-lc-rs` provider as everything else.
+
 The terminal interfaces added **four direct dependencies**, all in `ddirc-cli` and
 none of them in the app (`ddirc-bridge` does not depend on it): `ratatui` to
 draw, `tui-input` for a single-line text field with a cursor, `tui-popup` for the
