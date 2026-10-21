@@ -976,7 +976,11 @@ impl Session {
                 if let Some(new) = item.and_then(|i| i.nick.as_deref()).map(clean_name) {
                     // The old name is free from now, and the private chat filed
                     // under it must not pass to whoever takes it.
-                    self.index.forget_conversation(&format!("{channel}/{nick}"));
+                    // Filed under the occupant's address as it arrived, not as
+                    // it is cleaned for showing: the two differ for a nickname
+                    // that is long or carries characters cleaning removes.
+                    self.index
+                        .forget_conversation(&format!("{channel}/{raw_nick}"));
                     room.remove(&nick);
                     room.renaming.insert(new, nick);
                 }
@@ -997,7 +1001,8 @@ impl Session {
                     .forget_conversation_prefix(&format!("{channel}/"));
             } else {
                 self.index.forget_author(&channel, &nick);
-                self.index.forget_conversation(&format!("{channel}/{nick}"));
+                self.index
+                    .forget_conversation(&format!("{channel}/{raw_nick}"));
             }
             if is_self {
                 self.rooms.remove(jid);
