@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../rust/api/client.dart' as core;
+import '../rust/api/types.dart';
 import 'errors.dart';
 import 'log.dart';
 import 'personas.dart';
@@ -184,38 +185,53 @@ class Workspace extends ChangeNotifier {
     try {
       // Read the secrets here and hand them straight to the core, which
       // zeroizes each after it is used. None of them are ever held on the
-      // profile. The server password and NickServ password are read
-      // unconditionally — a missing key is just a fast null, and neither has
-      // a companion field to gate the read on the way SASL's account does.
-      final password = profile.usesSasl
+      // profile.
+      final password = profile.usesPassword
           ? await profiles.passwordFor(profile.id)
           : null;
-      final serverPassword = await profiles.serverPasswordFor(profile.id);
-      final nickservPassword = await profiles.nickservPasswordFor(profile.id);
       // Settled here, once, rather than inside the core: the choice between
       // the app-wide proxy and this server's own is the app's to make, and
       // the core is better off being handed an answer.
       final proxy = await resolveProxy(profile, proxies, profiles);
-      // An identity's nick stands in for the one typed on the profile. Minted
-      // once and remembered per network, so a reconnect is the same handle;
-      // resolved here rather than on the profile because it lives in the store.
-      final personaNick = profile.usesPersona
-          ? await Personas.instance.nickFor(profile.personaId!, profile.id)
-          : null;
-      final config = profile.toConfig(
-        saslPassword: password,
-        serverPassword: serverPassword,
-        nickservPassword: nickservPassword,
-        proxy: proxy,
-        nicknameOverride: personaNick,
-      );
       if (proxy != null) {
         AppLog.instance.debug(
-          '[${profile.host}] connecting through SOCKS5 '
+          '[${profile.serverName}] connecting through SOCKS5 '
           '${proxy.host}:${proxy.port}',
         );
       }
-      final id = await core.connect(config: config);
+
+      final BigInt id;
+      final ServerConfig config;
+      if (profile.isXmpp) {
+        // An XMPP account has one password and no identity to hide behind, so
+        // none of what the IRC branch reads - a server password, NickServ, a
+        // persona - applies, and none of it is read.
+        id = await core.connectXmpp(
+          config: profile.toXmppConfig(password: password, proxy: proxy),
+        );
+        config = profile.toDisplayConfig(proxy: proxy);
+      } else {
+        // The server password and NickServ password are read unconditionally -
+        // a missing key is just a fast null, and neither has a companion field
+        // to gate the read on the way SASL's account does.
+        final serverPassword = await profiles.serverPasswordFor(profile.id);
+        final nickservPassword = await profiles.nickservPasswordFor(profile.id);
+        // An identity's nick stands in for the one typed on the profile. Minted
+        // once and remembered per network, so a reconnect is the same handle;
+        // resolved here rather than on the profile because it lives in the
+        // store.
+        final personaNick = profile.usesPersona
+            ? await Personas.instance.nickFor(profile.personaId!, profile.id)
+            : null;
+        config = profile.toConfig(
+          saslPassword: password,
+          serverPassword: serverPassword,
+          nickservPassword: nickservPassword,
+          proxy: proxy,
+          nicknameOverride: personaNick,
+        );
+        id = await core.connect(config: config);
+      }
 
       late final SessionModel session;
       session = SessionModel(
@@ -241,7 +257,9 @@ class Workspace extends ChangeNotifier {
     } catch (e) {
       final message = describeError(e);
       _failures[profile.id] = message;
-      AppLog.instance.debug('[${profile.host}] could not connect: $message');
+      AppLog.instance.debug(
+        '[${profile.serverName}] could not connect: $message',
+      );
       return message;
     } finally {
       _connecting.remove(profile.id);

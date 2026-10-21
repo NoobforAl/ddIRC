@@ -10,6 +10,59 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../rust/api/types.dart';
 import 'proxy.dart';
 
+/// What a saved account speaks.
+///
+/// Stored by name, and read back as [irc] for anything it does not recognise,
+/// which includes every profile saved before XMPP existed: those are IRC, and
+/// must stay exactly what they were.
+enum NetworkProtocol {
+  irc,
+  xmpp;
+
+  static NetworkProtocol byName(Object? name) => name == 'xmpp' ? xmpp : irc;
+}
+
+/// The part of an account address after the `@`, which is the server it lives
+/// on. Anything after a `/` is a resource and not part of the address.
+String jidDomain(String jid) => jid.trim().split('/').first.split('@').last;
+
+/// What is wrong with an account address, in words, or null if nothing is.
+///
+/// Deliberately shallow: it catches the mistakes a person makes typing one -
+/// a missing name, a space, a stray resource - and leaves the rest to the core,
+/// which validates properly and says so before it dials. An address with a
+/// resource (`name@example.org/phone`) is refused rather than trimmed, because
+/// the resource is the server's to assign and silently dropping it would hide
+/// that the user expected something different.
+String? jidProblem(String jid) {
+  const shape = 'An account address looks like name@example.org.';
+  final text = jid.trim();
+  if (text.isEmpty) return 'Enter your account address — $shape';
+  if (RegExp(r'\s').hasMatch(text)) return 'An address has no spaces. $shape';
+  if (text.contains('/')) {
+    return 'Leave off anything after a "/" — the server chooses that part.';
+  }
+  final parts = text.split('@');
+  if (parts.length != 2 || parts.any((p) => p.isEmpty)) return shape;
+  return null;
+}
+
+/// What is wrong with a room address, or null. The same depth as [jidProblem].
+///
+/// A room is an address like any other, which is also why a `#channel` is not
+/// one: the people most likely to type that are people who have used IRC, and
+/// telling them what a room looks like here is kinder than a rejected join.
+String? roomProblem(String room) {
+  final text = room.trim();
+  final shape =
+      '"$text" is not a room address. Rooms look like '
+      'room@conference.example.org.';
+  if (text.isEmpty || RegExp(r'[\s#/]').hasMatch(text)) return shape;
+  final parts = text.split('@');
+  if (parts.length != 2 || parts.any((p) => p.isEmpty)) return shape;
+  return null;
+}
+
 /// A saved server, ready to connect to.
 ///
 /// Everything here except the SASL password is ordinary configuration and is
@@ -30,6 +83,7 @@ class Profile {
     this.proxy,
     this.autoConnect = false,
     this.personaId,
+    this.protocol = NetworkProtocol.irc,
   });
 
   /// Stable across renames, because it keys both the stored password and the
@@ -38,6 +92,17 @@ class Profile {
 
   /// What the user calls this network. Defaults to the host.
   final String name;
+
+  /// Which protocol this account speaks.
+  ///
+  /// The fields below are shared, and read differently for XMPP rather than
+  /// duplicated: [nickname] holds the account address (`name@example.org`),
+  /// [channels] the rooms to join, and [host] and [port] are an optional
+  /// override of where to dial, with an empty [host] meaning "the server the
+  /// address names". Keeping one shape means the rail, the store, the session
+  /// and the `.irc` file all keep working without knowing about the second
+  /// protocol.
+  final NetworkProtocol protocol;
 
   final String host;
   final int port;
@@ -72,10 +137,29 @@ class Profile {
   /// the history store and only exists once that is open. See `Personas`.
   final String? personaId;
 
+  bool get isXmpp => protocol == NetworkProtocol.xmpp;
+
   /// Whether this network hides behind one of the user's identities.
-  bool get usesPersona => personaId != null;
+  ///
+  /// Never for XMPP: an identity is a random per-network IRC nick, and an XMPP
+  /// account is an address someone gave you, not a handle you mint.
+  bool get usesPersona => personaId != null && !isXmpp;
 
   bool get usesSasl => (saslAccount ?? '').isNotEmpty;
+
+  /// Whether this profile has a password in the keychain: an IRC network's
+  /// SASL password, or an XMPP account's, which is stored in the same place.
+  ///
+  /// The distinction matters in [ProfileStore.save], which drops a password
+  /// nothing can use. For IRC that is a password with no SASL account; for
+  /// XMPP there is no such companion field, and the password is the whole
+  /// point.
+  bool get usesPassword => isXmpp || usesSasl;
+
+  /// The server this account lives on: the host for IRC, and for XMPP either
+  /// the override or the domain of the address.
+  String get serverName =>
+      isXmpp && host.trim().isEmpty ? jidDomain(nickname) : host;
 
   /// Whether this profile needs its own proxy password in the keychain.
   bool get usesProxyAuth =>
@@ -110,9 +194,11 @@ class Profile {
     ProxyEndpoint? proxy,
     bool? autoConnect,
     Object? personaId = _keep,
+    NetworkProtocol? protocol,
   }) {
     return Profile(
       id: id,
+      protocol: protocol ?? this.protocol,
       name: name ?? this.name,
       host: host ?? this.host,
       port: port ?? this.port,
@@ -175,8 +261,45 @@ class Profile {
     );
   }
 
+  /// Build the config the core connects to an XMPP account with.
+  ///
+  /// The same rule as [toConfig]: the password is passed in rather than
+  /// stored, so it exists only for the length of the call.
+  XmppConfig toXmppConfig({String? password, ProxyConfig? proxy}) {
+    return XmppConfig(
+      jid: nickname.trim(),
+      password: password ?? '',
+      // Blank means "the server the address names", and the default port is
+      // only sent when something else was chosen: the core knows it already.
+      host: host.trim().isEmpty ? null : host.trim(),
+      port: port == xmppDefaultPort ? null : port,
+      rooms: channels,
+      proxy: proxy,
+    );
+  }
+
+  /// An IRC-shaped config that stands for this account in the places that only
+  /// need to show where a session is connected: the log, the rail, the server
+  /// settings. Never sent to the core.
+  ///
+  /// The session model keeps a [ServerConfig] for a few things - the host to
+  /// name in messages, the proxy to badge - and an XMPP account has the same
+  /// answers to give, so it is described in the shape they already read.
+  ServerConfig toDisplayConfig({ProxyConfig? proxy}) => ServerConfig(
+    host: serverName,
+    port: port,
+    nickname: nickname,
+    altNicks: const [],
+    channels: channels,
+    proxy: proxy,
+  );
+
+  /// The port XMPP servers offer TLS from the first byte on (XEP-0368).
+  static const xmppDefaultPort = 5223;
+
   Map<String, Object?> toJson() => {
     'id': id,
+    'protocol': protocol.name,
     'name': name,
     'host': host,
     'port': port,
@@ -191,10 +314,17 @@ class Profile {
   };
 
   static Profile? fromJson(Map<String, Object?> json) {
+    final protocol = NetworkProtocol.byName(json['protocol']);
     final id = json['id'];
-    final host = json['host'];
     final nickname = json['nickname'];
-    final port = json['port'];
+    // An XMPP account is its address, and the server is worked out from that:
+    // a file that names none, or no port, is complete, and is read as "the
+    // server the address names" on the standard port. An IRC network needs
+    // both, as it always has.
+    final host = json['host'] ?? (protocol == NetworkProtocol.xmpp ? '' : null);
+    final port =
+        json['port'] ??
+        (protocol == NetworkProtocol.xmpp ? xmppDefaultPort : null);
     // A malformed entry is dropped rather than crashing the app on launch:
     // one bad record must not cost the user every other profile.
     if (id is! String || host is! String || nickname is! String) return null;
@@ -202,7 +332,12 @@ class Profile {
 
     return Profile(
       id: id,
-      name: json['name'] is String ? json['name']! as String : host,
+      protocol: protocol,
+      name: json['name'] is String
+          ? json['name']! as String
+          // An XMPP account may have no host of its own, and the address is
+          // the next best thing to call it.
+          : (host.isEmpty ? nickname : host),
       host: host,
       port: port,
       nickname: nickname,
@@ -328,13 +463,16 @@ class ProfileStore extends ChangeNotifier {
     if (nickservPassword != null) {
       await _writeSecret(_nickservPrefix, profile.id, nickservPassword);
     }
-    // A profile with no SASL account cannot use a password; drop any that a
+    // A profile with nothing that can use a password - an IRC network with no
+    // SASL account - cannot use one; drop any that a
     // previous configuration left behind rather than keeping an orphan. The
     // same goes for a proxy that no longer authenticates, or is no longer
     // this profile's own. The server password and NickServ password have no
     // such companion field to check against — each stands on its own — so
     // there is nothing to auto-clear for either.
-    if (!profile.usesSasl) await _writeSecret(_secretPrefix, profile.id, '');
+    if (!profile.usesPassword) {
+      await _writeSecret(_secretPrefix, profile.id, '');
+    }
     if (!profile.usesProxyAuth) {
       await _writeSecret(_proxySecretPrefix, profile.id, '');
     }

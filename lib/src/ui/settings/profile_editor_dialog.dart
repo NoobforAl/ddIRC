@@ -164,12 +164,23 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
 
   bool get _isNew => widget.profile == null;
 
+  /// Which protocol this account speaks.
+  ///
+  /// Chosen when adding and not offered again afterwards: switching a saved
+  /// account from one protocol to the other would leave every field holding the
+  /// wrong kind of answer - an address where a nickname was.
+  late NetworkProtocol _protocol =
+      widget.profile?.protocol ?? NetworkProtocol.irc;
+
+  bool get _isXmpp => _protocol == NetworkProtocol.xmpp;
+
   /// What each field held when the editor opened, so "has anything been
   /// changed" is a comparison and not a guess.
   late final Map<_Input, String> _opened;
 
   /// Whether leaving now would throw away something the user typed.
   bool get _dirty =>
+      _protocol != (widget.profile?.protocol ?? NetworkProtocol.irc) ||
       _autoConnect != (widget.profile?.autoConnect ?? false) ||
       _fields.entries.any((e) => e.value.text != _opened[e.key]);
 
@@ -224,6 +235,9 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     // setting they will conclude has been lost.
     _showAdvanced =
         (widget.profile?.usesSasl ?? false) ||
+        // A server override on an account is a setting somebody made.
+        (widget.profile?.isXmpp == true &&
+            widget.profile!.host.trim().isNotEmpty) ||
         (widget.profile?.proxyMode ?? ProxyMode.followDefault) !=
             ProxyMode.followDefault;
     _proxy.addListener(() {
@@ -334,6 +348,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   Map<_Input, String> _validate() {
     _liftPortOutOfAddress();
     final errors = <_Input, String>{};
+    if (_isXmpp) return _validateAccount(errors);
 
     if (_text(_Input.host).isEmpty) {
       errors[_Input.host] = 'Enter a server address.';
@@ -372,6 +387,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   }
 
   Profile _build() {
+    if (_isXmpp) return _buildAccount();
     final host = _text(_Input.host);
     final name = _text(_Input.name);
     return Profile(
@@ -414,10 +430,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         _shake++;
         // An error inside something folded away is an error nobody can see,
         // and the form would refuse to save while showing nothing wrong.
-        if (proxyErrors.isNotEmpty ||
-            errors.keys.any(
-              (f) => f == _Input.account || f == _Input.password,
-            )) {
+        if (proxyErrors.isNotEmpty || _hiddenInAdvanced(errors)) {
           _showAdvanced = true;
         }
       });
@@ -486,10 +499,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ..addAll(proxyErrors);
         _shake++;
         _testNote = null;
-        if (proxyErrors.isNotEmpty ||
-            errors.keys.any(
-              (f) => f == _Input.account || f == _Input.password,
-            )) {
+        if (proxyErrors.isNotEmpty || _hiddenInAdvanced(errors)) {
           _showAdvanced = true;
         }
       });
@@ -521,21 +531,32 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     String note;
     var failed = true;
     try {
-      final config = profile.toConfig(
-        saslPassword: await _secretFor(_Input.password, store.passwordFor),
-        serverPassword: await _secretFor(
-          _Input.serverPassword,
-          store.serverPasswordFor,
-        ),
-        // Deliberately not passed. The core's probe never identifies to
-        // NickServ — sending a password to a service is a side effect, and a
-        // test is supposed to leave nothing behind.
-        proxy: await _proxyForTest(profile, store, proxies),
-        nicknameOverride: personaNick,
-      );
-      final report = await core.testConnection(config: config);
-      failed = false;
-      note = _describe(report, personaNick ?? profile.nickname);
+      if (profile.isXmpp) {
+        final report = await core.testConnectionXmpp(
+          config: profile.toXmppConfig(
+            password: await _secretFor(_Input.password, store.passwordFor),
+            proxy: await _proxyForTest(profile, store, proxies),
+          ),
+        );
+        failed = false;
+        note = _describeAccount(report);
+      } else {
+        final config = profile.toConfig(
+          saslPassword: await _secretFor(_Input.password, store.passwordFor),
+          serverPassword: await _secretFor(
+            _Input.serverPassword,
+            store.serverPasswordFor,
+          ),
+          // Deliberately not passed. The core's probe never identifies to
+          // NickServ — sending a password to a service is a side effect, and a
+          // test is supposed to leave nothing behind.
+          proxy: await _proxyForTest(profile, store, proxies),
+          nicknameOverride: personaNick,
+        );
+        final report = await core.testConnection(config: config);
+        failed = false;
+        note = _describe(report, personaNick ?? profile.nickname);
+      }
     } catch (error) {
       note = describeError(error);
     }
@@ -675,7 +696,9 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) => _onDismissed(didPop),
       child: SettingsDialog(
-        title: _isNew ? 'Add a network' : 'Edit network',
+        title: _isNew
+            ? (_isXmpp ? 'Add an account' : 'Add a network')
+            : (_isXmpp ? 'Edit account' : 'Edit network'),
         subtitle: _isNew ? 'Every connection uses TLS' : widget.profile!.name,
         actions: _isNew
             ? const []
@@ -708,151 +731,364 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
           ],
         ),
         children: [
-          SettingsSection(
-            label: 'Server',
-            children: [
-              _field(
-                _Input.name,
-                'Name',
-                hint: 'Optional — defaults to the host',
-                help:
-                    'What this network is called in the rail on the left and in '
-                    'the channel list. Yours to choose — it is never sent '
-                    'anywhere, and changing it does not change what you connect '
-                    'to.',
-              ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _field(
-                      _Input.host,
-                      'Address',
-                      hint: 'irc.example.org',
-                      help:
-                          'The server to connect to, as a hostname or an IP '
-                          'address. A `.onion` address works too, and is routed '
-                          'through Tor. Pasting `host:port` is fine — the port '
-                          'moves into the box beside it.',
-                    ),
-                  ),
-                  // A fixed width, not a share of the row: a share left the box
-                  // too narrow for a five-digit port, which clipped the last
-                  // digit of `52675` so it could not be read back. Wide enough
-                  // for the longest valid port with room to spare, and the
-                  // address — which can be any length — takes everything else.
-                  SizedBox(
-                    width: 120,
-                    child: _field(
-                      _Input.port,
-                      'Port',
-                      help:
-                          'Almost always 6697, which is the standard port for '
-                          'IRC over TLS. ddIRC never connects in the clear, so '
-                          'the plaintext ports — 6667 and friends — will not '
-                          'work here.',
-                    ),
-                  ),
-                ],
-              ),
-              _networkNote(t),
-              _field(
-                _Input.channels,
-                'Channels',
-                hint: 'Comma-separated',
-                help:
-                    'Joined automatically whenever this network connects. They '
-                    'fill the channel list rather than opening a tab each, so '
-                    'saving a dozen does not mean landing in a dozen.',
-              ),
-              _suggestedChannels(t),
-              SettingsSwitch(
-                label: 'Connect at launch',
-                description:
-                    'Opens this network when ddIRC starts. Several may be '
-                    'marked; they connect together, and the first in the list '
-                    'is the one you land on.',
-                value: _autoConnect,
-                onChanged: (v) => setState(() => _autoConnect = v),
-              ),
-            ],
-          ),
-          const SettingsRule(),
-          SettingsSection(
-            label: 'Identity',
-            children: [
-              PersonaPicker(
-                selected: _personaId,
-                networkId: widget.profile?.id,
-                onChanged: (id) => setState(() => _personaId = id),
-                fixedNickField: _field(
-                  _Input.nick,
-                  'Nickname',
+          if (_isNew) ..._protocolChooser(),
+          if (_isXmpp)
+            ..._accountChildren(t)
+          else ...[
+            SettingsSection(
+              label: 'Server',
+              children: [
+                _field(
+                  _Input.name,
+                  'Name',
+                  hint: 'Optional — defaults to the host',
                   help:
-                      'How people address you on this network, and how you '
-                      'appear in every channel. No spaces. If it is already '
-                      'taken the server offers you the next one down — the '
-                      'connection test below says which name you actually got.',
+                      'What this network is called in the rail on the left and in '
+                      'the channel list. Yours to choose — it is never sent '
+                      'anywhere, and changing it does not change what you connect '
+                      'to.',
                 ),
-              ),
-            ],
-          ),
-          const SettingsRule(),
-          SettingsDisclosure(
-            label: 'Advanced',
-            summary: _advancedSummary,
-            open: _showAdvanced,
-            onToggle: () => setState(() => _showAdvanced = !_showAdvanced),
-            children: [
-              SettingsSection(
-                label: 'Authentication',
-                children: [
-                  _field(
-                    _Input.serverPassword,
-                    'Server password',
-                    obscure: true,
-                    hint: _hasStoredServerPassword
-                        ? 'Stored — leave blank to keep it'
-                        : 'Optional',
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _field(
+                        _Input.host,
+                        'Address',
+                        hint: 'irc.example.org',
+                        help:
+                            'The server to connect to, as a hostname or an IP '
+                            'address. A `.onion` address works too, and is routed '
+                            'through Tor. Pasting `host:port` is fine — the port '
+                            'moves into the box beside it.',
+                      ),
+                    ),
+                    // A fixed width, not a share of the row: a share left the box
+                    // too narrow for a five-digit port, which clipped the last
+                    // digit of `52675` so it could not be read back. Wide enough
+                    // for the longest valid port with room to spare, and the
+                    // address — which can be any length — takes everything else.
+                    SizedBox(
+                      width: 120,
+                      child: _field(
+                        _Input.port,
+                        'Port',
+                        help:
+                            'Almost always 6697, which is the standard port for '
+                            'IRC over TLS. ddIRC never connects in the clear, so '
+                            'the plaintext ports — 6667 and friends — will not '
+                            'work here.',
+                      ),
+                    ),
+                  ],
+                ),
+                _networkNote(t),
+                _field(
+                  _Input.channels,
+                  'Channels',
+                  hint: 'Comma-separated',
+                  help:
+                      'Joined automatically whenever this network connects. They '
+                      'fill the channel list rather than opening a tab each, so '
+                      'saving a dozen does not mean landing in a dozen.',
+                ),
+                _suggestedChannels(t),
+                SettingsSwitch(
+                  label: 'Connect at launch',
+                  description:
+                      'Opens this network when ddIRC starts. Several may be '
+                      'marked; they connect together, and the first in the list '
+                      'is the one you land on.',
+                  value: _autoConnect,
+                  onChanged: (v) => setState(() => _autoConnect = v),
+                ),
+              ],
+            ),
+            const SettingsRule(),
+            SettingsSection(
+              label: 'Identity',
+              children: [
+                PersonaPicker(
+                  selected: _personaId,
+                  networkId: widget.profile?.id,
+                  onChanged: (id) => setState(() => _personaId = id),
+                  fixedNickField: _field(
+                    _Input.nick,
+                    'Nickname',
                     help:
-                        'Sent as the server\'s PASS before registration. Kept '
-                        'in the platform keychain, never in app settings.',
+                        'How people address you on this network, and how you '
+                        'appear in every channel. No spaces. If it is already '
+                        'taken the server offers you the next one down — the '
+                        'connection test below says which name you actually got.',
                   ),
-                  _field(_Input.account, 'SASL account'),
-                  _field(
-                    _Input.password,
-                    'SASL password',
-                    obscure: true,
-                    hint: !_isNew && widget.profile!.usesSasl
-                        ? 'Stored — leave blank to keep it'
-                        : null,
-                    help:
-                        'Optional. Kept in the platform keychain, never in app '
-                        'settings, and zeroized by the core once authentication '
-                        'completes.',
-                  ),
-                  _field(
-                    _Input.nickservPassword,
-                    'NickServ password',
-                    obscure: true,
-                    hint: _hasStoredNickservPassword
-                        ? 'Stored — leave blank to keep it'
-                        : 'Optional',
-                    help:
-                        'Used to identify with NickServ if SASL was not '
-                        'accepted. Kept in the platform keychain, never in app '
-                        'settings.',
-                  ),
-                  const SecretStorageNote(),
-                ],
-              ),
-              _proxySection(t),
-            ],
-          ),
+                ),
+              ],
+            ),
+            const SettingsRule(),
+            SettingsDisclosure(
+              label: 'Advanced',
+              summary: _advancedSummary,
+              open: _showAdvanced,
+              onToggle: () => setState(() => _showAdvanced = !_showAdvanced),
+              children: [
+                SettingsSection(
+                  label: 'Authentication',
+                  children: [
+                    _field(
+                      _Input.serverPassword,
+                      'Server password',
+                      obscure: true,
+                      hint: _hasStoredServerPassword
+                          ? 'Stored — leave blank to keep it'
+                          : 'Optional',
+                      help:
+                          'Sent as the server\'s PASS before registration. Kept '
+                          'in the platform keychain, never in app settings.',
+                    ),
+                    _field(_Input.account, 'SASL account'),
+                    _field(
+                      _Input.password,
+                      'SASL password',
+                      obscure: true,
+                      hint: !_isNew && widget.profile!.usesSasl
+                          ? 'Stored — leave blank to keep it'
+                          : null,
+                      help:
+                          'Optional. Kept in the platform keychain, never in app '
+                          'settings, and zeroized by the core once authentication '
+                          'completes.',
+                    ),
+                    _field(
+                      _Input.nickservPassword,
+                      'NickServ password',
+                      obscure: true,
+                      hint: _hasStoredNickservPassword
+                          ? 'Stored — leave blank to keep it'
+                          : 'Optional',
+                      help:
+                          'Used to identify with NickServ if SASL was not '
+                          'accepted. Kept in the platform keychain, never in app '
+                          'settings.',
+                    ),
+                    const SecretStorageNote(),
+                  ],
+                ),
+                _proxySection(t),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
+
+  /// Choose between IRC and XMPP. Offered only when adding.
+  List<Widget> _protocolChooser() => [
+    SettingsSection(
+      label: 'Protocol',
+      children: [
+        SettingsChoice<NetworkProtocol>(
+          label: 'Speaks',
+          description:
+              'IRC networks are joined by an address and a nickname. XMPP '
+              'accounts log in with an address like name@example.org and a '
+              'password, and chat in rooms. This cannot be changed once the '
+              'account is saved.',
+          options: NetworkProtocol.values,
+          labelFor: (p) => p == NetworkProtocol.xmpp ? 'XMPP' : 'IRC',
+          value: _protocol,
+          onChanged: _setProtocol,
+        ),
+      ],
+    ),
+    const SettingsRule(),
+  ];
+
+  void _setProtocol(NetworkProtocol next) {
+    if (next == _protocol) return;
+    // The one field whose sensible value differs between the two. A port the
+    // user typed themselves is left alone: only the standard one is swapped.
+    final ircPort = '${core.defaultTlsPort()}';
+    final xmppPort = '${Profile.xmppDefaultPort}';
+    final port = _fields[_Input.port]!;
+    if (port.text.trim() == (_isXmpp ? xmppPort : ircPort)) {
+      port.text = next == NetworkProtocol.xmpp ? xmppPort : ircPort;
+    }
+    setState(() {
+      _protocol = next;
+      // Errors about fields the other form does not have would sit there in
+      // red with nothing to fix.
+      _errors.clear();
+      _testNote = null;
+    });
+  }
+
+  /// Whether any of [errors] belongs to a field folded away in Advanced.
+  bool _hiddenInAdvanced(Map<_Input, String> errors) => _isXmpp
+      ? errors.keys.any((f) => f == _Input.host || f == _Input.port)
+      : errors.keys.any((f) => f == _Input.account || f == _Input.password);
+
+  /// What is wrong with an account's fields.
+  ///
+  /// Shallow on purpose: the core validates properly before it dials, and says
+  /// so in a sentence. This catches what a person gets wrong typing one.
+  Map<_Input, String> _validateAccount(Map<_Input, String> errors) {
+    final address = jidProblem(_text(_Input.nick));
+    if (address != null) errors[_Input.nick] = address;
+
+    // On an existing account a blank password means "keep the stored one".
+    if (_isNew && _fields[_Input.password]!.text.isEmpty) {
+      errors[_Input.password] = "Enter the account's password.";
+    }
+
+    final portText = _text(_Input.port);
+    final port = int.tryParse(portText);
+    if (portText.isEmpty) {
+      errors[_Input.port] = 'Required.';
+    } else if (port == null || port < 1 || port > 65535) {
+      errors[_Input.port] = 'Must be 1-65535.';
+    } else if (port == 5222) {
+      errors[_Input.port] =
+          'Port 5222 starts in plaintext. Use ${Profile.xmppDefaultPort}, or '
+          'the port your server offers encrypted connections on.';
+    }
+
+    for (final room in _channelList()) {
+      final problem = roomProblem(room);
+      if (problem != null) {
+        errors[_Input.channels] = problem;
+        break;
+      }
+    }
+    return errors;
+  }
+
+  Profile _buildAccount() {
+    final address = _text(_Input.nick);
+    final name = _text(_Input.name);
+    return Profile(
+      id: widget.profile?.id ?? ProfileStore.newId(),
+      protocol: NetworkProtocol.xmpp,
+      // An unnamed account takes its address, so the rail always has something
+      // to show.
+      name: name.isEmpty ? address : name,
+      // Empty means "the server the address names".
+      host: _text(_Input.host),
+      port: int.parse(_text(_Input.port)),
+      nickname: address,
+      channels: _channelList(),
+      autoConnect: _autoConnect,
+      proxyMode: _proxyMode,
+      proxy: _proxy.isEmpty ? widget.profile?.proxy : _proxy.build(),
+    );
+  }
+
+  /// What a successful account test found, in one sentence.
+  String _describeAccount(rust.ProbeReport report) {
+    final seconds = (report.elapsedMs.toInt() / 1000).toStringAsFixed(1);
+    return 'Logged in as ${report.nickname} over TLS in ${seconds}s. No room '
+        'was joined, no presence was sent, and nothing was saved.';
+  }
+
+  /// The form for an XMPP account.
+  ///
+  /// Shorter than the IRC one, because an account is an address and a password:
+  /// the server follows from the address, there is no nickname to choose and no
+  /// identity to hide behind, and none of IRC's three kinds of password.
+  List<Widget> _accountChildren(Tokens t) => [
+    SettingsSection(
+      label: 'Account',
+      children: [
+        _field(
+          _Input.name,
+          'Name',
+          hint: 'Optional — defaults to the address',
+          help:
+              'What this account is called in the rail on the left. Yours to '
+              'choose — it is never sent anywhere.',
+        ),
+        _field(
+          _Input.nick,
+          'Address',
+          hint: 'name@example.org',
+          help:
+              'Your XMPP account. The server is worked out from the part '
+              'after the @, so there is usually nothing more to fill in. '
+              'Leave off anything after a "/" — the server chooses that part.',
+        ),
+        _field(
+          _Input.password,
+          'Password',
+          obscure: true,
+          hint: _isNew ? null : 'Stored — leave blank to keep it',
+          help:
+              'Kept in the platform keychain, never in app settings, and '
+              'zeroized by the core once login completes.',
+        ),
+        _field(
+          _Input.channels,
+          'Rooms',
+          hint: 'Comma-separated',
+          help:
+              'Group chats to join whenever this account connects, written '
+              'as room@conference.example.org. A #channel is IRC and will '
+              'not work here.',
+        ),
+        SettingsSwitch(
+          label: 'Connect at launch',
+          description:
+              'Opens this account when ddIRC starts. Several may be marked; '
+              'they connect together.',
+          value: _autoConnect,
+          onChanged: (v) => setState(() => _autoConnect = v),
+        ),
+      ],
+    ),
+    const SettingsRule(),
+    SettingsDisclosure(
+      label: 'Advanced',
+      summary: _advancedSummary,
+      open: _showAdvanced,
+      onToggle: () => setState(() => _showAdvanced = !_showAdvanced),
+      children: [
+        SettingsSection(
+          label: 'Server',
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _field(
+                    _Input.host,
+                    'Server',
+                    hint: 'Same as the address',
+                    help:
+                        'Only when the server is not at the domain in your '
+                        'address — some hosts run theirs elsewhere. Your '
+                        "login is still checked against the address's own "
+                        'domain, never against this.',
+                  ),
+                ),
+                SizedBox(
+                  width: 120,
+                  child: _field(
+                    _Input.port,
+                    'Port',
+                    help:
+                        'Almost always ${Profile.xmppDefaultPort}, where '
+                        'servers offer encryption from the first byte. '
+                        'Port 5222 starts in plaintext, which ddIRC never '
+                        'does.',
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        _proxySection(t),
+      ],
+    ),
+  ];
 
   /// The row of buttons at the bottom, in the shape the width has room for.
   ///
@@ -923,11 +1159,14 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   /// It is worth keeping: what it mostly says is what the test does *not* do —
   /// no channel joined, no NickServ password sent, nothing saved.
   Widget _testButton() => Tooltip(
-    message:
-        'Dials this server the way connecting would — through the proxy, over '
-        'TLS, with whatever passwords are set here — and then hangs up. No '
-        'channel is joined, no NickServ password is sent, and nothing is '
-        'saved.',
+    message: _isXmpp
+        ? 'Logs in to this account the way connecting would — through the '
+              'proxy, over TLS, with the password set here — and then hangs up. '
+              'No room is joined, no presence is sent, and nothing is saved.'
+        : 'Dials this server the way connecting would — through the proxy, over '
+              'TLS, with whatever passwords are set here — and then hangs up. No '
+              'channel is joined, no NickServ password is sent, and nothing is '
+              'saved.',
     child: SettingsSecondaryButton(
       label: _testing ? 'Testing…' : 'Test connection',
       tone: context.tokens.accent,
@@ -1097,6 +1336,17 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
   /// something is — so folding it away never hides a decision that has been
   /// made, only ones that have not.
   String get _advancedSummary {
+    if (_isXmpp) {
+      final set = <String?>[
+        if (_text(_Input.host).isNotEmpty) 'own server',
+        switch (_proxyMode) {
+          ProxyMode.followDefault => null,
+          ProxyMode.direct => 'always direct',
+          ProxyMode.custom => 'own proxy',
+        },
+      ].nonNulls.toList();
+      return set.isEmpty ? 'server, proxy' : set.join(' · ');
+    }
     final hasServerPassword =
         _hasStoredServerPassword ||
         _fields[_Input.serverPassword]!.text.isNotEmpty;
