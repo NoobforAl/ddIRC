@@ -1,0 +1,16 @@
+# Blank issues stay open: CONTRIBUTING.md asks for a change to arrive explained,
+# not for a form to be filled in, and a report that fits neither template below
+# is still a report. The forms are here to make the usual ones easier to write
+# and easier to act on - not to stand in the way of the unusual one.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem privately
+    url: https://github.com/NoobforAl/ddIRC/security/advisories/new
+    about: >-
+      Anything that could let a server, another user or a network observer read
+      what they should not, or run something on your machine. Please do not
+      open a public issue for it. SECURITY.md describes what the project already
+      promises, which is worth reading first.
+  - name: How it is built, and what it promises
+    url: https://github.com/NoobforAl/ddIRC/blob/main/docs/building.md
+    about: Building from source, the installers, and the CLI harness.

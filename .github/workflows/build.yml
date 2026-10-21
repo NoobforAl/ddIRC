@@ -1,112 +1,135 @@
-# Does it still compile.
+# Does it still compile - and does it still install.
 #
 # A separate workflow from Test and Lint, and not folded into either, because
 # it answers a question neither of them can. `make test` runs the Dart suite on
 # the Dart VM and the Rust suite for the host; `make lint` runs analyze, format,
-# rustfmt and clippy. Between them they never invoke a platform toolchain — so
+# rustfmt and clippy. Between them they never invoke a platform toolchain - so
 # the Kotlin under `android/`, the C++ runner under `windows/`, the Gradle
-# build, the NDK cross-compile and the Inno Setup script are all invisible to
-# them.
+# build, the NDK cross-compile, the Inno Setup script and the Linux installer
+# are all invisible to them.
 #
 # That was not theoretical. The Android foreground service was rewritten across
 # three Kotlin files and a new one, and every one of those changes could have
-# failed to compile with both existing workflows green — the first build would
+# failed to compile with both existing workflows green - the first build would
 # have been the release tag, which is the worst possible moment to find out.
 #
-# The cost is real: this is the slow workflow, because Rust cross-compiles once
-# per Android ABI. The caches carry most of it after the first run.
+# The slow workflow, so it is the one ci.yml starts last: only for a change that
+# has already passed lint and the tests. A change that fails either never pays
+# for this. It is called by ci.yml, and never started by an event of its own.
+#
+# The two installers are built here as well as at release, from the same
+# Makefile targets, and the Linux one is installed, upgraded and uninstalled in
+# a throwaway home before anyone downloads it. Both are kept for a week as
+# artifacts, so a pull request's installer can be tried without building it.
 name: Build
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # Kotlin, Gradle, and the Rust core cross-compiled for three ABIs.
+  # Kotlin, Gradle, and the Rust core cross-compiled for Android.
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      # `cache: gradle` keeps the Gradle distribution, its wrapper and the
+      # downloaded dependencies between runs - minutes of fetching otherwise.
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
 
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
+      # One ABI, not three: see `make build-android`. This asks whether it
+      # compiles, and arm64 is the ABI the Rust cross-compile is the same code
+      # for; the other two are built for real at release, where all three are
+      # built and published.
+      - uses: ./.github/actions/setup
         with:
-          toolchain: "1.99.1"
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
+          rust-targets: aarch64-linux-android
 
       - run: cargo install cargo-ndk --locked
 
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: "3.47.7"
-          channel: stable
-          cache: true
-
       # Gradle reads compileSdk and ndkVersion itself and fetches what is
-      # missing once the licences are accepted — see release.yml, where the
+      # missing once the licences are accepted - see release.yml, where the
       # same step explains why nothing is named by package id here.
       - name: Accept the Android SDK licences
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
 
-      - run: flutter pub get
-
       # Debug, not release: this asks whether it compiles, and the release
-      # build additionally signs — with the debug key today, which is a
-      # separate problem and not one to discover here.
-      - run: make build-android
+      # build additionally signs.
+      - run: make build-android ANDROID_TARGET=android-arm64
 
-  # The C++ runner, the Rust core for windows-msvc, and the installer script.
+  # The C++ runner, the Rust core for windows-msvc, and the per-user installer.
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
-        with:
-          toolchain: "1.99.1"
+      - uses: ./.github/actions/setup
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
-
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          flutter-version: "3.47.7"
-          channel: stable
-          cache: true
-
-      # Neither is on a Windows runner by default.
+      # `make` is not on a Windows runner. Inno Setup may or may not be, by the
+      # image; installing it only when it is absent saves the download on the
+      # runs where it is already there.
       - name: Inno Setup and make
+        shell: pwsh
         run: |
-          choco install innosetup --no-progress -y
           choco install make --no-progress -y
-
-      - run: flutter pub get
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
 
       # The installer rather than the app, which builds the app on the way
       # through: `installer` depends on `build-release`. What it adds is the
       # Inno Setup script, which is otherwise only ever run by hand on one
       # maintainer's machine and would fail at the one moment it matters.
-      #
-      # Nothing is uploaded. This is a compile check; release.yml is what
-      # publishes.
       - name: Build the installer
         shell: bash
         run: make installer
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-windows
+          path: build/installer/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # The Linux app, and the per-user installer around it - which, unlike the
+  # Windows one, has never been run by anyone, and is tried here before it is
+  # ever offered.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: ./.github/actions/setup
+
+      - uses: ./.github/actions/linux-deps
+
+      - name: Build the installer
+        run: make installer-linux
+
+      # Every library the program links against has to be on a plain Linux
+      # desktop, or be inside the bundle. One that is neither would be a window
+      # that never opens on someone else's machine.
+      - name: Nothing the program links against is missing
+        run: |
+          missing="$(ldd build/linux/x64/release/bundle/ddirc | grep 'not found' || true)"
+          if [ -n "$missing" ]; then echo "$missing"; exit 1; fi
+
+      # Install it, upgrade it, uninstall it, in a throwaway home. This is the
+      # part nothing else tests.
+      - name: Install, upgrade and uninstall it
+        run: make test-installer-linux INSTALLER="$(ls build/installer/*.sh)"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-linux
+          path: build/installer/*.sh
+          if-no-files-found: error
+          retention-days: 7

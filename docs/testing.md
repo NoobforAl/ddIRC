@@ -97,18 +97,53 @@ live session, so it needs the `docker` command as well as the server;
 
 ## Continuous integration
 
-`.github/workflows/lint.yml` runs `make lint` — `flutter analyze`, `cargo fmt
---check`, and `cargo clippy -D warnings` — on every push to `main` and every
-pull request. It calls the Makefile target rather than repeating the commands,
-so a local check and CI cannot drift apart.
+One workflow starts everything, and it decides the order:
 
-Both toolchains are pinned. Clippy runs with `-D warnings`, and an unpinned
-toolchain would fail CI on unchanged code the day a new lint ships.
+```
+changes ──┬── lint ──┐
+          └── test ──┴── build ── ci
+```
 
-`.github/workflows/test.yml` runs the suites, in two jobs. **hermetic** is
-`make test` — the Dart widget tests and the Rust unit and transcript tests,
-needing no network and no Docker. **integration** starts the dev server with
-`make dev-server` and runs the end-to-end suite against it.
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`.
+`lint.yml`, `test.yml` and `build.yml` are workflows of their own - so each can
+be read and run by hand, and `release.yml` reuses them - but none of them starts
+on an event; they are called from here.
+
+**A build is never started for a change that does not pass lint and the
+tests.** Build is the slow workflow (Rust cross-compiled, a Windows installer, a
+Linux one), and a formatting slip or a failing test would otherwise pay for all
+of it before anyone read the first red mark. Lint and test run side by side, so
+the wait is the longer of the two, not the sum.
+
+**A change that touches only documentation runs nothing.** The `changes` job
+reads which files changed (from the API, nothing is fetched); if every one is
+Markdown, `docs/`, the licence, the issue forms or Dependabot's configuration,
+the three workflows are skipped, and a skipped job counts as passing for a
+required check. The workflow-level `paths-ignore` is deliberately not used for
+this: it would leave a required check waiting for ever on a change it skipped.
+
+**`ci` is the one check to require.** It succeeds when everything that ran
+succeeded, and fails when anything failed or was cancelled, so branch protection
+can ask for it alone instead of a list of jobs that changes whenever one is
+added.
+
+A new push to a pull request cancels the run already in flight; on `main` every
+push is kept, so a merge is never hidden behind the next one.
+
+### Lint
+
+`lint.yml` runs `make lint` - `flutter analyze`, `cargo fmt --check` and
+`cargo clippy -D warnings`. It calls the Makefile target rather than repeating
+the commands, so a local check and CI cannot drift apart. Both toolchains are
+pinned: clippy runs with `-D warnings`, and an unpinned toolchain would fail CI
+on unchanged code the day a new lint ships.
+
+### Test
+
+`test.yml` runs the suites. **hermetic** is `make test` - the Dart widget tests
+and the Rust unit and transcript tests, needing no network and no Docker.
+**integration** starts the dev server with `make dev-server` and runs the
+end-to-end suite against it.
 
 The integration job starts the server through the Compose file rather than a
 `services:` block. The Compose file already describes the server, its
@@ -116,43 +151,94 @@ healthcheck and its loopback binding, and a service container would be a second
 description to keep in step; it also puts the generated certificate in
 `dev/ergo/` inside the workspace, which is where the tests look by default.
 
-Lint and test are separate workflows so a formatting slip and a broken test
-report as two different failures.
+Rust test binaries are built with line tables and no more debug information
+(`CARGO_PROFILE_DEV_DEBUG`): it is most of what the linker writes, nothing here
+reads a debugger's output, and a backtrace still names the line.
 
-`.github/workflows/build.yml` answers a question neither of the two above can:
-**does it still compile.** `make test` runs Dart on the Dart VM and Rust for
-the host; `make lint` runs the analyzers. Between them they never invoke a
-platform toolchain, so the Kotlin under `android/`, the C++ runner under
-`windows/`, the Gradle build, the NDK cross-compile and the Inno Setup script
-were all invisible to CI — a change to any of them could go green in both
-workflows and first be built by a release tag, which is the worst moment to
-find out. Two jobs, `make build-android` and `make installer`. It is the slow
-one, because Rust cross-compiles once per Android ABI; the caches carry most of
-that after the first run.
+### Build
 
-`.github/workflows/release.yml` publishes to a GitHub Release when a tag is
-pushed: the **Android APK** and the **Windows installer**, one job each, both
-uploading to the same release. Releases share one concurrency group, so pushing
-a newer tag cancels the build of an older one still running instead of letting
-both finish. It only ever fires on `v0.*` — not `v*` —
-because that is what marks a release as beta in the tag itself: a `v1.0.0`
-push is a claim this pipeline should not be able to make on its own, so
-widening the pattern is left as a deliberate change for when that claim is
-actually true.
+`build.yml` answers a question neither of the two above can: **does it still
+compile, and does it still install.** `make test` runs Dart on the Dart VM and
+Rust for the host; `make lint` runs the analyzers. Between them they never
+invoke a platform toolchain, so the Kotlin under `android/`, the C++ runner
+under `windows/`, the Gradle build, the NDK cross-compile, the Inno Setup script
+and the Linux installer were all invisible to CI - a change to any of them could
+go green and first be built by a release tag, which is the worst moment to find
+out. Three jobs:
 
-Both release jobs start by running `.github/tag-matches-manifest.sh`, which
-fails the release if the tag and `pubspec.yaml` disagree about the version.
-There are three places a version lives and only two of them were checked:
-`test/version_test.dart` keeps the manifest and `lib/src/version.dart` in step,
-and nothing kept the tag in step with either — so a tag nobody bumped the
-manifest for would ship an APK whose Android `versionName` came from the tag
-and whose own settings screen came from the constant. Only `MAJOR.MINOR.PATCH`
-has to match, because the tags here carry a suffix the manifest does not
-(`v0.2.0+beta`), and that is a label on the release rather than a disagreement
-about which version it is.
+- **android** - `make build-android`, narrowed to one ABI (`ANDROID_TARGET`):
+  this asks whether it compiles, and the Rust cross-compile, once per ABI, is
+  most of the time it takes. The release builds all three. The Gradle
+  distribution and dependencies are cached.
+- **windows** - `make installer`: the release build and the Inno Setup script.
+- **linux** - `make installer-linux`, then a check that nothing the program
+  links against is missing, then `make test-installer-linux` against the real
+  file: installed, upgraded and uninstalled in a throwaway home. That script
+  (`linux/installer/smoke-test.sh`) is the only test the installer has, and the
+  one thing nothing else covers.
 
-**The release APK is signed with the debug key** — that is what
+Both installers are kept for a week as workflow artifacts, so a pull request's
+can be tried without building it.
+
+### Speed
+
+The slow part is Rust and Gradle, so that is what is cached and what is not
+repeated. `ci.yml` stops a build that was never going to be wanted (above); the
+Rust cache is saved from `main` and from release tags only, and a pull request
+restores it and adds nothing, so PRs cannot evict the cache the next build on
+`main` needs; the toolchain pins and their cache live in one composite action
+(`.github/actions/setup`) rather than nine copies; the Linux system packages in
+another (`.github/actions/linux-deps`), where a test job installs only what
+`flutter test` needs; and the compile-check Android build is one ABI, not three.
+Dependabot watches the composite actions as well as the workflows.
+
+### Release
+
+`release.yml` runs when a tag is pushed, and publishes the **Android APK**, the
+**Windows installer** and the **Linux installer**, with a `SHA256SUMS` file.
+
+```
+verify ── lint ──┬── android ──┐
+      └─ test ───┼── windows ──┼── publish
+                 └── linux ────┘
+```
+
+**Nothing is built for a tag that does not pass.** The tag has to agree with the
+manifest, and lint and the full test suite have to pass, before the first
+installer is compiled.
+
+**Nothing is published unless everything was built.** Each platform builds and
+uploads an artifact; only `publish`, which needs all three, makes the release.
+Each job used to publish its own asset, so one failing left a release with an
+APK and no installer - a release that looks complete and is not. Now a failed
+build means no release at all, and the answer is the next tag. A tag pushed
+while an older one is building cancels it, and that can no longer leave a
+half-made release behind.
+
+It only ever fires on `v0.*` - not `v*` - because that is what marks a release
+as beta in the tag itself: a `v1.0.0` push is a claim this pipeline should not
+be able to make on its own, so widening the pattern is left as a deliberate
+change for when that claim is actually true.
+
+The first job runs `.github/tag-matches-manifest.sh`, which fails the release if
+the tag and `pubspec.yaml` disagree about the version. There are three places a
+version lives and only two of them were checked: `test/version_test.dart` keeps
+the manifest and `lib/src/version.dart` in step, and nothing kept the tag in
+step with either - so a tag nobody bumped the manifest for would ship an APK
+whose Android `versionName` came from the tag and whose own settings screen came
+from the constant. Only `MAJOR.MINOR.PATCH` has to match, because the tags here
+carry a suffix the manifest does not (`v0.2.0+beta`), and that is a label on the
+release rather than a disagreement about which version it is.
+
+**The release APK is signed with the debug key** - that is what
 `android/app/build.gradle.kts` names as the release signing config. Survivable
 for a beta people sideload; not survivable for a store, or for any upgrade path
 across a later key change. A real signing config is the thing to arrange before
 this leaves beta.
+
+### Issue forms
+
+`.github/ISSUE_TEMPLATE/` has a bug report and a feature request, and points
+security reports at GitHub's private advisory form instead of a public issue.
+Blank issues stay enabled: CONTRIBUTING asks for a change to arrive explained,
+not for a form to be filled in.

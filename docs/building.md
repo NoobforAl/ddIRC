@@ -110,6 +110,54 @@ person to run each release until enough of them have run it anyway. That is
 worth deciding about before a release rather than after someone is frightened by
 it.
 
+## The Linux installer
+
+`make installer-linux` builds the release bundle and wraps it in one
+self-extracting script, `build/installer/ddIRC-<version>-linux-x64-installer.sh`.
+It needs a Linux host with GTK 3, clang, cmake, ninja and pkg-config (the
+packages are listed in `.github/actions/linux-deps/action.yml`).
+
+```bash
+make installer-linux
+sh build/installer/ddIRC-<version>-linux-x64-installer.sh          # install or upgrade
+sh build/installer/ddIRC-<version>-linux-x64-installer.sh --uninstall
+ddirc-uninstall                                                     # the same, once installed
+```
+
+Like the Windows installer, it installs **for the person running it** and never
+asks for administrator rights - and it refuses to run as root rather than
+quietly installing somewhere only root can undo. It is an installer, not a
+portable archive: it puts a menu entry, an icon and an uninstaller where the
+desktop looks for them.
+
+| | |
+|---|---|
+| `~/.local/share/ddirc/` | the application |
+| `~/.local/bin/ddirc` | a link to it, for the shell; `~/.local/bin/ddirc-uninstall` removes it |
+| `~/.local/share/applications/dev.ddirc.ddirc.desktop` | the menu entry |
+| `~/.local/share/icons/hicolor/512x512/apps/dev.ddirc.ddirc.png` | the icon |
+
+`--prefix DIR` installs somewhere other than `~/.local`. An upgrade is unpacked
+beside the old copy and moved in, so an interrupted one leaves the previous
+version working. The file checks its own checksum before it unpacks anything,
+and a damaged download is refused. Settings, saved networks, history and logs
+are in the user's own data directories and are **not** the installer's:
+uninstalling removes the program and leaves them where they were, as the
+Windows one does.
+
+The part nothing else tests is the installer itself, so it has its own test:
+
+```bash
+make test-installer-linux                       # builds one around a fake app
+make test-installer-linux INSTALLER=path/to.sh  # tests a real one
+```
+
+It installs, upgrades and uninstalls in a throwaway home and checks, among other
+things, that nothing is written outside the prefix, that settings survive, that
+a link which is not its own is left alone, and that a damaged file or a prefix
+that could break out of its quotes is refused. CI runs it against the real
+installer on every build.
+
 ## Building for Linux, macOS and iOS
 
 Scaffolded, configured, and **not yet built by anyone** — every one of them

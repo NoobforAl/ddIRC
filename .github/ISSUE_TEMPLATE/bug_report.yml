@@ -1,0 +1,102 @@
+name: Bug report
+description: Something does not work, or works differently from what it says.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. A report that says what you did, what you expected and what
+        happened instead is most of the fix.
+
+        **Please do not paste passwords, tokens, or anything private** — a log
+        or a screenshot can contain a nickname, an address, a channel name or a
+        message. Read it through first and cut what you would not post publicly.
+        If it is a security problem, use the private report link on the issue
+        chooser instead of opening this.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected to happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The shortest list of steps you know of. "Happens on its own" is a fine answer too.
+      placeholder: |
+        1. Add an XMPP account…
+        2. Open…
+        3. …
+    validations:
+      required: false
+
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Android
+        - Windows
+        - Linux
+        - Terminal client (ddirc-cli)
+        - Another platform / built from source
+    validations:
+      required: true
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol
+      options:
+        - IRC
+        - XMPP
+        - Both / not specific to one
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Shown on the start screen ("Version …") and at the top of App settings. For the terminal client or a build from source, the commit.
+      placeholder: "0.12.3"
+    validations:
+      required: true
+
+  - type: input
+    id: server
+    attributes:
+      label: Server or network
+      description: Only if it matters, and only what you are comfortable sharing — a network name such as "Libera.Chat" is enough. A server you run yourself is worth naming with its software ("ergo", "ejabberd 24.x").
+    validations:
+      required: false
+
+  - type: dropdown
+    id: proxy
+    attributes:
+      label: How it connects
+      options:
+        - Built-in Tor (the default on a fresh install)
+        - Another SOCKS5 proxy
+        - Direct
+        - Not sure
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log or screenshot
+      description: |
+        App settings → Logging → *Save debug logs* (connection and protocol
+        events only, never message text) — turn it on before reproducing the
+        bug. The connection bar's log button shows what the connection itself did. Paste only the lines
+        that matter, with anything private removed.
+      render: text
+    validations:
+      required: false
