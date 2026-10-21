@@ -125,6 +125,15 @@ enum UploadReport {
     },
 }
 
+/// What an upload the user stopped reports as its reason.
+///
+/// The words DCC's own cancel uses, because the app tells a transfer the user
+/// stopped from one that failed by exactly this string (`FileTransfer.
+/// cancelledError` in `lib/src/model/transfer.dart`). Anything else - a full
+/// stop, a capital - would show a card the user cancelled as a failure and raise
+/// an error for it.
+const CANCELLED: &str = "cancelled";
+
 /// How much more must be sent before progress is reported again. A report per
 /// chunk would be thousands of events for a large file, about a number nobody
 /// reads that fast.
@@ -598,7 +607,7 @@ impl Actor {
                         }
                         ClientCommand::CancelTransfer { id } => {
                             if uploads.cancel(id) {
-                                let fx = session.upload_finished(id, Err("Cancelled.".to_owned()));
+                                let fx = session.upload_finished(id, Err(CANCELLED.to_owned()));
                                 self.apply(fx, &stream, &mut paced, &mut uploads).await;
                             }
                         }
@@ -814,6 +823,14 @@ impl Actor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopping_an_upload_says_what_stopping_a_dcc_transfer_says() {
+        assert_eq!(
+            CANCELLED,
+            crate::dcc::transfer::TransferError::Cancelled.to_string()
+        );
+    }
 
     #[test]
     fn the_first_connection_has_nothing_to_have_flapped() {
