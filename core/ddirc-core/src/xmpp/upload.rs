@@ -147,8 +147,14 @@ pub fn check_slot(slot: &SlotResult, account_domain: &str) -> Result<Slot, SlotE
 
     match put.host() {
         Some(Host::Domain(name)) => {
-            let inside = name == account_domain || name.ends_with(&format!(".{account_domain}"));
-            if !inside && (!name.contains('.') || name.eq_ignore_ascii_case("localhost")) {
+            // `localhost.` is `localhost`, and `Localhost` and `LOCALHOST` are
+            // too: compare what the name means, not how it was spelled.
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            let domain = account_domain.trim_end_matches('.').to_ascii_lowercase();
+            let inside =
+                !domain.is_empty() && (name == domain || name.ends_with(&format!(".{domain}")));
+            let loopback_name = name == "localhost" || name.ends_with(".localhost");
+            if !inside && (!name.contains('.') || loopback_name) {
                 return Err(SlotError::UnsafeHost);
             }
         }
@@ -198,6 +204,47 @@ fn parse_https(address: &str) -> Result<Url, SlotError> {
         }
     }
     Ok(url)
+}
+
+/// Whether an address is one on the public internet, as far as its number says.
+///
+/// What a name must resolve to for an upload to be sent to it, when this
+/// process does the resolving. A server cannot name a private address in the
+/// slot (see [`check_slot`]), but a name it controls can *resolve* to one, and
+/// a file sent to a printer or a router's admin page is the same mistake with
+/// extra steps. Not `IpAddr::is_global`, which is not stable.
+pub fn is_public_address(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            !(v4.is_unspecified()
+                || v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_multicast()
+                || v4.is_documentation()
+                // Shared address space (carrier-grade NAT), reserved, and the
+                // "this network" block.
+                || (o[0] == 100 && (64..=127).contains(&o[1]))
+                || o[0] == 0
+                || o[0] >= 240
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0))
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_address(IpAddr::V4(v4));
+            }
+            let first = v6.segments()[0];
+            !(v6.is_unspecified()
+                || v6.is_loopback()
+                || v6.is_multicast()
+                // Unique local fc00::/7, link local fe80::/10, documentation.
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80
+                || (first == 0x2001 && v6.segments()[1] == 0x0db8))
+        }
+    }
 }
 
 /// Why an upload did not complete.
@@ -409,7 +456,90 @@ mod tests {
         assert_eq!(content_type("weird.xyz"), "application/octet-stream");
     }
 
+    // ---- addresses ------------------------------------------------------------
+
+    #[test]
+    fn private_and_special_addresses_are_not_public() {
+        for a in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.168.1.1",
+            "169.254.169.254",
+            "0.0.0.0",
+            "255.255.255.255",
+            "224.0.0.1",
+            "100.64.0.1",
+            "100.127.255.255",
+            "192.0.2.1",
+            "198.51.100.1",
+            "203.0.113.1",
+            "240.0.0.1",
+            "::1",
+            "::",
+            "fe80::1",
+            "fc00::1",
+            "fd12:3456::1",
+            "ff02::1",
+            "2001:db8::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+        ] {
+            assert!(!is_public_address(a.parse().unwrap()), "{a}");
+        }
+    }
+
+    #[test]
+    fn ordinary_public_addresses_are_public() {
+        for a in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "93.184.216.34",
+            "100.63.0.1",
+            "100.128.0.1",
+            "2606:4700::1111",
+            "::ffff:8.8.8.8",
+        ] {
+            assert!(is_public_address(a.parse().unwrap()), "{a}");
+        }
+    }
+
     // ---- slots ------------------------------------------------------------
+
+    #[test]
+    fn spellings_of_localhost_are_all_localhost() {
+        for host in [
+            "localhost.",
+            "LOCALHOST",
+            "Localhost.",
+            "foo.localhost",
+            "a.b.localhost.",
+        ] {
+            assert_eq!(
+                check_slot(
+                    &slot(&format!("https://{host}/p"), "https://up.example.org/g"),
+                    "example.org"
+                ),
+                Err(SlotError::UnsafeHost),
+                "{host}"
+            );
+        }
+        // Still allowed where the account itself lives there.
+        assert!(check_slot(
+            &slot("https://localhost.:5443/p", "https://localhost:5443/g"),
+            "localhost"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn an_empty_account_domain_makes_nothing_inside_it() {
+        assert_eq!(
+            check_slot(&slot("https://router/p", "https://up.example.org/g"), ""),
+            Err(SlotError::UnsafeHost)
+        );
+    }
 
     #[test]
     fn an_ordinary_slot_is_accepted() {
