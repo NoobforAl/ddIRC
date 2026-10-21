@@ -15,8 +15,8 @@ ddIRC/
 ├─ android/           # Flutter Android host
 ├─ windows/           # Flutter Windows host
 ├─ rust_builder/      # cargokit glue that builds Rust during a Flutter build
-├─ irc-core/          # the Cargo workspace
-│  ├─ ddirc-core/     # the reusable core — no Flutter awareness
+├─ core/              # the Cargo workspace
+│  ├─ ddirc-core/     # the reusable core, IRC and XMPP — no Flutter awareness
 │  ├─ ddirc-cli/      # terminal client and server, each full-screen or plain lines
 │  ├─ ddirc-server/   # the local IRC server: loopback only, TLS only
 │  ├─ ddirc-tor/      # the bundled Tor: arti behind a loopback SOCKS5 port
@@ -25,7 +25,7 @@ ddIRC/
 ```
 
 `ddirc-core` knows nothing about Flutter or `flutter_rust_bridge`. The binding
-crate `irc-core/ddirc-bridge` depends on it and owns every DTO that crosses into
+crate `core/ddirc-bridge` depends on it and owns every DTO that crosses into
 Dart, which is what keeps the core reusable for desktop, CLI, and iOS
 unchanged.
 
@@ -37,7 +37,7 @@ flowchart TB
         gen["generated bindings<br/>lib/src/rust"]
     end
 
-    subgraph ws["Cargo workspace (irc-core/)"]
+    subgraph ws["Cargo workspace (core/)"]
         bridge["ddirc-bridge<br/>DTOs + frb API"]
         core["ddirc-core<br/>no Flutter awareness"]
         tor["ddirc-tor<br/>arti → loopback SOCKS5"]
@@ -271,7 +271,7 @@ Both serious downstream users, [Halloy](https://github.com/squidowl/halloy) and
 We depend on the published crate and treat vendoring as a **planned escape
 hatch**, not a surprise. IRC is a frozen protocol, so a fork carries no ongoing
 maintenance tax. If we hit the gaps they hit — flood protection, rustls
-behaviour — the fork goes in `irc-core/vendor/irc` and nothing else changes.
+behaviour — the fork goes in `core/vendor/irc` and nothing else changes.
 
 `tray_manager` is the Dart side's only new dependency, and it is the companion
 to `window_manager`, which was already here. It exists because hiding a window

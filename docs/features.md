@@ -330,7 +330,7 @@ needed to scale:
 - Deleting a network now deletes its history too. It used to leave every
   line in the file, unreachable from the app and still on disk.
 
-The full design is in `irc-core/ddirc-core/src/store/mod.rs`.
+The full design is in `core/ddirc-core/src/store/mod.rs`.
 
 ## Window
 

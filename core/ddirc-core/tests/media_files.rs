@@ -10,7 +10,7 @@
 //!
 //! ```bash
 //! DDIRC_MEDIA_DIR=/path/to/photos \
-//!   cargo test --manifest-path irc-core/Cargo.toml -p ddirc-core \
+//!   cargo test --manifest-path core/Cargo.toml -p ddirc-core \
 //!   --test media_files -- --ignored --nocapture
 //! ```
 //!

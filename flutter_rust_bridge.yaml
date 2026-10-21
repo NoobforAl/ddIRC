@@ -1,3 +1,3 @@
 rust_input: crate::api
-rust_root: irc-core/ddirc-bridge/
+rust_root: core/ddirc-bridge/
 dart_output: lib/src/rust

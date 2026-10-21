@@ -35,7 +35,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: irc-core
+          workspaces: core
 
       # `flutter test` builds every dependency's native assets, and the tray
       # package (tray_manager 0.8, through cnativeapi) compiles against GTK 3,
@@ -68,7 +68,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: irc-core
+          workspaces: core
 
       # `--wait` blocks on the healthcheck, so the suite can start the instant
       # this returns.

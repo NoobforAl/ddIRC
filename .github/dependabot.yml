@@ -26,7 +26,7 @@ updates:
       - dependency-name: "flutter_rust_bridge"
 
   - package-ecosystem: "cargo"
-    directory: "/irc-core"
+    directory: "/core"
     schedule:
       interval: "cron"
       cronjob: "0 6 1 */2 *"

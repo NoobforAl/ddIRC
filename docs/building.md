@@ -3,7 +3,7 @@
 Requires Rust 1.82+. The Android targets are only needed for an Android build.
 
 ```bash
-cd irc-core
+cd core
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo audit
@@ -58,7 +58,7 @@ event type is an enum carrying data, which becomes a sealed class in Dart.
 ```bash
 export ANDROID_NDK_HOME="$LOCALAPPDATA/Android/Sdk/ndk/27.0.12077973"
 export PATH="$HOME/flutter/bin:$PATH"   # codegen shells out to `flutter`
-flutter_rust_bridge_codegen generate    # after changing irc-core/ddirc-bridge/src/api/**
+flutter_rust_bridge_codegen generate    # after changing core/ddirc-bridge/src/api/**
 make build-android                      # or build-android-release for the shipped one
 ```
 

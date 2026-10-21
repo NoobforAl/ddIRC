@@ -56,7 +56,7 @@ make dev-server
 make test-integration
 ```
 
-`irc-core/ddirc-core/tests/dev_server.rs` points `extra_root_cert` at
+`core/ddirc-core/tests/dev_server.rs` points `extra_root_cert` at
 `dev/ergo/fullchain.pem`, which **adds** a trusted root for that one
 connection. It does not disable verification, and one of the tests in that file
 asserts that without it the same connection is refused — so if verification is
@@ -157,9 +157,9 @@ a release build rather than merely unreachable in one. If you want to confirm
 that rather than take it on faith:
 
 ```bash
-cargo build --release --manifest-path irc-core/Cargo.toml -p ddirc_bridge
-grep -c DDIRC_DEV_CA irc-core/target/release/ddirc_bridge.dll   # 0
-grep -c DDIRC_DEV_CA irc-core/target/debug/ddirc_bridge.dll     # 1
+cargo build --release --manifest-path core/Cargo.toml -p ddirc_bridge
+grep -c DDIRC_DEV_CA core/target/release/ddirc_bridge.dll   # 0
+grep -c DDIRC_DEV_CA core/target/debug/ddirc_bridge.dll     # 1
 ```
 
 A path that is set but missing is *not* quietly ignored: `validate` refuses it
@@ -188,7 +188,7 @@ mention, WHOIS, a reply — is `ddirc-cli`, which takes the certificate as a
 flag:
 
 ```bash
-cargo run --manifest-path irc-core/Cargo.toml -p ddirc-cli --   --server localhost --nick pc_tester --channel '#ddirc-test'   --ca-file dev/ergo/fullchain.pem
+cargo run --manifest-path core/Cargo.toml -p ddirc-cli --   --server localhost --nick pc_tester --channel '#ddirc-test'   --ca-file dev/ergo/fullchain.pem
 ```
 
 **3. Launch the app with `SSL_CERT_FILE` pointing at the certificate.** Works

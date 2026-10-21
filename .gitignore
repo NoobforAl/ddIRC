@@ -48,9 +48,9 @@ app.*.map.json
 /android/local.properties
 **/generated_plugin_registrant.*
 
-# Rust — the native core lives in irc-core/
-/irc-core/target/
-/irc-core/jniLibs/
+# Rust — the native core lives in core/
+/core/target/
+/core/jniLibs/
 
 # Native build output
 **/*.so

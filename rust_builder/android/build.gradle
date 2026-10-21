@@ -57,6 +57,6 @@ android {
 
 apply from: "../cargokit/gradle/plugin.gradle"
 cargokit {
-    manifestDir = "../../irc-core/ddirc-bridge"
+    manifestDir = "../../core/ddirc-bridge"
     libname = "ddirc_bridge"
 }

@@ -510,7 +510,7 @@ free to vendor or replace the underlying crate without touching Dart.
 `Cargo.lock` is committed. Run `cargo audit` over the full tree:
 
 ```bash
-cd irc-core && cargo audit
+cd core && cargo audit
 ```
 
 This is a strict improvement on the original plan's "manually watch for
