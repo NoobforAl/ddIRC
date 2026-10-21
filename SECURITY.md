@@ -296,6 +296,65 @@ Backoff resets only on **successful registration**, not when the socket opens. A
 server that accepts and immediately drops us would otherwise reset the backoff
 every cycle and produce a hot loop.
 
+### XMPP
+
+Everything above applies to XMPP accounts too, through a core of its own
+(`xmpp/`, beside `conn/`). What is specific to it:
+
+- **TLS from the first byte, and nothing else.** No STARTTLS, no plaintext, no
+  switch for either: the connection begins inside TLS or does not begin. Port
+  5222, where servers start in plaintext, is refused at validation with an
+  explanation, as IRC's plaintext ports are. The certificate is verified against
+  the account's *domain*, whatever host was dialled, and the roots are the same
+  ones IRC trusts. There is no verification-skipping path, and a test asserts a
+  server whose CA is not trusted is refused.
+- **The proxy gets a name, never an address.** `tokio-xmpp` can resolve a server
+  by itself (SRV lookups through its own resolver); that is deliberately not
+  compiled in, because those lookups would be made by this process, outside the
+  proxy. The connector dials instead, and with a proxy the hostname goes to it
+  unresolved. A proxy that is down is an error, never a direct connection, and a
+  test pins both.
+- **Nothing is answered that was not asked.** No version, time, last-activity or
+  feature-list reply, no delivery or read receipts, no typing notifications, no
+  capabilities hash or client name in presence. A request for any of them gets
+  `service-unavailable`, because an IQ must be answered and that is the answer
+  that says nothing. Only a ping is answered in kind. This is the CTCP decision
+  again, and it holds in `session.rs`, where tests send each of those requests.
+- **A request to see us online is never accepted for us.** It is shown as a
+  notice from the sender, like a first message from a stranger.
+- **Only the right party may say a thing.** A carbon copy is believed only from
+  our own account (anyone can otherwise forge one, putting words in our mouth or
+  a stranger's message under a trusted name); a message ID only from the room
+  that assigned it; an answer to a request only from where the request went.
+- **Login mechanisms.** SCRAM-SHA-256, SCRAM-SHA-1 or PLAIN, in that order of
+  preference, and PLAIN only because TLS is. ANONYMOUS is removed from what the
+  server offers before the library sees it: a server that offered it in place of
+  a mechanism that checks the password would otherwise log the client in as
+  nobody and report success.
+- **Failed logins are not retried.** The library's own client retries *every*
+  failure, a wrong password included, every thirty seconds for ever, and only
+  logs it. The login and the retry policy are therefore ours: a refusal that
+  waiting cannot cure (wrong password, disabled account, untrusted or expired
+  certificate, a proxy rejecting its credentials) stops, says why, and waits to
+  be asked; an account that has never logged in is tried three times; one that
+  has is resumed with backoff. A test asserts a refused password is tried once.
+- **A stanza that does not parse ends the connection.** *This is a limitation of
+  `tokio-xmpp` 6.0.0, not a decision.* A stanza the library cannot parse - say,
+  a room occupant whose nick fails resource preparation - is answered with a
+  stream error, and the connection closes and reconnects. A room service that
+  relays such a presence can therefore disconnect everyone in the room, repeatedly.
+  A well-behaved server prepares nicks before relaying them, which is why it has
+  not been seen in the wild, but a malicious or non-compliant remote service is
+  not covered by that. Nothing in this crate can intercept the stanza before the
+  library parses it. If it proves real, the answer is the one this project
+  already has for a dependency with a bug it cannot work around: vendor the
+  crate and make a stanza-level parse error a dropped stanza, not a dead stream.
+- **Text from the network is cleaned before it is shown**: names lose control and
+  layout characters (right-to-left overrides that make one occupant read as
+  another), bodies lose control characters, both are bounded. Outgoing text
+  loses what XML cannot carry, since a stanza holding such a character is itself
+  a stream error.
+
 ### Credentials
 
 - Held in `Zeroizing<String>`, so they are wiped when dropped rather than left in

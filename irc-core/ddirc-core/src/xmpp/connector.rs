@@ -14,11 +14,12 @@
 
 use std::borrow::Cow;
 use std::fmt;
-use std::io::{self, BufReader};
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rustls::pki_types::ServerName;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, RootCertStore};
 use sasl::common::ChannelBinding;
 use tokio::io::BufStream;
@@ -81,8 +82,8 @@ pub fn trust_store(extra_root_cert: Option<&str>) -> Result<RootCertStore, Conne
 /// mistyped path into a handshake failure with no stated cause. Here the
 /// failure is the cause.
 fn add_pem(roots: &mut RootCertStore, path: &str) -> Result<(), ConnectorError> {
-    let file = std::fs::File::open(path).map_err(|e| ConnectorError::Certificate(e.to_string()))?;
-    let certificates = rustls_pemfile::certs(&mut BufReader::new(file))
+    let certificates = CertificateDer::pem_file_iter(path)
+        .map_err(|e| ConnectorError::Certificate(e.to_string()))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| ConnectorError::Certificate(e.to_string()))?;
     let (added, _ignored) = roots.add_parsable_certificates(certificates);

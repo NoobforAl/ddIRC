@@ -10,5 +10,10 @@
 //! What is shared is what was never about IRC to begin with: the proxy, the
 //! backoff, the rate limits, the message store.
 
+pub mod actor;
+pub mod auth;
 pub mod config;
 pub mod connector;
+pub mod diagnose;
+pub mod session;
+pub mod state;

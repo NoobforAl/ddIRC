@@ -108,13 +108,15 @@ zeroize = { version = "1", features = ["derive"] }
 # (XEP-0368) is the only mode.
 tokio-xmpp = { version = "6", default-features = false, features = ["aws_lc_rs"] }
 # The trust store XMPP builds for itself, because it cannot use the one inside
-# `tokio-xmpp` (that one is behind the `dns` feature, see above). The same three
+# `tokio-xmpp` (that one is behind the `dns` feature, see above). The same two
 # the `irc` crate uses to build its own, at the versions it already resolves to,
 # so the two protocols trust the same roots and nothing is added to the build:
-# the Mozilla list, the platform's store, and the PEM for `extra_root_cert`.
+# the Mozilla list and the platform's store. The PEM for `extra_root_cert` is
+# read with `rustls-pki-types`, which is already here, and not with
+# `rustls-pemfile`, which is unmaintained (RUSTSEC-2025-0134, see SECURITY.md)
+# and which the `irc` crate is the only remaining reason to have.
 webpki-roots = "0.26"
 rustls-native-certs = "0.8"
-rustls-pemfile = "2"
 # `ChannelBinding` is in the signature of `ServerConnector`, and `tokio-xmpp`
 # does not re-export it. Already resolved by `tokio-xmpp` itself.
 sasl = "0.5"

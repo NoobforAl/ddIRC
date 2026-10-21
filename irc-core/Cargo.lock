@@ -1059,7 +1059,6 @@ dependencies = [
  "rusqlite",
  "rustls",
  "rustls-native-certs",
- "rustls-pemfile",
  "sasl",
  "thiserror 2.0.21",
  "tokio",
