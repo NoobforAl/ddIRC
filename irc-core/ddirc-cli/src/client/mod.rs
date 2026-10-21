@@ -7,11 +7,9 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
-use ddirc_core::api::types::ServerConfig;
-use ddirc_core::conn::actor;
 use ratatui::crossterm::event::Event;
 
-use crate::cli::ClientArgs;
+use crate::cli::{ClientArgs, Connection};
 use crate::term::{self, Screen};
 
 mod commands;
@@ -26,20 +24,23 @@ pub async fn run(args: ClientArgs) -> ExitCode {
         return ExitCode::FAILURE;
     }
     if full_screen {
-        full_screen_run(args.config).await
+        full_screen_run(args.connection).await
     } else {
-        plain::run(args.config).await
+        plain::run(args.connection).await
     }
 }
 
-async fn full_screen_run(config: ServerConfig) -> ExitCode {
-    if let Err(error) = config.validate() {
+async fn full_screen_run(connection: Connection) -> ExitCode {
+    if let Err(error) = connection.validate() {
         eprintln!("error: {error}");
         return ExitCode::FAILURE;
     }
 
-    let mut app = model::App::new(&config.nickname, &config.host);
-    let (handle, mut events) = actor::spawn(config);
+    let mut app = model::App::new(connection.nick(), connection.host());
+    if connection.is_xmpp() {
+        app = app.for_xmpp();
+    }
+    let (handle, mut events) = connection.spawn();
     let mut keys = term::events();
     let mut screen = match Screen::enter() {
         Ok(screen) => screen,

@@ -18,7 +18,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-use super::commands::{command_for, Action};
+use super::commands::{command_for, command_for_with, Action};
 
 /// Lines kept per conversation. A busy channel for an evening, not forever.
 pub const MAX_LINES: usize = 2000;
@@ -184,6 +184,9 @@ pub struct App {
     history_at: Option<usize>,
     draft: String,
     completion: Option<Completion>,
+    /// Whether this is an XMPP account. Changes how a typed name is read: see
+    /// [`App::is_room`].
+    xmpp: bool,
 }
 
 /// ASCII case-insensitive, which is what IRC names are compared with here.
@@ -208,6 +211,34 @@ impl App {
             history_at: None,
             draft: String::new(),
             completion: None,
+            xmpp: false,
+        }
+    }
+
+    /// For an XMPP account, whose names are read differently: see
+    /// [`App::is_room`].
+    #[must_use]
+    pub fn for_xmpp(mut self) -> Self {
+        self.xmpp = true;
+        self
+    }
+
+    /// Whether `name` is a room rather than a person, for an XMPP account.
+    ///
+    /// Both are addresses - `lobby@conference.example.org`, `alice@example.org` -
+    /// so nothing in the name says which, and the answer is what has been
+    /// opened: a channel buffer is a room, a conversation is a person. A name
+    /// with no buffer yet is read as a room if it is written like an address,
+    /// because the words that ask - `/part room@x`, `/kick room@x bob` - put
+    /// the room first, and a nick inside a room is not an address.
+    pub fn is_room(&self, name: &str) -> bool {
+        match self
+            .buffers
+            .iter()
+            .find(|b| b.kind != BufferKind::Server && same(&b.name, name))
+        {
+            Some(buffer) => buffer.kind == BufferKind::Channel,
+            None => name.contains('@') && !name.contains('/'),
         }
     }
 
@@ -656,7 +687,12 @@ impl App {
         }
 
         let target = self.target().map(str::to_owned);
-        match command_for(&line, target.as_deref()) {
+        let action = if self.xmpp {
+            command_for_with(&line, target.as_deref(), &|name| self.is_room(name), false)
+        } else {
+            command_for(&line, target.as_deref())
+        };
+        match action {
             None => {
                 if target.is_none() {
                     self.buffer_mut().push(Line::system(

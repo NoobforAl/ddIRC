@@ -553,3 +553,19 @@ fn shortcuts_work_on_a_non_latin_layout_but_typing_stays_in_that_language() {
     app.key(key(KeyCode::Char('ض')));
     assert!(app.popup.is_none());
 }
+
+#[test]
+fn an_xmpp_account_tells_rooms_from_people_by_what_was_opened() {
+    let mut app = App::new("alice@example.org", "example.org").for_xmpp();
+    app.ensure("lobby@conference.example.org", BufferKind::Channel);
+    app.ensure("bob@example.net", BufferKind::Direct);
+
+    assert!(app.is_room("lobby@conference.example.org"));
+    assert!(app.is_room("LOBBY@conference.example.org"), "case aside");
+    assert!(!app.is_room("bob@example.net"), "an address, but a person");
+    // Not opened yet: written like an address, so a room - the position
+    // commands such as /part and /kick put one in.
+    assert!(app.is_room("other@conference.example.org"));
+    assert!(!app.is_room("bob"), "a nick in a room is not an address");
+    assert!(!app.is_room("room@x/nick"), "a room's occupant is a person");
+}

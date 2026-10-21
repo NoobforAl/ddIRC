@@ -11,8 +11,12 @@
 
 use std::path::PathBuf;
 
+use ddirc_core::api::events::IrcEvent;
 use ddirc_core::api::types::{ProxyConfig, ServerConfig};
+use ddirc_core::conn::actor::{self, ConnectionHandle};
+use ddirc_core::xmpp::config::XmppConfig;
 use ddirc_server::state::{DEFAULT_NETWORK_NAME, DEFAULT_SERVER_NAME};
+use tokio::sync::mpsc::Receiver;
 use zeroize::Zeroizing;
 
 pub const USAGE: &str = "\
@@ -35,11 +39,17 @@ ddirc-cli client — connect to an IRC server
 USAGE:
     ddirc-cli client --nick <NICK> [OPTIONS]
 
+    ddirc-cli client --xmpp <ADDRESS> [OPTIONS]      an XMPP account instead
+
 OPTIONS:
-    --server <HOST>        Server hostname [default: irc.libera.chat]
-    --port <PORT>          TLS port [default: 6697]
-    --nick <NICK>          Nickname (required)
-    --channel <CHANNEL>    Channel to join; repeatable
+    --server <HOST>        Server hostname [default: irc.libera.chat]; for
+                           --xmpp, only if it is not the address's own domain
+    --port <PORT>          TLS port [default: 6697; 5223 for --xmpp]
+    --nick <NICK>          Nickname (required; not used with --xmpp)
+    --xmpp <ADDRESS>       Log in to an XMPP account, e.g. alice@example.org.
+                           The password is read from DDIRC_XMPP_PASSWORD.
+    --channel <CHANNEL>    Channel to join; repeatable. With --xmpp, a room
+                           address such as lobby@conference.example.org
     --sasl-account <NAME>  SASL account name
     --ca-file <PATH>       Also trust this certificate, e.g. dev/ergo/fullchain.pem
     --proxy <HOST:PORT>    Dial through a SOCKS5 proxy, e.g. 127.0.0.1:9050
@@ -49,6 +59,7 @@ OPTIONS:
                            has nowhere else to put them)
 
 ENVIRONMENT:
+    DDIRC_XMPP_PASSWORD      XMPP account password (with --xmpp)
     DDIRC_SASL_PASSWORD      SASL password (with --sasl-account)
     DDIRC_NICKSERV_PASSWORD  NickServ password, used only if SASL is unavailable
     DDIRC_SERVER_PASSWORD    Server-level PASS
@@ -97,9 +108,88 @@ pub enum Parsed {
 
 #[derive(Debug)]
 pub struct ClientArgs {
-    pub config: ServerConfig,
+    pub connection: Connection,
     pub tui: bool,
     pub log_file: Option<PathBuf>,
+}
+
+/// What the client connects to: an IRC network or an XMPP account.
+///
+/// One type so everything past parsing - the screens, the plain mode - holds a
+/// connection and does not care which kind. They differ in how they start, and
+/// in a few words (what the server buffer is called, how to describe it).
+#[derive(Debug)]
+pub enum Connection {
+    Irc(ServerConfig),
+    Xmpp(XmppConfig),
+}
+
+impl Connection {
+    pub fn is_xmpp(&self) -> bool {
+        matches!(self, Self::Xmpp(_))
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Irc(config) => config.validate().map_err(|e| e.to_string()),
+            Self::Xmpp(config) => config.validate().map_err(|e| e.to_string()),
+        }
+    }
+
+    /// Who we are: the nickname, or the account's address.
+    pub fn nick(&self) -> String {
+        match self {
+            Self::Irc(config) => config.nickname.clone(),
+            Self::Xmpp(config) => config.jid.clone(),
+        }
+    }
+
+    /// What the server buffer is called.
+    pub fn host(&self) -> String {
+        match self {
+            Self::Irc(config) => config.host.clone(),
+            Self::Xmpp(config) => config.dial_host().unwrap_or_default(),
+        }
+    }
+
+    pub fn first_channel(&self) -> Option<String> {
+        match self {
+            Self::Irc(config) => config.channels.first().cloned(),
+            Self::Xmpp(config) => config.rooms.first().cloned(),
+        }
+    }
+
+    /// One line saying where this goes, for the plain mode's first output.
+    pub fn describe(&self) -> String {
+        let (target, proxy) = match self {
+            Self::Irc(config) => (
+                format!("{}:{} as {}", config.host, config.port, config.nickname),
+                &config.proxy,
+            ),
+            Self::Xmpp(config) => (
+                format!(
+                    "{}:{} as {}",
+                    config.dial_host().unwrap_or_default(),
+                    config.dial_port(),
+                    config.jid
+                ),
+                &config.proxy,
+            ),
+        };
+        let via = match proxy {
+            Some(proxy) => format!(", via SOCKS5 {}:{}", proxy.host, proxy.port),
+            None => String::new(),
+        };
+        format!("connecting to {target} (TLS{via})")
+    }
+
+    /// Start the connection. Must be called inside a runtime.
+    pub fn spawn(self) -> (ConnectionHandle, Receiver<IrcEvent>) {
+        match self {
+            Self::Irc(config) => actor::spawn(config),
+            Self::Xmpp(config) => ddirc_core::xmpp::actor::spawn(config),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -136,6 +226,11 @@ fn parse_client(args: Vec<String>) -> Result<Parsed, String> {
         port: ServerConfig::DEFAULT_TLS_PORT,
         ..Default::default()
     };
+    // Whether the server or port was given, which only matters for an XMPP
+    // account: there they are an override, not a default to start from.
+    let mut server_given = false;
+    let mut port_given = false;
+    let mut xmpp = None;
 
     let mut tui = true;
     let mut log_file = None;
@@ -145,11 +240,16 @@ fn parse_client(args: Vec<String>) -> Result<Parsed, String> {
         let mut value = || args.next().ok_or_else(|| format!("{arg} needs a value"));
         match arg.as_str() {
             "-h" | "--help" => return Ok(Parsed::Help(CLIENT_USAGE)),
-            "--server" => config.host = value()?,
+            "--server" => {
+                config.host = value()?;
+                server_given = true;
+            }
             "--port" => {
                 let raw = value()?;
                 config.port = raw.parse().map_err(|_| format!("invalid port: {raw}"))?;
+                port_given = true;
             }
+            "--xmpp" => xmpp = Some(value()?),
             "--nick" => config.nickname = value()?,
             "--channel" => config.channels.push(value()?),
             "--sasl-account" => config.sasl_account = Some(value()?),
@@ -162,6 +262,39 @@ fn parse_client(args: Vec<String>) -> Result<Parsed, String> {
             "--log-file" => log_file = Some(PathBuf::from(value()?)),
             other => return Err(format!("unrecognised argument: {other}")),
         }
+    }
+
+    if let Some(jid) = xmpp {
+        // The flags that are IRC's, refused rather than quietly ignored: a
+        // --sasl-account given to an XMPP login is a mistake worth saying.
+        if !config.nickname.is_empty() || config.sasl_account.is_some() {
+            return Err(
+                "--nick and --sasl-account are IRC's, and do not apply with --xmpp".to_owned(),
+            );
+        }
+        let password = secret("DDIRC_XMPP_PASSWORD")
+            .ok_or_else(|| "--xmpp requires DDIRC_XMPP_PASSWORD to be set".to_owned())?;
+        let mut account = XmppConfig {
+            jid,
+            password,
+            host: server_given.then_some(config.host),
+            port: port_given.then_some(config.port),
+            rooms: config.channels,
+            nickname: None,
+            extra_root_cert: config.extra_root_cert,
+            proxy: config.proxy,
+        };
+        if let Some(proxy) = &mut account.proxy {
+            proxy.username = proxy_user;
+            proxy.password = secret("DDIRC_PROXY_PASSWORD");
+        } else if proxy_user.is_some() {
+            return Err("--proxy-user requires --proxy".to_owned());
+        }
+        return Ok(Parsed::Client(Box::new(ClientArgs {
+            connection: Connection::Xmpp(account),
+            tui,
+            log_file,
+        })));
     }
 
     if config.nickname.is_empty() {
@@ -190,7 +323,7 @@ fn parse_client(args: Vec<String>) -> Result<Parsed, String> {
     // app refuse the same configurations for the same stated reasons.
 
     Ok(Parsed::Client(Box::new(ClientArgs {
-        config,
+        connection: Connection::Irc(config),
         tui,
         log_file,
     })))
@@ -345,8 +478,11 @@ mod tests {
         else {
             panic!("expected the client");
         };
-        assert_eq!(args.config.host, "localhost");
-        assert_eq!(args.config.channels, vec!["#a".to_owned()]);
+        let Connection::Irc(config) = &args.connection else {
+            panic!("expected an IRC network");
+        };
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.channels, vec!["#a".to_owned()]);
         assert!(args.tui, "the full-screen interface is the default");
 
         let Ok(Parsed::Client(args)) = parse_str("client --nick me --no-tui") else {
@@ -358,6 +494,59 @@ mod tests {
     #[test]
     fn the_client_still_needs_a_nick() {
         assert!(parse_str("client --server x").is_err());
+    }
+
+    #[test]
+    fn an_xmpp_account_is_an_address_and_a_password_from_the_environment() {
+        std::env::set_var("DDIRC_XMPP_PASSWORD", "hunter2");
+        let Ok(Parsed::Client(args)) = parse_str(
+            "client --xmpp alice@example.org --channel lobby@conference.example.org --no-tui",
+        ) else {
+            panic!("expected the client");
+        };
+        let Connection::Xmpp(account) = &args.connection else {
+            panic!("expected an XMPP account");
+        };
+        assert_eq!(account.jid, "alice@example.org");
+        assert_eq!(
+            account.rooms,
+            vec!["lobby@conference.example.org".to_owned()]
+        );
+        assert_eq!(account.password.as_str(), "hunter2");
+        assert_eq!(account.host, None, "the address names the server");
+        assert_eq!(account.port, None);
+        assert!(args.connection.is_xmpp());
+        assert_eq!(args.connection.nick(), "alice@example.org");
+        assert_eq!(args.connection.host(), "example.org");
+        assert!(!args.tui);
+        // And the password is not left in this process's environment.
+        assert!(std::env::var("DDIRC_XMPP_PASSWORD").is_err());
+    }
+
+    #[test]
+    fn an_xmpp_server_and_port_are_overrides() {
+        std::env::set_var("DDIRC_XMPP_PASSWORD", "hunter2");
+        let Ok(Parsed::Client(args)) =
+            parse_str("client --xmpp alice@example.org --server xmpp.host.example --port 5443")
+        else {
+            panic!("expected the client");
+        };
+        let Connection::Xmpp(account) = &args.connection else {
+            panic!("expected an XMPP account");
+        };
+        assert_eq!(account.host.as_deref(), Some("xmpp.host.example"));
+        assert_eq!(account.port, Some(5443));
+    }
+
+    #[test]
+    fn an_xmpp_account_needs_its_password_and_refuses_irc_flags() {
+        std::env::remove_var("DDIRC_XMPP_PASSWORD");
+        assert!(parse_str("client --xmpp alice@example.org").is_err());
+
+        std::env::set_var("DDIRC_XMPP_PASSWORD", "hunter2");
+        assert!(parse_str("client --xmpp alice@example.org --nick me").is_err());
+        std::env::set_var("DDIRC_XMPP_PASSWORD", "hunter2");
+        assert!(parse_str("client --xmpp alice@example.org --sasl-account me").is_err());
     }
 
     #[test]
