@@ -1162,3 +1162,361 @@ fn logging_in_again_rejoins_every_room_from_scratch() {
         IrcEvent::Joined { is_self: true, .. }
     ));
 }
+
+// ---- catching up after a reconnect ------------------------------------------
+
+const MAM: &str = "urn:xmpp:mam:2";
+
+/// A live message carrying the id the room gave it.
+fn live(nick: &str, id: &str, text: &str) -> String {
+    format!(
+        "<message xmlns='jabber:client' type='groupchat' from='{MUC}/{nick}' id='c-{id}'>\
+         <body>{text}</body><stanza-id xmlns='urn:xmpp:sid:0' id='{id}' by='{MUC}'/></message>"
+    )
+}
+
+/// The archive's answer: one message, in the wrapper it comes in.
+fn archived(query: &str, from: &str, id: &str, nick: &str, stamp: &str, text: &str) -> String {
+    format!(
+        "<message xmlns='jabber:client' from='{from}'><result xmlns='{MAM}' queryid='{query}' id='{id}'>\
+         <forwarded xmlns='urn:xmpp:forward:0'><delay xmlns='urn:xmpp:delay' stamp='{stamp}'/>\
+         <message xmlns='jabber:client' type='groupchat' from='{MUC}/{nick}'><body>{text}</body></message>\
+         </forwarded></result></message>"
+    )
+}
+
+/// The end of a page.
+fn fin(query: &str, from: &str, complete: bool, last: &str) -> String {
+    format!(
+        "<iq xmlns='jabber:client' type='result' from='{from}' id='{query}'>\
+         <fin xmlns='{MAM}' complete='{complete}'>\
+         <set xmlns='http://jabber.org/protocol/rsm'><last>{last}</last></set></fin></iq>"
+    )
+}
+
+/// The id and body of the archive query in `fx`, if it holds one.
+fn catch_up_query(fx: &Effects) -> Option<(String, Element)> {
+    fx.send.iter().find_map(|s| match s {
+        Stanza::Iq(Iq::Set {
+            id, payload, to, ..
+        }) if payload.is("query", MAM) && to.as_ref().is_some_and(|t| t.to_string() == MUC) => {
+            Some((id.clone(), payload.clone()))
+        }
+        _ => None,
+    })
+}
+
+/// Seen a message, then lost the connection and come back into the room.
+fn rejoined_after(last_id: &str) -> (Session, Effects) {
+    let mut s = in_room();
+    feed(&mut s, &live("bob", last_id, "the last thing I saw"));
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        &muc_presence("alice", None, &item("none", "participant"), &[110]),
+    );
+    (s, fx)
+}
+
+#[test]
+fn rejoining_a_room_asks_the_archive_for_what_came_after_the_last_message() {
+    let (_, fx) = rejoined_after("S1");
+    let (_, query) = catch_up_query(&fx).expect("the room's archive was asked");
+    let set = query
+        .get_child("set", "http://jabber.org/protocol/rsm")
+        .expect("a bounded request");
+    assert_eq!(
+        set.get_child("after", "http://jabber.org/protocol/rsm")
+            .map(|a| a.text()),
+        Some("S1".to_owned())
+    );
+    assert_eq!(
+        set.get_child("max", "http://jabber.org/protocol/rsm")
+            .map(|m| m.text()),
+        Some("100".to_owned()),
+        "a page, not the whole archive"
+    );
+}
+
+#[test]
+fn a_room_we_have_shown_nothing_from_has_nothing_to_catch_up_from() {
+    let mut s = in_room();
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        &muc_presence("alice", None, &item("none", "participant"), &[110]),
+    );
+    assert!(catch_up_query(&fx).is_none());
+}
+
+#[test]
+fn the_first_join_never_asks() {
+    // Joining for the first time: the room has no history for us to be missing.
+    let mut s = session();
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        &muc_presence("alice", None, &item("none", "participant"), &[110]),
+    );
+    assert!(catch_up_query(&fx).is_none());
+}
+
+#[test]
+fn only_an_id_the_room_assigned_is_something_to_catch_up_from() {
+    let mut s = in_room();
+    // A client's own id, with no stanza-id from the room: an archive cannot
+    // find its place by it, and asking would be an error.
+    feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='groupchat' from='{MUC}/bob' id='client-only'>\
+             <body>x</body></message>"
+        ),
+    );
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        &muc_presence("alice", None, &item("none", "participant"), &[110]),
+    );
+    assert!(catch_up_query(&fx).is_none());
+}
+
+#[test]
+fn what_the_archive_sends_is_shown_with_the_time_it_was_said() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+
+    let fx = feed(
+        &mut s,
+        &archived(
+            &query,
+            MUC,
+            "S2",
+            "carol",
+            "2026-10-21T08:00:00Z",
+            "while you were away",
+        ),
+    );
+    let m = messages(&fx)[0];
+    assert_eq!(m.target, Target::Channel(MUC.to_owned()));
+    assert_eq!(m.sender, "carol");
+    assert_eq!(text(m), "while you were away");
+    assert_eq!(m.msgid.as_deref(), Some("S2"));
+    assert_eq!(m.server_time_ms, Some(1_792_569_600_000));
+}
+
+#[test]
+fn replayed_history_never_raises_a_mention() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    let fx = feed(
+        &mut s,
+        &archived(
+            &query,
+            MUC,
+            "S2",
+            "carol",
+            "2026-10-21T08:00:00Z",
+            "hey alice, look",
+        ),
+    );
+    assert!(
+        !messages(&fx)[0].is_mention,
+        "five hundred notifications for old news is the opposite of help"
+    );
+}
+
+#[test]
+fn a_message_that_is_both_live_and_archived_is_shown_once() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+
+    assert_eq!(messages(&feed(&mut s, &live("bob", "S2", "both"))).len(), 1);
+    let again = feed(
+        &mut s,
+        &archived(&query, MUC, "S2", "bob", "2026-10-21T08:00:00Z", "both"),
+    );
+    assert!(messages(&again).is_empty(), "shown twice");
+}
+
+#[test]
+fn the_next_catch_up_starts_after_what_the_last_one_brought() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    feed(
+        &mut s,
+        &archived(&query, MUC, "S2", "carol", "2026-10-21T08:00:00Z", "one"),
+    );
+    feed(
+        &mut s,
+        &archived(&query, MUC, "S3", "carol", "2026-10-21T08:01:00Z", "two"),
+    );
+    // Lost again before anything newer arrived: it resumes from S3, not S1.
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        &muc_presence("alice", None, &item("none", "participant"), &[110]),
+    );
+    let (_, query) = catch_up_query(&fx).unwrap();
+    let after = query
+        .get_child("set", "http://jabber.org/protocol/rsm")
+        .and_then(|set| set.get_child("after", "http://jabber.org/protocol/rsm"))
+        .map(|a| a.text());
+    assert_eq!(after, Some("S3".to_owned()));
+}
+
+#[test]
+fn an_unfinished_page_asks_for_the_next_and_a_finished_one_stops() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    feed(
+        &mut s,
+        &archived(&query, MUC, "S2", "carol", "2026-10-21T08:00:00Z", "one"),
+    );
+
+    let fx = feed(&mut s, &fin(&query, MUC, false, "S2"));
+    let (next, body) = catch_up_query(&fx).expect("more to fetch");
+    assert_ne!(
+        next, query,
+        "a request of its own, so its answers are told apart"
+    );
+    let after = body
+        .get_child("set", "http://jabber.org/protocol/rsm")
+        .and_then(|set| set.get_child("after", "http://jabber.org/protocol/rsm"))
+        .map(|a| a.text());
+    assert_eq!(after, Some("S2".to_owned()));
+
+    let fx = feed(&mut s, &fin(&next, MUC, true, "S2"));
+    assert!(
+        catch_up_query(&fx).is_none(),
+        "the archive said that was all"
+    );
+}
+
+#[test]
+fn an_answer_to_a_question_we_did_not_ask_is_ignored() {
+    let (mut s, _) = rejoined_after("S1");
+    let fx = feed(
+        &mut s,
+        &archived(
+            "never-asked",
+            MUC,
+            "S9",
+            "mallory",
+            "2026-10-21T08:00:00Z",
+            "forged",
+        ),
+    );
+    assert!(
+        fx.events.is_empty(),
+        "history was written by someone who was not asked"
+    );
+}
+
+#[test]
+fn an_answer_from_somewhere_else_is_ignored() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    // Right query id, wrong sender: someone who guessed it.
+    let fx = feed(
+        &mut s,
+        &archived(
+            &query,
+            "other@conference.example.org",
+            "S9",
+            "mallory",
+            "2026-10-21T08:00:00Z",
+            "forged",
+        ),
+    );
+    assert!(fx.events.is_empty());
+    // And not as one of the room's own occupants either.
+    let fx = feed(
+        &mut s,
+        &archived(
+            &query,
+            &format!("{MUC}/mallory"),
+            "S9",
+            "mallory",
+            "2026-10-21T08:00:00Z",
+            "forged",
+        ),
+    );
+    assert!(fx.events.is_empty());
+}
+
+#[test]
+fn an_archived_message_that_claims_to_be_from_another_room_is_ignored() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    let wrong = format!(
+        "<message xmlns='jabber:client' from='{MUC}'><result xmlns='{MAM}' queryid='{query}' id='S9'>\
+         <forwarded xmlns='urn:xmpp:forward:0'><delay xmlns='urn:xmpp:delay' stamp='2026-10-21T08:00:00Z'/>\
+         <message xmlns='jabber:client' type='groupchat' from='other@conference.example.org/eve'>\
+         <body>planted</body></message></forwarded></result></message>"
+    );
+    assert!(feed(&mut s, &wrong).events.is_empty());
+}
+
+#[test]
+fn an_old_subject_does_not_set_the_topic_back() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    feed(
+        &mut s,
+        &format!("<message xmlns='jabber:client' type='groupchat' from='{MUC}/bob'><subject>now</subject></message>"),
+    );
+    let old = format!(
+        "<message xmlns='jabber:client' from='{MUC}'><result xmlns='{MAM}' queryid='{query}' id='S2'>\
+         <forwarded xmlns='urn:xmpp:forward:0'><delay xmlns='urn:xmpp:delay' stamp='2026-10-20T08:00:00Z'/>\
+         <message xmlns='jabber:client' type='groupchat' from='{MUC}/bob'><subject>long ago</subject></message>\
+         </forwarded></result></message>"
+    );
+    assert!(feed(&mut s, &old).events.is_empty());
+}
+
+#[test]
+fn a_server_without_an_archive_is_not_an_error_to_show() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    let fx = feed(
+        &mut s,
+        &format!(
+            "<iq xmlns='jabber:client' type='error' from='{MUC}' id='{query}'>\
+             <error type='cancel'><feature-not-implemented xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></iq>"
+        ),
+    );
+    assert!(fx.events.is_empty());
+}
+
+#[test]
+fn a_catch_up_stops_at_its_limit_however_much_the_archive_has() {
+    let (mut s, fx) = rejoined_after("S0");
+    let (mut query, _) = catch_up_query(&fx).unwrap();
+    let mut requests = 1;
+    // An archive that never says it is finished.
+    for page in 0..20 {
+        for n in 0..100 {
+            feed(
+                &mut s,
+                &archived(
+                    &query,
+                    MUC,
+                    &format!("S{page}-{n}"),
+                    "carol",
+                    "2026-10-21T08:00:00Z",
+                    "x",
+                ),
+            );
+        }
+        let fx = feed(&mut s, &fin(&query, MUC, false, &format!("S{page}-99")));
+        match catch_up_query(&fx) {
+            Some((next, _)) => {
+                query = next;
+                requests += 1;
+            }
+            None => break,
+        }
+    }
+    assert_eq!(requests, 5, "500 messages in pages of 100, then enough");
+}

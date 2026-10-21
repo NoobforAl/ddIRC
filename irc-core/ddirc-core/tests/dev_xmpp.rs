@@ -558,3 +558,85 @@ async fn recovers_and_rejoins_when_the_server_restarts() {
         .message(Target::Channel(room.clone()), "back again")
         .await;
 }
+
+/// Drop one account's sessions at the server, leaving everything else standing.
+fn kick(user: &str) {
+    // `ejabberdctl` by name: a path starting with a slash is rewritten by Git
+    // for Windows into one on the host.
+    let out = std::process::Command::new("docker")
+        .args([
+            "exec",
+            "ddirc-dev-xmppd",
+            "ejabberdctl",
+            "kick_user",
+            user,
+            "localhost",
+        ])
+        .output()
+        .expect("the docker command runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs `make dev-xmpp`"]
+async fn catches_up_on_what_was_said_while_the_connection_was_down() {
+    let room = unique_room("catchup");
+    let mut alice = Client::start(account("alice", "hunter2", &[&room]));
+    alice.joined(&room).await;
+    let mut bob = Client::start(account("bob", "hunter2", &[&room]));
+    bob.joined(&room).await;
+
+    // Something alice sees live: that is what gives her a place to catch up from.
+    bob.say(&room, "before the drop").await;
+    let seen = alice
+        .message(Target::Channel(room.clone()), "before the drop")
+        .await;
+    assert!(seen.msgid.is_some());
+
+    // Her connection goes, and bob speaks into the gap. Alice's client waits a
+    // second or two before dialling again - the connection she had was young -
+    // which is the time bob needs.
+    kick("alice");
+    bob.say(&room, "while you were away").await;
+    bob.say(&room, "hey alice, are you there?").await;
+
+    let missed = alice
+        .message(Target::Channel(room.clone()), "while you were away")
+        .await;
+    assert_eq!(missed.sender, "bob");
+    assert!(!missed.is_self);
+    assert!(
+        missed.server_time_ms.is_some(),
+        "it carries the time it was said, not the time it arrived"
+    );
+    let second = alice
+        .message(Target::Channel(room.clone()), "are you there")
+        .await;
+    assert!(
+        !second.is_mention,
+        "a replayed mention is old news and must not raise a notification"
+    );
+
+    // Back in order, and what she had already seen is not shown a second time.
+    let before = alice
+        .seen
+        .iter()
+        .filter(|e| {
+            matches!(e, IrcEvent::Message(m) if
+            ddirc_core::text::format::strip(&ddirc_core::text::format::encode(&m.spans))
+                .contains("before the drop"))
+        })
+        .count();
+    assert_eq!(before, 1, "shown {before} times");
+
+    // And live talk carries on afterwards.
+    bob.say(&room, "welcome back").await;
+    let live = alice
+        .message(Target::Channel(room.clone()), "welcome back")
+        .await;
+    assert!(!live.is_self);
+}

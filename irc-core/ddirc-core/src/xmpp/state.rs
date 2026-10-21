@@ -6,7 +6,7 @@
 //! nick in it, and standing is two independent things - *affiliation*, which
 //! the room remembers, and *role*, which lasts as long as the visit.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use tokio_xmpp::jid::BareJid;
 use tokio_xmpp::parsers::muc::user::{Affiliation, Role};
@@ -134,8 +134,20 @@ pub struct Room {
     /// departure or an arrival, but they cannot be told from one without
     /// remembering the first when the second comes.
     pub renaming: BTreeMap<String, String>,
+    /// The id the room's archive gave the last message we showed from it. What
+    /// a catch-up after a reconnect asks "everything after" of. Only ever an id
+    /// the room itself assigned: a client's own id means nothing to an archive,
+    /// and asking for "after" one is an error.
+    pub last_id: Option<String>,
+    /// The ids of the messages most recently shown, so one that arrives twice -
+    /// live, and again from the archive - is shown once.
+    recent: VecDeque<String>,
     occupants: BTreeMap<String, Occupant>,
 }
+
+/// How many ids a room remembers. Far more than a catch-up fetches, so a
+/// message cannot be live and in the archive page and slip between the two.
+const RECENT_IDS: usize = 512;
 
 impl Room {
     pub fn new(jid: BareJid, nick: String) -> Self {
@@ -147,6 +159,8 @@ impl Room {
             nick_attempts: 0,
             topic: None,
             renaming: BTreeMap::new(),
+            last_id: None,
+            recent: VecDeque::new(),
             occupants: BTreeMap::new(),
         }
     }
@@ -158,6 +172,19 @@ impl Room {
 
     pub fn is_self(&self, nick: &str) -> bool {
         nick == self.nick
+    }
+
+    /// Note that a message with this id is being shown. False if it already
+    /// was, in which case it should not be shown again.
+    pub fn remember(&mut self, id: &str) -> bool {
+        if self.recent.iter().any(|seen| seen == id) {
+            return false;
+        }
+        if self.recent.len() >= RECENT_IDS {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(id.to_owned());
+        true
     }
 
     pub fn occupant(&self, nick: &str) -> Option<&Occupant> {
