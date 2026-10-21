@@ -105,8 +105,8 @@ pub struct DirectTlsConnector {
     /// The same trust, for a server speaking HTTP: the difference is the
     /// protocol the handshake offers.
     http_tls: Arc<ClientConfig>,
-    /// The account's domain, which an upload address inside it is trusted to
-    /// name a machine of the user's own (a development server on loopback).
+    /// The account's domain, for the one case where an upload may go to a
+    /// machine of the user's own: see [`DirectTlsConnector::dev_server`].
     domain: String,
 }
 
@@ -212,7 +212,7 @@ impl DirectTlsConnector {
     /// the proxy resolves, and what it resolves is its business.
     pub async fn https_stream(&self, host: &str, port: u16) -> io::Result<TlsStream<TcpStream>> {
         timeout(CONNECT_TIMEOUT, async {
-            if self.proxy.is_some() || self.inside_account_domain(host) {
+            if self.proxy.is_some() || (self.inside_account_domain(host) && self.dev_server()) {
                 return self.tls_stream(host, port, host, &self.http_tls).await;
             }
             let addresses: Vec<std::net::SocketAddr> =
@@ -236,6 +236,23 @@ impl DirectTlsConnector {
         })
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connecting timed out"))?
+    }
+
+    /// Whether the account itself is on this machine or this network: the
+    /// server it dials is an address that is not public, or `localhost`.
+    ///
+    /// The only case where an upload may be sent to a private address, and only
+    /// to a name inside the account's domain. It is what a development server
+    /// is. It is not what a provider is: a provider that is on the public
+    /// internet gets no say over where inside the user's network a file goes,
+    /// and a subdomain it controls that resolves to one is refused like any
+    /// other name.
+    fn dev_server(&self) -> bool {
+        let host = self.host.trim_end_matches('.');
+        host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| !crate::xmpp::upload::is_public_address(ip))
     }
 
     /// Whether `host` is the account's domain or one of its subdomains.
@@ -492,6 +509,21 @@ mod tests {
             DirectTlsConnector::with_roots(&account("127.0.0.1", 1, None), trusting(&pki)).unwrap();
         let error = connector.https_stream("localhost", 1).await.unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn only_an_account_on_this_network_may_upload_to_it() {
+        let pki = pki();
+        let dev = |host: &str| {
+            DirectTlsConnector::with_roots(&account(host, 1, None), trusting(&pki))
+                .unwrap()
+                .dev_server()
+        };
+        assert!(dev("127.0.0.1"));
+        assert!(dev("localhost"));
+        assert!(dev("192.168.1.20"));
+        assert!(!dev("93.184.216.34"));
+        assert!(!dev("xmpp.example.org"));
     }
 
     #[test]

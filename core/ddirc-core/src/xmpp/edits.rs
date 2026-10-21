@@ -66,11 +66,15 @@ pub struct MessageIndex {
 impl MessageIndex {
     /// Remember a message that was shown.
     pub fn record(&mut self, entry: Entry) {
-        if self
-            .entries
-            .iter()
-            .any(|e| e.conversation == entry.conversation && e.msgid == entry.msgid)
-        {
+        // The same id from the same author. A different author's message under
+        // an id we already hold is a different message, and dropping it would
+        // let anyone who guesses our next id keep our message out of the index
+        // by saying something under it first.
+        if self.entries.iter().any(|e| {
+            e.conversation == entry.conversation
+                && e.msgid == entry.msgid
+                && e.author == entry.author
+        }) {
             return;
         }
         if self.entries.len() >= MAX_INDEXED {
@@ -115,6 +119,30 @@ impl MessageIndex {
             .iter()
             .rev()
             .find(|e| e.mine && e.conversation == conversation && e.msgid == msgid)
+    }
+
+    /// Forget everything one author said in a conversation.
+    ///
+    /// For when they leave a room. A room names people by nickname, and a
+    /// nickname is free the moment its holder goes: whoever takes it next must
+    /// not be able to change what the last holder said.
+    pub fn forget_author(&mut self, conversation: &str, author: &str) {
+        self.entries
+            .retain(|e| !(e.conversation == conversation && e.author == author));
+    }
+
+    /// Forget a whole conversation, for when we leave it.
+    pub fn forget_conversation(&mut self, conversation: &str) {
+        self.entries.retain(|e| e.conversation != conversation);
+    }
+
+    /// Carry an author's messages over to a new name, for a rename in a room.
+    pub fn rename_author(&mut self, conversation: &str, old: &str, new: &str) {
+        for e in &mut self.entries {
+            if e.conversation == conversation && e.author == old {
+                e.author = new.to_owned();
+            }
+        }
     }
 
     /// Forget a message, once it has been retracted.
@@ -291,6 +319,48 @@ mod tests {
         assert!(index
             .for_retraction("room", &format!("s{}", MAX_INDEXED + 9), "bob")
             .is_some());
+    }
+
+    #[test]
+    fn someone_else_claiming_our_id_does_not_keep_ours_out() {
+        let mut index = MessageIndex::default();
+        // Mallory says something first under the id our next message will use.
+        index.record(entry("room", "mallory", "alice-7", Some("alice-7")));
+        let mut ours = entry("room", "alice", "alice-7", Some("alice-7"));
+        ours.mine = true;
+        index.record(ours);
+        assert!(index.ours("room", "alice-7").is_some());
+        // And her entry is still hers alone.
+        assert!(index.for_correction("room", "alice-7", "mallory").is_some());
+    }
+
+    #[test]
+    fn a_nickname_taken_over_does_not_inherit_what_the_last_holder_said() {
+        let mut index = MessageIndex::default();
+        index.record(entry("room", "bob", "s1", Some("b1")));
+        index.record(entry("other", "bob", "s2", Some("b2")));
+        index.forget_author("room", "bob");
+        assert!(index.for_correction("room", "b1", "bob").is_none());
+        assert!(index.for_correction("other", "b2", "bob").is_some());
+    }
+
+    #[test]
+    fn a_rename_carries_the_messages_to_the_new_name_only() {
+        let mut index = MessageIndex::default();
+        index.record(entry("room", "bob", "s1", Some("b1")));
+        index.rename_author("room", "bob", "robert");
+        assert!(index.for_correction("room", "b1", "bob").is_none());
+        assert!(index.for_correction("room", "b1", "robert").is_some());
+    }
+
+    #[test]
+    fn leaving_a_conversation_forgets_all_of_it() {
+        let mut index = MessageIndex::default();
+        index.record(entry("room", "bob", "s1", Some("b1")));
+        index.record(entry("other", "bob", "s2", Some("b2")));
+        index.forget_conversation("room");
+        assert!(index.for_correction("room", "b1", "bob").is_none());
+        assert!(index.for_correction("other", "b2", "bob").is_some());
     }
 
     #[test]

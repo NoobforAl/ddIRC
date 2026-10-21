@@ -277,6 +277,16 @@ impl Session {
         for event in self.contacts.forget_presence() {
             fx.event(event);
         }
+        // Whoever is still waiting will ask again: a server delivers the
+        // subscriptions it holds when we log in. What it does not deliver was
+        // withdrawn while we were away, and would otherwise wait for ever.
+        for jid in self.contacts.clear_requests() {
+            if !self.contacts.contains(&jid) {
+                fx.event(IrcEvent::ContactRemoved {
+                    jid: jid.to_string(),
+                });
+            }
+        }
         self.upload = None;
         let waiting: Vec<u64> = self
             .tickets
@@ -896,8 +906,25 @@ impl Session {
                 // Someone asks to see when we are online. Never answered on our
                 // behalf: accepting tells them we exist and are reading, which
                 // is the user's to give. Reported, and the user answers it.
-                if bare != self.account && self.contacts.add_request(bare.clone()) {
+                //
+                // From a person only: an address with no name before the `@` is
+                // a server or a service, which can be neither accepted nor
+                // declined here and would sit in the list for ever.
+                if bare != self.account
+                    && bare.node().is_some()
+                    && self.contacts.add_request(bare.clone())
+                {
                     fx.event(IrcEvent::SubscriptionRequest {
+                        jid: bare.to_string(),
+                    });
+                }
+            }
+            // They changed their mind. Accepting now would pre-approve someone
+            // who withdrew, so the request goes, and the UI is told by the one
+            // event it already clears a waiting request on.
+            PresenceType::Unsubscribe => {
+                if self.contacts.take_request(&bare) && !self.contacts.contains(&bare) {
+                    fx.event(IrcEvent::ContactRemoved {
                         jid: bare.to_string(),
                     });
                 }
@@ -958,6 +985,14 @@ impl Session {
                 .filter(|r| !r.is_empty())
                 .or_else(|| removal_reason(&statuses));
             room.remove(&nick);
+            // A nickname is free the moment its holder goes, so what they said
+            // is no longer anyone's to change but a message they can no longer
+            // send - and ours, all of it, when we leave.
+            if is_self {
+                self.index.forget_conversation(&channel);
+            } else {
+                self.index.forget_author(&channel, &nick);
+            }
             if is_self {
                 self.rooms.remove(jid);
                 fx.event(IrcEvent::Parted {
@@ -998,6 +1033,7 @@ impl Session {
             if room.is_self(&old) {
                 room.nick = nick.clone();
             }
+            self.index.rename_author(&channel, &old, &nick);
             fx.event(IrcEvent::NickChanged {
                 channel: channel.clone(),
                 old: old.clone(),
@@ -1495,6 +1531,19 @@ impl Session {
         } else {
             sender
         };
+        // Who is *recorded* as having said it, which is not always what is shown.
+        // In a room's private chat the shown name is a nickname, and a nickname
+        // can be anything - including our own address - so it is filed under the
+        // occupant's full address instead, which has a `/` in it that no account
+        // address has. Without this, someone in a room calling themselves our
+        // address could change the private messages we sent them.
+        let key = if outgoing {
+            self.account.to_string()
+        } else if from_room {
+            other.to_string()
+        } else {
+            author.clone()
+        };
         let origin = edits::origin_id(message);
 
         // Said before, live, and now again from the archive: shown once.
@@ -1509,11 +1558,7 @@ impl Session {
         // A retraction is never shown as a message, and is applied only if it
         // comes from whoever wrote what it names.
         if let Some(target_id) = edits::retraction(message) {
-            if let Some(entry) = self
-                .index
-                .for_retraction(&name, &target_id, &author)
-                .cloned()
-            {
+            if let Some(entry) = self.index.for_retraction(&name, &target_id, &key).cloned() {
                 self.index.forget(&name, &entry.msgid);
                 fx.event(IrcEvent::MessageRetracted {
                     target: Target::Direct(name),
@@ -1545,7 +1590,7 @@ impl Session {
         if let Some(replace) = &correction {
             if let Some(entry) = self
                 .index
-                .for_correction(&name, &replace.id.0, &author)
+                .for_correction(&name, &replace.id.0, &key)
                 .cloned()
             {
                 let edited = ChatMessage {
@@ -1578,7 +1623,7 @@ impl Session {
         if let Some(id) = &msgid {
             self.index.record(Entry {
                 conversation: name.clone(),
-                author: author.clone(),
+                author: key,
                 msgid: id.clone(),
                 origin,
                 mine: outgoing,
