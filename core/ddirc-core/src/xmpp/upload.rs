@@ -229,13 +229,47 @@ pub fn is_public_address(address: IpAddr) -> bool {
                 || (o[0] == 100 && (64..=127).contains(&o[1]))
                 || o[0] == 0
                 || o[0] >= 240
+                // Benchmarking, 198.18.0.0/15.
+                || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
                 || (o[0] == 192 && o[1] == 0 && o[2] == 0))
         }
         IpAddr::V6(v6) => {
             if let Some(v4) = v6.to_ipv4_mapped() {
                 return is_public_address(IpAddr::V4(v4));
             }
-            let first = v6.segments()[0];
+            let s = v6.segments();
+            let first = s[0];
+            // Forms that carry an IPv4 address inside, which is the address the
+            // packet ends up at: judge it by that one. NAT64 (64:ff9b::/96),
+            // IPv4-compatible (::/96) and 6to4 (2002::/16, the address in bits
+            // 16-48).
+            let embedded = |hi: u16, lo: u16| {
+                IpAddr::V4(std::net::Ipv4Addr::new(
+                    (hi >> 8) as u8,
+                    hi as u8,
+                    (lo >> 8) as u8,
+                    lo as u8,
+                ))
+            };
+            if first == 0x64 && s[1] == 0xff9b && s[2..6] == [0, 0, 0, 0] {
+                return is_public_address(embedded(s[6], s[7]));
+            }
+            if s[..6] == [0, 0, 0, 0, 0, 0] {
+                return is_public_address(embedded(s[6], s[7]));
+            }
+            if first == 0x2002 {
+                return is_public_address(embedded(s[1], s[2]));
+            }
+            // Refused outright: they tunnel to an address this check cannot see
+            // (Teredo 2001::/32, local-use NAT64 64:ff9b:1::/48), are
+            // deprecated site-local (fec0::/10), or discard traffic (100::/64).
+            if (first == 0x2001 && s[1] == 0)
+                || (first == 0x64 && s[1] == 0xff9b && s[2] == 1)
+                || (first & 0xffc0) == 0xfec0
+                || (first == 0x100 && s[1..4] == [0, 0, 0])
+            {
+                return false;
+            }
             !(v6.is_unspecified()
                 || v6.is_loopback()
                 || v6.is_multicast()
@@ -360,14 +394,23 @@ async fn read_status<S: AsyncRead + Unpin>(stream: &mut S) -> Result<u16, Upload
             return Err(UploadError::BadResponse);
         }
         seen.extend_from_slice(&buffer[..n]);
-        let mut headers = [httparse::EMPTY_HEADER; 32];
-        let mut response = httparse::Response::new(&mut headers);
-        match response.parse(&seen) {
-            Ok(httparse::Status::Complete(_)) => {
-                return response.code.ok_or(UploadError::BadResponse);
+        // More than one head can arrive: a server may say `100 Continue` or
+        // `103 Early Hints` before the answer that counts.
+        loop {
+            let mut headers = [httparse::EMPTY_HEADER; 96];
+            let mut response = httparse::Response::new(&mut headers);
+            match response.parse(&seen) {
+                Ok(httparse::Status::Complete(length)) => {
+                    let code = response.code.ok_or(UploadError::BadResponse)?;
+                    if (100..200).contains(&code) && code != 101 {
+                        seen.drain(..length);
+                        continue;
+                    }
+                    return Ok(code);
+                }
+                Ok(httparse::Status::Partial) if seen.len() < MAX_RESPONSE_HEAD => break,
+                _ => return Err(UploadError::BadResponse),
             }
-            Ok(httparse::Status::Partial) if seen.len() < MAX_RESPONSE_HEAD => {}
-            _ => return Err(UploadError::BadResponse),
         }
     }
 }
@@ -485,6 +528,22 @@ mod tests {
             "2001:db8::1",
             "::ffff:127.0.0.1",
             "::ffff:10.0.0.1",
+            "198.18.0.1",
+            "198.19.255.255",
+            // Embedded IPv4: NAT64, IPv4-compatible, 6to4.
+            "64:ff9b::7f00:1",
+            "64:ff9b::a00:1",
+            "64:ff9b::c0a8:101",
+            "::7f00:1",
+            "::a00:1",
+            "2002:7f00:1::",
+            "2002:a9fe:a9fe::",
+            "2002:c0a8:101::",
+            // Tunnels, site-local, discard.
+            "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+            "64:ff9b:1::1",
+            "fec0::1",
+            "100::1",
         ] {
             assert!(!is_public_address(a.parse().unwrap()), "{a}");
         }
@@ -500,6 +559,9 @@ mod tests {
             "100.128.0.1",
             "2606:4700::1111",
             "::ffff:8.8.8.8",
+            "198.20.0.1",
+            "64:ff9b::808:808",
+            "2002:808:808::",
         ] {
             assert!(is_public_address(a.parse().unwrap()), "{a}");
         }
@@ -770,6 +832,23 @@ mod tests {
         let result = put(client, &granted(), &path, 5, "text/plain", |_| {}).await;
         server.await.unwrap();
         assert!(matches!(result, Err(UploadError::Refused(403))));
+    }
+
+    #[tokio::test]
+    async fn an_interim_answer_is_not_the_answer() {
+        let (_dir, path) = temp_file(b"hello");
+        let (client, remote) = tokio::io::duplex(4096);
+        let server = tokio::spawn(async move {
+            server(
+                remote,
+                5,
+                "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 201 Created\r\n\r\n",
+            )
+            .await
+        });
+        let result = put(client, &granted(), &path, 5, "text/plain", |_| {}).await;
+        server.await.unwrap();
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[tokio::test]

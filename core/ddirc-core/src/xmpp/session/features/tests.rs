@@ -1555,6 +1555,212 @@ fn a_group_message_in_our_archive_is_not_a_chat() {
     assert!(messages(&feed(&mut s, &m)).is_empty());
 }
 
+// ---- found in review ------------------------------------------------------------------
+
+#[test]
+fn someone_in_a_room_called_by_our_address_cannot_change_our_private_messages() {
+    let mut s = in_room();
+    // Mallory joins under a nickname that is our own account address.
+    feed(
+        &mut s,
+        &muc_presence("alice@example.org", None, &item("none", "participant"), &[]),
+    );
+    let target = format!("{MUC}/alice@example.org");
+    let sent = s.on_command(ClientCommand::SendMessage {
+        target: target.clone(),
+        text: "a private word".to_owned(),
+    });
+    let Stanza::Message(m) = &sent.send[0] else {
+        panic!();
+    };
+    let our_id = m.id.clone().unwrap().0;
+
+    let edit = feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='chat' from='{target}' id='x1'>\
+             <body>I never said that</body>\
+             <replace xmlns='urn:xmpp:message-correct:0' id='{our_id}'/></message>"
+        ),
+    );
+    assert!(!edit
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageEdited { .. })));
+    let retract = feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='chat' from='{target}' id='x2'>\
+             <retract xmlns='urn:xmpp:message-retract:1' id='{our_id}'/></message>"
+        ),
+    );
+    assert!(!retract
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageRetracted { .. })));
+}
+
+#[test]
+fn a_nickname_taken_over_cannot_change_what_its_last_holder_said() {
+    let mut s = in_room();
+    feed(&mut s, &room_says("bob", "bobs-1", "S1", "", "I agree"));
+    feed(
+        &mut s,
+        &muc_presence("bob", Some("unavailable"), &item("none", "none"), &[]),
+    );
+    feed(
+        &mut s,
+        &muc_presence("bob", None, &item("none", "participant"), &[]),
+    );
+    let fx = feed(
+        &mut s,
+        &room_says(
+            "bob",
+            "new-1",
+            "S2",
+            "<replace xmlns='urn:xmpp:message-correct:0' id='bobs-1'/>",
+            "I disagree",
+        ),
+    );
+    assert!(!fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageEdited { .. })));
+    let fx = feed(
+        &mut s,
+        &room_says(
+            "bob",
+            "new-2",
+            "S3",
+            "<retract xmlns='urn:xmpp:message-retract:1' id='S1'/>",
+            "x",
+        ),
+    );
+    assert!(!fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageRetracted { .. })));
+}
+
+#[test]
+fn a_rename_keeps_the_right_to_change_what_was_said() {
+    let mut s = in_room();
+    feed(&mut s, &room_says("bob", "bobs-1", "S1", "", "teh plan"));
+    feed(
+        &mut s,
+        &muc_presence(
+            "bob",
+            Some("unavailable"),
+            "<item nick='robert' affiliation='none' role='participant'/>",
+            &[303],
+        ),
+    );
+    feed(
+        &mut s,
+        &muc_presence("robert", None, &item("none", "participant"), &[]),
+    );
+    let fx = feed(
+        &mut s,
+        &room_says(
+            "robert",
+            "r-1",
+            "S2",
+            "<replace xmlns='urn:xmpp:message-correct:0' id='bobs-1'/>",
+            "the plan",
+        ),
+    );
+    assert!(fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageEdited { msgid, .. } if msgid == "S1")));
+}
+
+#[test]
+fn a_link_that_could_not_be_sent_is_not_reported_as_a_file_sent() {
+    let mut s = with_upload(1_000_000);
+    let (ticket, fx) = s.begin_upload(MUC, "a.png", 10);
+    let id = id_of(&fx, "upload.example.org");
+    feed(
+        &mut s,
+        &slot_reply(
+            "upload.example.org",
+            &id,
+            "https://upload.example.org/put",
+            "https://upload.example.org/get",
+        ),
+    );
+    // The connection drops while the bytes are on their way, and the room is
+    // forgotten on the next login.
+    s.on_online(&bound());
+    let fx = s.upload_finished(ticket.unwrap(), Ok(()));
+    assert!(fx.send.is_empty(), "no link went out");
+    assert!(matches!(
+        fx.events.as_slice(),
+        [IrcEvent::FileTransferEnded { error: Some(e), .. }] if e.contains("not sent")
+    ));
+}
+
+#[test]
+fn a_request_from_a_service_is_not_a_request() {
+    let mut s = session();
+    s.on_online(&bound());
+    let fx = feed(
+        &mut s,
+        "<presence xmlns='jabber:client' type='subscribe' from='evil.example'/>",
+    );
+    assert!(fx.events.is_empty());
+}
+
+#[test]
+fn a_request_that_was_withdrawn_cannot_be_accepted() {
+    let mut s = session();
+    s.on_online(&bound());
+    feed(
+        &mut s,
+        "<presence xmlns='jabber:client' type='subscribe' from='dave@example.net'/>",
+    );
+    let fx = feed(
+        &mut s,
+        "<presence xmlns='jabber:client' type='unsubscribe' from='dave@example.net'/>",
+    );
+    assert!(matches!(
+        fx.events.as_slice(),
+        [IrcEvent::ContactRemoved { jid }] if jid == "dave@example.net"
+    ));
+    let answer = s.on_command(ClientCommand::AnswerSubscription {
+        jid: "dave@example.net".to_owned(),
+        accept: true,
+    });
+    assert!(
+        answer.send.is_empty(),
+        "no pre-approval of someone who left"
+    );
+}
+
+#[test]
+fn waiting_requests_start_again_on_a_new_login() {
+    let mut s = session();
+    s.on_online(&bound());
+    feed(
+        &mut s,
+        "<presence xmlns='jabber:client' type='subscribe' from='dave@example.net'/>",
+    );
+    let fx = s.on_online(&bound());
+    assert!(fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::ContactRemoved { jid } if jid == "dave@example.net")));
+    // The server delivers it again if it is still waiting, and it counts again.
+    let again = feed(
+        &mut s,
+        "<presence xmlns='jabber:client' type='subscribe' from='dave@example.net'/>",
+    );
+    assert!(matches!(
+        again.events.as_slice(),
+        [IrcEvent::SubscriptionRequest { .. }]
+    ));
+}
+
 // Keep `stanza` used: the helpers above build XML and parse it through feed.
 #[test]
 fn the_test_helpers_agree_about_stanzas() {

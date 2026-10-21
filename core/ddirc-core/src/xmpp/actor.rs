@@ -781,6 +781,15 @@ impl Actor {
             uploads.start(job);
         }
         for event in fx.events {
+            // An upload that has ended, however it ended, has nothing left to
+            // wait for or to run: the session dropped its ticket, and keeping
+            // ours would leak one entry for every slot a server refused.
+            if let IrcEvent::FileTransferEnded { id, .. } = &event {
+                uploads.staged.remove(id);
+                if let Some(handle) = uploads.running.remove(id) {
+                    handle.abort();
+                }
+            }
             self.emit(event);
         }
         for stanza in fx.send {

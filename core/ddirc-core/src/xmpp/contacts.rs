@@ -264,6 +264,11 @@ impl Contacts {
         self.requests.len() != before
     }
 
+    /// Forget everyone who was waiting, and say who that was.
+    pub fn clear_requests(&mut self) -> Vec<BareJid> {
+        std::mem::take(&mut self.requests)
+    }
+
     /// Everyone waiting on an answer, oldest first.
     pub fn requests(&self) -> &[BareJid] {
         &self.requests

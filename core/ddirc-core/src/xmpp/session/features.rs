@@ -436,14 +436,29 @@ impl Session {
         let Some(get) = entry.get else {
             return fx;
         };
+        // The link first, and only then the card. A file that is on the server
+        // and whose link never reached anyone (the room was left, or the
+        // connection dropped, while the bytes were on their way) is not a file
+        // that was sent, and a card that says it was would be a lie.
+        let mut sent = Effects::default();
+        self.say_with(&entry.target, &get, false, Some(&get), &mut sent);
+        let refused = sent.events.iter().find_map(|e| match e {
+            IrcEvent::Error { message, .. } => Some(message.clone()),
+            _ => None,
+        });
+        let outcome =
+            refused.map(|why| format!("It was uploaded, but the link was not sent: {why}"));
         fx.event(IrcEvent::FileTransferEnded {
             id: ticket,
             channel: entry.target.clone(),
             filename: entry.filename,
             path: None,
-            error: None,
+            error: outcome.clone(),
         });
-        self.say_with(&entry.target, &get, false, Some(&get), &mut fx);
+        if outcome.is_none() {
+            fx.events.extend(sent.events);
+            fx.send.extend(sent.send);
+        }
         fx
     }
 }
