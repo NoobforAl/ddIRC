@@ -1617,3 +1617,69 @@ fn an_archive_id_is_bounded_as_a_live_one_is() {
         .unwrap();
     assert!(after.chars().count() <= 200);
 }
+
+#[test]
+fn an_occupant_cannot_answer_for_the_room() {
+    let mut s = session();
+    s.on_online(&bound());
+    let fx = s.on_command(ClientCommand::Kick {
+        channel: MUC.to_owned(),
+        nick: "bob".to_owned(),
+        reason: None,
+    });
+    let Stanza::Iq(Iq::Set { id, .. }) = &fx.send[0] else {
+        panic!("an iq set");
+    };
+    let id = id.clone();
+    // Right id, and the room's address - but with someone's name on the end.
+    let forged = format!(
+        "<iq xmlns='jabber:client' type='error' from='{MUC}/mallory' id='{id}'>\
+         <error type='auth'><forbidden xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></iq>"
+    );
+    assert!(feed(&mut s, &forged).events.is_empty());
+    // And with no sender at all, which is only ever our own server.
+    let anonymous = format!(
+        "<iq xmlns='jabber:client' type='error' id='{id}'>\
+         <error type='auth'><forbidden xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></iq>"
+    );
+    assert!(feed(&mut s, &anonymous).events.is_empty());
+    // The room itself still can.
+    let real = format!(
+        "<iq xmlns='jabber:client' type='error' from='{MUC}' id='{id}'>\
+         <error type='auth'><forbidden xmlns='urn:ietf:params:xml:ns:xmpp-stanzas'/></error></iq>"
+    );
+    assert_eq!(feed(&mut s, &real).events.len(), 1);
+}
+
+#[test]
+fn an_occupant_or_our_own_server_cannot_turn_the_page_of_a_catch_up() {
+    let (mut s, fx) = rejoined_after("S1");
+    let (query, _) = catch_up_query(&fx).unwrap();
+    feed(
+        &mut s,
+        &archived(&query, MUC, "S2", "carol", "2026-10-21T08:00:00Z", "one"),
+    );
+    let by_occupant = fin(&query, &format!("{MUC}/mallory"), false, "S2");
+    assert!(catch_up_query(&feed(&mut s, &by_occupant)).is_none());
+
+    let no_sender = format!(
+        "<iq xmlns='jabber:client' type='result' id='{query}'>\
+         <fin xmlns='{MAM}' complete='false'><set xmlns='http://jabber.org/protocol/rsm'>\
+         <last>S2</last></set></fin></iq>"
+    );
+    assert!(catch_up_query(&feed(&mut s, &no_sender)).is_none());
+
+    // The room can: that page is still open.
+    assert!(catch_up_query(&feed(&mut s, &fin(&query, MUC, false, "S2"))).is_some());
+}
+
+#[test]
+fn ids_are_not_short_enough_to_guess() {
+    let mut s = session();
+    let fx = s.on_online(&bound());
+    let Stanza::Iq(Iq::Set { id, .. }) = &fx.send[0] else {
+        panic!("carbons");
+    };
+    // "ddirc" + 64 random bits + "-" + a counter.
+    assert!(id.len() >= "ddirc".len() + 16 + 2, "{id}");
+}
