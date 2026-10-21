@@ -143,10 +143,20 @@ List<ImportedNetwork> parseIrcConfig(String source) {
         // somebody writing this file by hand will reach for first;
         // `serverPassword` matches what the editor labels the same field.
         // Both mean the same thing, and the explicit one wins.
-        serverPassword:
-            _secret(map['serverPassword']) ?? _secret(map['password']),
-        saslPassword: _secret(map['saslPassword']),
-        nickservPassword: _secret(map['nickservPassword']),
+        //
+        // For an XMPP account there is one password, which is the account's,
+        // and it is stored where an IRC network's SASL password is. `password`
+        // is the spelling a hand-written file will use for it, and it must not
+        // be filed under a server password the account has no use for.
+        serverPassword: profile.isXmpp
+            ? null
+            : _secret(map['serverPassword']) ?? _secret(map['password']),
+        saslPassword: profile.isXmpp
+            ? _secret(map['saslPassword']) ?? _secret(map['password'])
+            : _secret(map['saslPassword']),
+        nickservPassword: profile.isXmpp
+            ? null
+            : _secret(map['nickservPassword']),
         proxyPassword: _secret(
           map['proxy'] is Map ? (map['proxy']! as Map)['password'] : null,
         ),
@@ -203,6 +213,9 @@ String writeIrcConfig(List<Profile> profiles) {
 String _network(Profile profile) {
   final lines = <String>[
     '  - name: ${_scalar(profile.name)}',
+    // Only written for XMPP, so a file of IRC networks is byte-for-byte what it
+    // always was and reads back in an older ddIRC.
+    if (profile.isXmpp) '    protocol: xmpp',
     '    host: ${_scalar(profile.host)}',
     '    port: ${profile.port}',
     '    nickname: ${_scalar(profile.nickname)}',

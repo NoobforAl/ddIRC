@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../model/profile.dart';
 import '../../model/proxy.dart';
 import '../../model/session.dart';
 import '../../model/settings.dart';
@@ -208,7 +209,13 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
             ),
             SettingsReadout(
               label: 'Authentication',
-              value: _describeAuth(session.auth, config),
+              value: _describeAuth(
+                session.auth,
+                config,
+                isXmpp:
+                    ProfileScope.of(context).byId(session.profileId)?.isXmpp ??
+                    false,
+              ),
             ),
             if (config.channels.isNotEmpty)
               SettingsReadout(
@@ -308,8 +315,15 @@ class _ServerSettingsDialogState extends State<ServerSettingsDialog> {
       };
 
   /// Never renders a credential — only which mechanism was used.
-  static String _describeAuth(AuthOutcome? auth, ServerConfig config) {
+  static String _describeAuth(
+    AuthOutcome? auth,
+    ServerConfig config, {
+    bool isXmpp = false,
+  }) {
     return switch (auth) {
+      // The mechanism is the server's and the library's choice (SCRAM when it
+      // is offered), so an account says who it logged in as and not how.
+      AuthOutcome_Sasl() when isXmpp => 'Logged in as ${config.nickname}',
       AuthOutcome_Sasl() => 'SASL PLAIN as ${config.saslAccount ?? 'account'}',
       AuthOutcome_NickServFallback(:final reason) =>
         'NickServ — SASL unavailable ($reason)',

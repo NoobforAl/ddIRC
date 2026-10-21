@@ -178,15 +178,24 @@ class _ImportConfigDialogState extends State<ImportConfigDialog> {
     String note;
     var failed = true;
     try {
-      final config = profile.toConfig(
-        saslPassword: draft.sasl.text,
-        serverPassword: draft.server.text,
-        // Deliberately not passed, matching the editor: the probe never
-        // identifies to NickServ, because sending a password to a service is
-        // a side effect and a test is supposed to leave nothing behind.
-        proxy: await _proxyFor(draft, profile),
-      );
-      final report = await core.testConnection(config: config);
+      final proxy = await _proxyFor(draft, profile);
+      final rust.ProbeReport report;
+      if (profile.isXmpp) {
+        report = await core.testConnectionXmpp(
+          config: profile.toXmppConfig(password: draft.sasl.text, proxy: proxy),
+        );
+      } else {
+        report = await core.testConnection(
+          config: profile.toConfig(
+            saslPassword: draft.sasl.text,
+            serverPassword: draft.server.text,
+            // Deliberately not passed, matching the editor: the probe never
+            // identifies to NickServ, because sending a password to a service
+            // is a side effect and a test is supposed to leave nothing behind.
+            proxy: proxy,
+          ),
+        );
+      }
       failed = false;
       note = _describe(report, profile);
     } catch (error) {
@@ -235,6 +244,9 @@ class _ImportConfigDialogState extends State<ImportConfigDialog> {
   /// editor's, because here it sits inside a row rather than under a form.
   String _describe(rust.ProbeReport report, Profile profile) {
     final seconds = (report.elapsedMs.toInt() / 1000).toStringAsFixed(1);
+    if (profile.isXmpp) {
+      return 'Logged in over TLS as ${report.nickname} in ${seconds}s.';
+    }
     final nick = report.nickname == profile.nickname
         ? report.nickname
         : '${report.nickname} — not the ${profile.nickname} you asked for';
@@ -379,7 +391,10 @@ class _NetworkRow extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${profile.host}:${profile.port} · ${profile.nickname}',
+                        profile.isXmpp
+                            ? '${profile.nickname} · XMPP'
+                            : '${profile.host}:${profile.port} · '
+                                  '${profile.nickname}',
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: t.faint, fontSize: 11.5),
                       ),
@@ -528,44 +543,60 @@ class _Credentials extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(height: 10),
-          SettingsLabelledField(
-            label: 'Server password',
-            controller: draft.server,
-            obscure: true,
-            hint: 'Optional',
-            help:
-                'Sent as the server\'s PASS before registration. Goes to the '
-                'platform keychain when you import, never to app settings.',
-            onSubmitted: (_) => busy ? null : onTest(),
-          ),
-          SettingsLabelledField(
-            label: 'SASL account',
-            controller: draft.account,
-            hint: 'Optional',
-            onSubmitted: (_) => busy ? null : onTest(),
-          ),
-          SettingsLabelledField(
-            label: 'SASL password',
-            controller: draft.sasl,
-            obscure: true,
-            hint: 'Optional',
-            help:
-                'The password for the account above. Kept in the platform '
-                'keychain and zeroized by the core once authentication '
-                'completes.',
-            onSubmitted: (_) => busy ? null : onTest(),
-          ),
-          SettingsLabelledField(
-            label: 'NickServ password',
-            controller: draft.nickserv,
-            obscure: true,
-            hint: 'Optional',
-            help:
-                'Used to identify with NickServ if SASL was not accepted. '
-                'Never sent by the connection test — a test is supposed to '
-                'leave nothing behind.',
-            onSubmitted: (_) => busy ? null : onTest(),
-          ),
+          if (draft.profile.isXmpp)
+            // An account has one password, and none of the rest: there is no
+            // server password to send, no SASL account separate from the
+            // address, and no NickServ.
+            SettingsLabelledField(
+              label: 'Password',
+              controller: draft.sasl,
+              obscure: true,
+              hint: 'Required to connect',
+              help:
+                  'The password for ${draft.profile.nickname}. Kept in the '
+                  'platform keychain when you import, never in app settings.',
+              onSubmitted: (_) => busy ? null : onTest(),
+            )
+          else ...[
+            SettingsLabelledField(
+              label: 'Server password',
+              controller: draft.server,
+              obscure: true,
+              hint: 'Optional',
+              help:
+                  'Sent as the server\'s PASS before registration. Goes to the '
+                  'platform keychain when you import, never to app settings.',
+              onSubmitted: (_) => busy ? null : onTest(),
+            ),
+            SettingsLabelledField(
+              label: 'SASL account',
+              controller: draft.account,
+              hint: 'Optional',
+              onSubmitted: (_) => busy ? null : onTest(),
+            ),
+            SettingsLabelledField(
+              label: 'SASL password',
+              controller: draft.sasl,
+              obscure: true,
+              hint: 'Optional',
+              help:
+                  'The password for the account above. Kept in the platform '
+                  'keychain and zeroized by the core once authentication '
+                  'completes.',
+              onSubmitted: (_) => busy ? null : onTest(),
+            ),
+            SettingsLabelledField(
+              label: 'NickServ password',
+              controller: draft.nickserv,
+              obscure: true,
+              hint: 'Optional',
+              help:
+                  'Used to identify with NickServ if SASL was not accepted. '
+                  'Never sent by the connection test — a test is supposed to '
+                  'leave nothing behind.',
+              onSubmitted: (_) => busy ? null : onTest(),
+            ),
+          ],
           const SecretStorageNote(),
           if (draft.note case final note?)
             SettingsNote(text: note, isError: draft.failed),

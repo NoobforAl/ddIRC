@@ -602,7 +602,9 @@ class _ProfileRow extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '${profile.host}:${profile.port}',
+                profile.isXmpp
+                    ? profile.serverName
+                    : '${profile.host}:${profile.port}',
                 style: TextStyle(color: t.faint, fontSize: 11.5),
               ),
               // The reason a network would not connect belongs with that

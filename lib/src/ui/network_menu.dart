@@ -106,8 +106,18 @@ class ForgetNetworkDialog extends StatelessWidget {
     final connected = WorkspaceScope.of(context).isConnected(profile.id);
 
     final goes = [
-      ('The saved server', '${profile.host}:${profile.port}, and its channels'),
-      if (profile.usesSasl)
+      if (profile.isXmpp)
+        (
+          'The saved account',
+          '${profile.nickname}, and its rooms. The account itself is not '
+              'touched: it still exists on its server.',
+        )
+      else
+        (
+          'The saved server',
+          '${profile.host}:${profile.port}, and its channels',
+        ),
+      if (profile.usesPassword)
         (
           'Its account password',
           'Removed from the platform keychain, not just from this list.',
