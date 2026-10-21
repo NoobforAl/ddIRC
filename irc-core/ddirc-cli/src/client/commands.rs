@@ -61,7 +61,26 @@ fn channel(name: &str) -> String {
 
 /// Translate a typed line into an action. `current` is the conversation the
 /// line was typed in, if there is one.
+///
+/// For IRC, where a name's first character says whether it is a channel.
 pub fn command_for(line: &str, current: Option<&str>) -> Option<Action> {
+    command_for_with(line, current, &is_channel, true)
+}
+
+/// [`command_for`] for a protocol whose names are told apart some other way.
+///
+/// `is_channel` answers whether a name is a channel or room rather than a
+/// person, and `add_sigil` whether a bare word given to `/join` is to be made
+/// into a channel by prefixing it. An XMPP room is an address, like a person's,
+/// so nothing in the name says which it is - the caller knows what it has
+/// joined - and prefixing `#` to `lobby@conference.example.org` would turn it
+/// into something else.
+pub fn command_for_with(
+    line: &str,
+    current: Option<&str>,
+    is_chan: &dyn Fn(&str) -> bool,
+    add_sigil: bool,
+) -> Option<Action> {
     let line = line.trim_end_matches(['\r', '\n']);
     if line.trim().is_empty() {
         return None;
@@ -79,7 +98,7 @@ pub fn command_for(line: &str, current: Option<&str>) -> Option<Action> {
         Some((command, argument)) => (command, argument.trim()),
         None => (rest, ""),
     };
-    let current_channel = current.filter(|c| is_channel(c));
+    let current_channel = current.filter(|c| is_chan(c));
     let reason = |s: &str| (!s.is_empty()).then(|| s.to_owned());
 
     let action = match command.to_ascii_lowercase().as_str() {
@@ -89,15 +108,19 @@ pub fn command_for(line: &str, current: Option<&str>) -> Option<Action> {
                 None => (argument, None),
             };
             Action::Send(ClientCommand::Join {
-                channel: channel(name),
+                channel: if add_sigil {
+                    channel(name)
+                } else {
+                    name.to_owned()
+                },
                 key,
             })
         }
         "part" | "leave" => {
             // `/part #other bye`, or `/part bye` for the one we are in.
             let (named, why) = match argument.split_once(' ') {
-                Some((first, why)) if is_channel(first) => (Some(first), why.trim()),
-                None if is_channel(argument) => (Some(argument), ""),
+                Some((first, why)) if is_chan(first) => (Some(first), why.trim()),
+                None if is_chan(argument) => (Some(argument), ""),
                 _ => (None, argument),
             };
             match named.or(current_channel) {
@@ -139,7 +162,7 @@ pub fn command_for(line: &str, current: Option<&str>) -> Option<Action> {
         "kick" if !argument.is_empty() => {
             // `/kick bob spamming`, or `/kick #room bob spamming`.
             let (named, rest) = match argument.split_once(' ') {
-                Some((first, rest)) if is_channel(first) => (Some(first), rest.trim()),
+                Some((first, rest)) if is_chan(first) => (Some(first), rest.trim()),
                 _ => (None, argument),
             };
             let (nick, why) = match rest.split_once(' ') {
@@ -304,6 +327,56 @@ mod tests {
         assert!(matches!(
             command_for("/jion #rust", Some("#test")),
             Some(Action::Notice(_))
+        ));
+    }
+
+    /// How an XMPP account reads names: what it has joined is a room.
+    fn rooms(name: &str) -> bool {
+        name == "lobby@conference.example.org" || name == "dev@conference.example.org"
+    }
+
+    #[test]
+    fn xmpp_join_takes_a_room_address_as_typed() {
+        let action = command_for_with("/join lobby@conference.example.org", None, &rooms, false);
+        assert!(matches!(
+            action,
+            Some(Action::Send(ClientCommand::Join { ref channel, .. }))
+                if channel == "lobby@conference.example.org"
+        ));
+        // Where IRC would have made it a channel.
+        let irc = command_for("/join lobby", None);
+        assert!(matches!(
+            irc,
+            Some(Action::Send(ClientCommand::Join { ref channel, .. })) if channel == "#lobby"
+        ));
+    }
+
+    #[test]
+    fn xmpp_commands_act_on_the_room_we_are_in_and_not_on_a_person() {
+        let topic = |current| command_for_with("/topic hello", Some(current), &rooms, false);
+        assert!(matches!(
+            topic("lobby@conference.example.org"),
+            Some(Action::Send(ClientCommand::SetTopic { .. }))
+        ));
+        // A conversation with a person is not a room, though it is spelled like one.
+        assert!(matches!(
+            topic("alice@example.org"),
+            Some(Action::Notice(ref text)) if text == "not in a channel"
+        ));
+    }
+
+    #[test]
+    fn xmpp_kick_may_name_another_room_first() {
+        let action = command_for_with(
+            "/kick dev@conference.example.org bob spamming",
+            Some("lobby@conference.example.org"),
+            &rooms,
+            false,
+        );
+        assert!(matches!(
+            action,
+            Some(Action::Send(ClientCommand::Kick { ref channel, ref nick, .. }))
+                if channel == "dev@conference.example.org" && nick == "bob"
         ));
     }
 }

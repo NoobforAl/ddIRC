@@ -9,33 +9,29 @@
 use std::process::ExitCode;
 
 use ddirc_core::api::events::IrcEvent;
-use ddirc_core::api::types::{AuthOutcome, ChatMessage, ConnectionStatus, ServerConfig, Target};
-use ddirc_core::conn::actor::{self, ClientCommand};
+use ddirc_core::api::types::{AuthOutcome, ChatMessage, ConnectionStatus, Target};
+use ddirc_core::conn::actor::ClientCommand;
 use ddirc_core::text::format::TextSpan;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use super::commands::{command_for, Action, HELP};
+use super::commands::{command_for, command_for_with, Action, HELP};
+use crate::cli::Connection;
 
-pub async fn run(config: ServerConfig) -> ExitCode {
-    if let Err(error) = config.validate() {
+pub async fn run(connection: Connection) -> ExitCode {
+    if let Err(error) = connection.validate() {
         eprintln!("error: {error}");
         return ExitCode::FAILURE;
     }
 
-    println!(
-        "connecting to {}:{} as {} (TLS{})",
-        config.host,
-        config.port,
-        config.nickname,
-        match &config.proxy {
-            Some(proxy) => format!(", via SOCKS5 {}:{}", proxy.host, proxy.port),
-            None => String::new(),
-        }
-    );
+    println!("{}", connection.describe());
 
     // Track a default target so plain lines can be sent without a command.
-    let mut current = config.channels.first().cloned();
-    let (handle, mut events) = actor::spawn(config);
+    let mut current = connection.first_channel();
+    let xmpp = connection.is_xmpp();
+    // The rooms joined, for an XMPP account: there a room is an address like a
+    // person's, so what has been joined is the only thing that tells them apart.
+    let mut rooms: Vec<String> = Vec::new();
+    let (handle, mut events) = connection.spawn();
     let mut stdin = BufReader::new(tokio::io::stdin()).lines();
 
     loop {
@@ -48,6 +44,9 @@ pub async fn run(config: ServerConfig) -> ExitCode {
                 // Adopt the first channel we actually join as the default.
                 if let IrcEvent::Joined { channel, is_self: true, .. } = &event {
                     current.get_or_insert_with(|| channel.clone());
+                    if !rooms.contains(channel) {
+                        rooms.push(channel.clone());
+                    }
                 }
                 render(&event);
             }
@@ -65,7 +64,16 @@ pub async fn run(config: ServerConfig) -> ExitCode {
                     }
                 };
 
-                match command_for(&line, current.as_deref()) {
+                let action = if xmpp {
+                    let is_room = |name: &str| {
+                        rooms.iter().any(|r| r.eq_ignore_ascii_case(name))
+                            || (name.contains('@') && !name.contains('/'))
+                    };
+                    command_for_with(&line, current.as_deref(), &is_room, false)
+                } else {
+                    command_for(&line, current.as_deref())
+                };
+                match action {
                     Some(Action::Send(command)) => {
                         if let ClientCommand::Join { channel, .. } = &command {
                             current = Some(channel.clone());
