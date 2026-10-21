@@ -451,7 +451,8 @@ class McpService extends ChangeNotifier {
           },
           'serverInfo': {'name': 'ddIRC', 'version': appVersion},
           'instructions':
-              'ddIRC is an IRC client. Use list_networks, then '
+              'ddIRC is a chat client for IRC networks and XMPP accounts. Use '
+              'list_networks, then '
               'list_conversations, then read_messages to catch up. '
               'send_message posts to a conversation that is already open, and '
               'waits for the user to approve it in the app.',
@@ -484,8 +485,9 @@ class McpService extends ChangeNotifier {
       'name': 'list_networks',
       'title': 'List networks',
       'description':
-          'The IRC networks ddIRC is connected to right now, with your nick '
-          'and the connection state on each.',
+          'The IRC networks and XMPP accounts ddIRC is connected to right now, '
+          'with your nick (or account address) and the connection state on '
+          'each.',
       'inputSchema': {'type': 'object', 'properties': <String, Object?>{}},
       'annotations': {'readOnlyHint': true},
     },

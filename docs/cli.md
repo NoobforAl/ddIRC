@@ -44,6 +44,26 @@ visible to other processes and land in shell history:
 `DDIRC_SASL_PASSWORD`, `DDIRC_NICKSERV_PASSWORD`, `DDIRC_SERVER_PASSWORD`,
 `DDIRC_PROXY_PASSWORD`.
 
+### An XMPP account
+
+```
+DDIRC_XMPP_PASSWORD=... ddirc-cli client --xmpp name@example.org
+                 [--channel room@conference.example.org ...]
+                 [--server HOST] [--port PORT] [--ca-file PATH]
+                 [--proxy HOST:PORT] [--no-tui]
+```
+
+`--xmpp` takes the place of `--nick`, which is IRC's and is refused beside it, as
+is `--sasl-account`. `--server` and `--port` are overrides here, for a host that
+runs its server somewhere other than the address's own domain; without them the
+server is worked out from the address and the port is 5223. `--channel` names a
+room.
+
+In the full-screen client, rooms and people are told apart by what has been
+opened, since both are addresses: `/join room@conference.example.org` does not
+add a `#`, and `/topic` and `/kick` act on a room but not on a conversation with
+a person.
+
 The text box at the bottom is a single soft bar rather than an outlined box:
 the conversation it will send to on the left (`#rust ›`), a muted placeholder
 while it is empty, and a `↵ send` hint on the right once there is something to

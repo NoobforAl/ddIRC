@@ -63,6 +63,7 @@ somebody wanted to share two.
 | `altNicks` | list of strings | no | `[]` | Tried in order if the nickname is taken. Empty means the app falls back to `<nickname>_`. |
 | `channels` | list of strings | no | `[]` | Joined on connect. **Must be quoted** — see [`#` is a YAML comment](#-is-a-yaml-comment). |
 | `saslAccount` | string | no | none | Account name. Pair it with `saslPassword`. |
+| `protocol` | string | no | `irc` | `xmpp` for an XMPP account; anything else is IRC. See [XMPP accounts](#xmpp-accounts). |
 | `password` | string | no | none | **Import only.** Sent as the server's `PASS`. Alias of `serverPassword`. |
 | `serverPassword` | string | no | none | **Import only.** The explicit spelling; wins if both are given. |
 | `saslPassword` | string | no | none | **Import only.** The password for `saslAccount`. |
@@ -115,6 +116,37 @@ networks:
 ```
 
 ---
+
+## XMPP accounts
+
+A network with `protocol: xmpp` is an account rather than a server, and reads
+its fields differently:
+
+```yaml
+ddirc: 1
+networks:
+  - protocol: xmpp
+    nickname: 'alice@example.org'
+    channels: ['lobby@conference.example.org']
+    password: 'hunter2'
+```
+
+- `nickname` is the **account address**.
+- `channels` are **rooms**, written as addresses.
+- `host` and `port` are optional, and mean "the server is not at the address's
+  own domain" and "not port 5223". Leave them out and the server is worked out
+  from the address.
+- `password` is the **account's password**, not a server `PASS`: an account has
+  no such thing, and it is stored where an IRC network's SASL password is.
+  Like every password here it is import-only and is never written back out.
+- `saslAccount`, `altNicks`, `nickservPassword` and `serverPassword` mean
+  nothing for an account and are ignored.
+
+An older ddIRC that does not know `protocol` cannot use such a network, and does
+not try. A file the app exported carries an empty `host`, which that version
+refuses at connect time ("server host must not be empty"); a hand-written one
+with no `host` at all is dropped as incomplete. Either way nothing is connected
+to by mistake.
 
 ## The QR code
 

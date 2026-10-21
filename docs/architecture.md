@@ -87,6 +87,23 @@ flowchart LR
 | `text/format.rs` | Parses mIRC formatting into styled spans and strips control codes, and writes them back out so the store can round-trip a line. |
 | `conn/probe.rs` | One connection made to be reported on and thrown away — what *Test connection* runs. |
 | `store/` | The message history database. Closed unless the user turned it on. |
+| `xmpp/` | The XMPP core, beside `conn/` and built the same way. It reports through the same `IrcEvent` and takes the same `ClientCommand`, so everything above it is shared. |
+| `xmpp/session.rs` | What XMPP *means*, as a pure state machine: stanzas in, events and stanzas out. No socket, no clock. Rooms, occupants, carbons, the archive catch-up, and the rule that nothing is answered that was not asked. |
+| `xmpp/actor.rs` | The task that owns the stream. Holds the login and the reconnect policy, which are ours rather than the library's (see below). |
+| `xmpp/connector.rs` | Direct TLS, through SOCKS5 when there is a proxy, with the proxy given the name unresolved. |
+| `xmpp/{config,auth,diagnose,probe,state}.rs` | Validation; which login mechanisms are acceptable; failures turned into sentences and a retry decision; *Test connection*; the rooms a session holds. |
+
+The XMPP side exists to prove the core is not IRC-shaped by accident: the
+second protocol was added without changing the event type, the command type,
+the connection handle or the bridge's connection table. What it needed was a
+way to be *chosen* (`connect_xmpp`, beside `connect`) and a few places in the
+app that read a name or a message's text and had assumed IRC; the tests for
+those say what they were.
+
+It does not use `tokio-xmpp`'s own client. That one retries every failure
+forever, a wrong password included, and only logs why; and it was found against
+a real server to loop without delay when a resume fails. Both are described in
+[SECURITY.md](../SECURITY.md#xmpp). What it keeps is the stream itself.
 
 `ddirc-server` is a separate crate rather than a module here, because it is the
 other half of the protocol and wants dependencies the client half does not —

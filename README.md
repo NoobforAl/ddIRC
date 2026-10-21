@@ -3,7 +3,8 @@
 [![Lint](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml)
 [![Test](https://github.com/NoobforAl/ddIRC/actions/workflows/test.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/test.yml)
 
-A minimal, modern IRC client. Android-first, built on a reusable native core.
+A minimal, modern chat client for IRC and XMPP. Android-first, built on a
+reusable native core.
 
 > [!WARNING]
 > **This is beta software.** It connects and it works, but it has not been
@@ -21,6 +22,9 @@ anything that matters.
 
 ## What it does
 
+- **IRC and XMPP.** An XMPP account is a saved profile like a network is: an
+  address and a password, rooms to join, the same proxy and the same privacy
+  rules. See [XMPP accounts](docs/features.md#xmpp-accounts).
 - **Several networks at once**, each a saved profile with its own channels,
   nickname and optional SASL account. A curated list of live networks to start
   from, and `.irc` files or QR codes to move a network between devices.

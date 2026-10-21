@@ -51,6 +51,46 @@ it, rather than leaving a wrong port to surface as a session stuck at
 "Reconnecting". It joins nothing, sends no NickServ password, and quits as soon
 as the server says hello.
 
+### XMPP accounts
+
+An XMPP account is added the same way a network is, by choosing **XMPP** at the
+top of *Add a network*. It asks for an address (`name@example.org`) and a
+password, and for rooms to join; the server is worked out from the address, and
+only needs naming under *Advanced* when a host runs theirs somewhere else. There
+is no nickname to choose and no identity to hide behind, because an account is
+an address somebody gave you rather than a handle you mint.
+
+Everything after that is the app you already have. A room is a channel and
+fills the channel list; the people in it are the member list, with `~` for an
+owner, `&` for an admin, `@` for a moderator and `+` for a member, so a room
+reads the way an IRC channel does. A chat with a person is a conversation, and
+a first message from a stranger is a request to accept or decline, as on IRC.
+Topics, `/me`, `/kick`, `/nick` (which changes the name you use in rooms),
+replies and the message menu all work. A message you send to a person on
+another of your devices appears here too (carbons).
+
+**Differences worth knowing:**
+
+- **Rooms are addresses.** `/join lobby@conference.example.org`; a `#channel` is
+  IRC and is refused with a sentence that says what a room looks like.
+  Rooms and people are both addresses, so the app tells them apart by what you
+  have joined.
+- **Markdown goes as typed.** On IRC it is turned into formatting codes first;
+  an XMPP message cannot carry those, and other XMPP clients read Markdown.
+- **Missed messages come from the server.** After a reconnect, a room you had
+  been reading is asked for what was said while you were away, up to 500
+  messages, shown with the time they were said and never raising a
+  notification. A conversation with a person relies on the server delivering
+  what it held for you when you log in.
+- **Not yet:** browsing a server's rooms, `/whois`, file transfer, and
+  end-to-end encryption (OMEMO). Each says so rather than doing nothing.
+- **Stream management is off**, so a dropped connection is a new login and a
+  rejoin rather than a seamless resume. The reason, and what restoring it
+  would take, is in [SECURITY.md](../SECURITY.md#xmpp).
+
+**Test connection** logs in and stops: it binds no resource and sends no
+presence, so trying an account does not announce it to anyone.
+
 ### Talking to one person
 
 Tap a nick in the member list, or type `/query <nick>`, and a conversation with

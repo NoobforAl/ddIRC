@@ -8,6 +8,9 @@ state.
 Everything it generates lands in `dev/ergo/`, which is gitignored and entirely
 disposable.
 
+> This page is the IRC server. The XMPP one is `make dev-xmpp`, described in
+> [docs/testing.md](../docs/testing.md#a-local-xmpp-server-to-test-against).
+
 ## Start and stop
 
 ```bash

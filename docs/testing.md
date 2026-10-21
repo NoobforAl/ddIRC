@@ -71,6 +71,30 @@ randomly generated oper password, so it is per-machine and never committed. The
 listener is bound to loopback: this server has a self-signed certificate and
 open registration, and must not be reachable from anywhere else.
 
+## A local XMPP server to test against
+
+```bash
+make dev-xmpp               # ejabberd on 127.0.0.1:5223; alice and bob, password hunter2
+make test-integration-xmpp  # the end-to-end suite, against it
+make dev-xmpp-stop
+```
+
+The same idea as the IRC server above, for the other protocol. It is ejabberd in
+its stock configuration with only a self-signed certificate mounted, listening
+for TLS from the first byte on loopback and nowhere else. The tests trust
+`dev/xmpp/certs/localhost.crt` directly, so certificate verification runs
+exactly as in release.
+
+These tests exist because the scripted-server test (`xmpp_round_trip`, which
+needs nothing installed and runs in `make test`) can only prove the code does
+what its author expected. They talk to software that does not share those
+assumptions, and the two worst bugs this protocol had - a login storm after a
+server restart, and a private reply that would have been heard by a whole room -
+were found by them and by review respectively, not by anything scripted.
+`recovers_and_rejoins_when_the_server_restarts` restarts the container under a
+live session, so it needs the `docker` command as well as the server;
+`DDIRC_XMPP_LOG=1` prints the library's own log for it.
+
 ## Continuous integration
 
 `.github/workflows/lint.yml` runs `make lint` — `flutter analyze`, `cargo fmt
