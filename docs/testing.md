@@ -138,10 +138,45 @@ two seconds, a tenth of it addressed to you:
 DDIRC_FLOOD_ROOM=room@conference.localhost DDIRC_FLOOD_SECS=90   cargo test -p ddirc-core --test dev_xmpp --release -- --ignored --nocapture flood
 ```
 
-and `adb shell dumpsys meminfo <package>` before and after, `top` beside it, and
-`adb shell dumpsys gfxinfo <package>` for dropped frames. Use a **release**
-build: a debug one carries its own interpreter and asserts, and its numbers are
-about itself.
+and `adb shell dumpsys meminfo <package>` before and after. Use a **release** or
+**profile** build: a debug one carries its own interpreter and asserts, and its
+numbers are about itself.
+
+What to read, and what to watch for:
+
+- **Memory** is `Native Heap` (the Rust core), `Java Heap`, and `TOTAL PSS`.
+  Over a 150-second flood of 30 messages a second the native heap stayed within
+  a megabyte of where it started and the total grew by a few, which is a
+  bounded conversation rather than a leak.
+- **CPU** is per thread, not `top`'s per-process figure, which samples too
+  coarsely to tell a busy second from an idle one. Read `/proc/<pid>/task/*/stat`
+  (user + system ticks, 1/100 s) before and after a window and subtract; the
+  thread names say who spent it: the app's main thread is Flutter's UI thread
+  (the two are merged on Android), `1.raster` is drawing, `ddirc-net` is the
+  Rust core. Idle is zero on all of them. In the flood, with the phone's
+  screen on the room, the core costs about a tenth of a core and the UI most of
+  a half to two thirds; backgrounded, the UI drops to about a twentieth. So
+  nearly all of the cost of a busy room is **drawing new messages**: each new
+  bubble is laid out, and its text is measured a second time to place the time
+  beside it.
+- Compare like with like. The same flood costs about 10 s of UI thread per
+  35 s while the scrollback fills and about 23 s once it is full and trimming
+  a line per arrival, so two measurements taken at different points of a run
+  disagree by more than most changes are worth. Start from a fresh launch.
+- **Dart CPU** can be sampled from the VM service of a **profile** build
+  (`flutter build apk --profile`; the port is in `adb logcat` as "The Dart VM
+  service is listening on"; `adb forward` it, then `setFlag('profiler', 'true')`
+  and `getCpuSamples` from the `vm_service` package). Turn the profiler off
+  again afterwards: left on, it roughly doubles what you then measure.
+- `gfxinfo` reports nothing for a Flutter app (it draws on its own surface).
+
+A development server's certificate is trusted only by builds with Rust's debug
+assertions on, by design. To measure a release or profile build against one,
+build it with `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS=true`, and get the
+certificate into the app's files directory by installing a debug build of the
+same package first (`run-as` needs a debuggable app; see `dev/README.md`): the
+file survives an update. Marking the release APK debuggable instead makes the
+Flutter engine abort at start.
 
 The layout tests (`test/xmpp_layout_test.dart`) render the XMPP dialogs on a
 320x568 phone, at text twice the normal size, right to left, with names ninety
