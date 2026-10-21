@@ -246,6 +246,15 @@ pub struct ConnectionHandle {
 }
 
 impl ConnectionHandle {
+    /// A handle over a command channel.
+    ///
+    /// For [`crate::xmpp::actor`], which takes the same commands and is driven
+    /// through the same handle, so the layer above need not know which protocol
+    /// it is talking to.
+    pub(crate) fn new(commands: mpsc::Sender<ClientCommand>) -> Self {
+        Self { commands }
+    }
+
     /// Queue a command, waiting if the queue is momentarily full.
     ///
     /// Fails only once the actor has stopped.
