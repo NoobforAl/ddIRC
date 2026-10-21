@@ -239,6 +239,7 @@ class Workspace extends ChangeNotifier {
         profileId: profile.id,
         config: config,
         settings: settings,
+        isXmpp: profile.isXmpp,
         onLine: onLine == null
             ? null
             : (conversation, line) => onLine!(session, conversation, line),
