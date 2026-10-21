@@ -253,3 +253,29 @@ this leaves beta.
 security reports at GitHub's private advisory form instead of a public issue.
 Blank issues stay enabled: CONTRIBUTING asks for a change to arrive explained,
 not for a form to be filled in.
+
+### A release build is not a debug build
+
+Every change builds a debug APK; only a tag builds the release one - and they are
+different programs, because release runs R8, which shrinks and renames the code.
+That is invisible until something reaches code by name. The preferences plugin is
+called from Dart through JNI, by method name and descriptor, and in v0.12.0 to
+v0.12.3 R8 renamed `kotlin.coroutines.Continuation` inside that descriptor. The
+lookup failed with `NoSuchMethodError`, and the app - which treats a preference it
+cannot read as "not set", on purpose, so that a damaged file never keeps it from
+starting - came up with no saved networks, every setting at its default, the app
+lock and the built-in Tor off, and the first-run screen showing. Nothing was lost;
+it was unreadable. Nothing failed at build time, in a test, or in a debug or
+profile run (neither uses R8), which is why it took a release build on a phone to
+see it.
+
+Two things stand guard now. `android/app/proguard-rules.pro` keeps those names,
+and `android/check-release-apk.sh` inspects the finished APK and fails if the
+plugin's `getAll` no longer has the signature the Dart side asks for; the release
+workflow runs it before anything is published, and so does
+`make build-android-release`. A plugin that is bound through JNI needs its
+classes in the rules and, if it can break the same way, a check beside this one.
+
+When testing on a phone, test the release build, and read `adb logcat -s flutter`
+for lines that say "unavailable": the app reports what it could not read there
+and carries on, so the screen alone can look merely empty.

@@ -114,7 +114,7 @@ help:
 	@echo "  make build-release     release build for Windows"
 	@echo "  make installer         wrap it in a per-user .exe (needs Inno Setup)"
 	@echo "  make build-android     debug APK  (needs the Android SDK and NDK)"
-	@echo "  make build-android-release   release APK — the thing that ships"
+	@echo "  make build-android-release   release APK — the thing that ships, checked for what R8 renamed"
 	@echo "  make keystore          make a release signing key, under android/"
 	@echo "  make keystore-secrets  push that key to GitHub Actions secrets"
 	@echo "  make installer-linux   per-user Linux installer (.sh), on a Linux host"
@@ -234,6 +234,7 @@ build-android:
 
 build-android-release:
 	$(FLUTTER) build apk --release
+	bash android/check-release-apk.sh build/app/outputs/flutter-apk/app-release.apk
 
 ## A release keystore + android/key.properties, both under android/ rather
 ## than in a machine-wide keystore directory — deliberately, so this key can
