@@ -105,6 +105,9 @@ pub struct DirectTlsConnector {
     /// The same trust, for a server speaking HTTP: the difference is the
     /// protocol the handshake offers.
     http_tls: Arc<ClientConfig>,
+    /// The account's domain, which an upload address inside it is trusted to
+    /// name a machine of the user's own (a development server on loopback).
+    domain: String,
 }
 
 impl fmt::Debug for DirectTlsConnector {
@@ -146,6 +149,10 @@ impl DirectTlsConnector {
             proxy: config.proxy.clone(),
             tls: Arc::new(tls),
             http_tls: Arc::new(http_tls),
+            domain: config
+                .bare_jid()
+                .map(|j| j.domain().as_str().to_ascii_lowercase())
+                .unwrap_or_default(),
         })
     }
 
@@ -194,13 +201,48 @@ impl DirectTlsConnector {
     /// authorities: through the proxy when there is one, the name handed over
     /// unresolved. Never a second way out of the application that a proxy
     /// setting does not cover.
+    ///
+    /// With no proxy this process resolves the name, and refuses to connect if
+    /// *any* address it resolves to is private, loopback or otherwise not on the
+    /// public internet, then dials one of the addresses it checked rather than
+    /// resolving a second time (which a hostile resolver could answer
+    /// differently). Inside the account's own domain that is waived, as it is
+    /// for the slot's address, so a server on loopback still works for
+    /// development. Through a proxy the name goes to it unresolved, as ever:
+    /// the proxy resolves, and what it resolves is its business.
     pub async fn https_stream(&self, host: &str, port: u16) -> io::Result<TlsStream<TcpStream>> {
-        timeout(
-            CONNECT_TIMEOUT,
-            self.tls_stream(host, port, host, &self.http_tls),
-        )
+        timeout(CONNECT_TIMEOUT, async {
+            if self.proxy.is_some() || self.inside_account_domain(host) {
+                return self.tls_stream(host, port, host, &self.http_tls).await;
+            }
+            let addresses: Vec<std::net::SocketAddr> =
+                tokio::net::lookup_host((host, port)).await?.collect();
+            if addresses.is_empty()
+                || addresses
+                    .iter()
+                    .any(|a| !crate::xmpp::upload::is_public_address(a.ip()))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "the upload address does not resolve to a public address",
+                ));
+            }
+            let name = ServerName::try_from(host.to_owned())
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+            let tcp = TcpStream::connect(addresses[0]).await?;
+            TlsConnector::from(self.http_tls.clone())
+                .connect(name, tcp)
+                .await
+        })
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "connecting timed out"))?
+    }
+
+    /// Whether `host` is the account's domain or one of its subdomains.
+    fn inside_account_domain(&self, host: &str) -> bool {
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        !self.domain.is_empty()
+            && (host == self.domain || host.ends_with(&format!(".{}", self.domain)))
     }
 
     async fn establish(&self, domain: &str) -> io::Result<(TlsStream<TcpStream>, ChannelBinding)> {
@@ -441,6 +483,28 @@ mod tests {
 
     /// A SOCKS5 proxy that records what it was asked to reach, then tunnels to
     /// `onward` whatever that was.
+    #[tokio::test]
+    async fn an_upload_is_not_sent_to_a_name_that_resolves_to_this_machine() {
+        // `localhost` is not inside example.org and resolves to loopback: a
+        // server that names it in a slot would be aiming the upload inward.
+        let pki = pki();
+        let connector =
+            DirectTlsConnector::with_roots(&account("127.0.0.1", 1, None), trusting(&pki)).unwrap();
+        let error = connector.https_stream("localhost", 1).await.unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn the_accounts_own_domain_and_its_subdomains_are_inside_it() {
+        let pki = pki();
+        let connector =
+            DirectTlsConnector::with_roots(&account("127.0.0.1", 1, None), trusting(&pki)).unwrap();
+        assert!(connector.inside_account_domain("example.org"));
+        assert!(connector.inside_account_domain("Up.Example.Org."));
+        assert!(!connector.inside_account_domain("evilexample.org"));
+        assert!(!connector.inside_account_domain("example.org.evil.net"));
+    }
+
     async fn socks_once(
         listener: TcpListener,
         onward: std::net::SocketAddr,

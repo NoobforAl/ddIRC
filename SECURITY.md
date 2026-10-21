@@ -347,9 +347,14 @@ Everything above applies to XMPP accounts too, through a core of its own
   could inject a second header are refused. The upload goes by the connection's
   own road, so a proxy covers it and the hostname is handed over unresolved. A
   redirect is not followed. Nothing is ever fetched from a link someone sends.
-  A hostile server can still point at a *name* that resolves somewhere private;
-  with a proxy the proxy resolves it, and without one a valid certificate for
-  that name is still required.
+  Spellings of `localhost` (a trailing dot, capitals, `*.localhost`) are
+  refused like it. With no proxy the name is also resolved here before anything
+  is sent, and if *any* address it resolves to is private, loopback, link-local,
+  shared (CGNAT) or otherwise not public, the upload is refused; the connection
+  then goes to an address that was checked, not to a second resolution. Inside
+  the account's own domain that is waived (a development server on loopback).
+  With a proxy the name goes to the proxy unresolved, and what the proxy
+  resolves is the proxy's business.
 - **Catching up is believed only from where the request went.** An archive
   result must carry the query id we sent and come from the room's own address -
   or, for one-to-one chats, from our own account - and anything else is
