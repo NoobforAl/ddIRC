@@ -1791,6 +1791,44 @@ fn a_nickname_taken_over_cannot_change_the_last_holders_private_messages() {
         .any(|e| matches!(e, IrcEvent::MessageEdited { .. })));
 }
 
+#[test]
+fn a_long_nickname_taken_over_cannot_change_the_last_holders_private_messages() {
+    // Longer than a nickname is kept when shown, so the name a chat is filed
+    // under and the name the room's presence is known by are not the same
+    // string unless both are taken as they arrived.
+    let nick = "n".repeat(90);
+    let mut s = in_room();
+    feed(
+        &mut s,
+        &muc_presence(&nick, None, &item("none", "participant"), &[]),
+    );
+    let from = format!("{MUC}/{nick}");
+    feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='chat' from='{from}' id='pm1'><body>psst</body></message>"
+        ),
+    );
+    feed(
+        &mut s,
+        &muc_presence(&nick, Some("unavailable"), &item("none", "none"), &[]),
+    );
+    feed(
+        &mut s,
+        &muc_presence(&nick, None, &item("none", "participant"), &[]),
+    );
+    let fx = feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='chat' from='{from}' id='pm2'><body>rewritten</body>             <replace xmlns='urn:xmpp:message-correct:0' id='pm1'/></message>"
+        ),
+    );
+    assert!(!fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::MessageEdited { .. })));
+}
+
 // Keep `stanza` used: the helpers above build XML and parse it through feed.
 #[test]
 fn the_test_helpers_agree_about_stanzas() {
