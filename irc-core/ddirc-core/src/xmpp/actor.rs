@@ -77,6 +77,24 @@ const TIMEOUTS: Timeouts = Timeouts {
 /// How often dropped incoming messages are reported, at most.
 const DROP_REPORT_EVERY: Duration = Duration::from_secs(5);
 
+/// How long a connection must stay up before it counts as having worked.
+///
+/// The backoff is forgiven only after this, never merely because a login
+/// succeeded. A server that accepts a login and drops the connection at once -
+/// because it is overloaded, because it is shutting down, because it has just
+/// banned the address - succeeds every time by that measure, and a backoff
+/// reset on each success would never grow: the client would log in as fast as
+/// the network allowed, which against a server in trouble is an attack. This is
+/// the IRC side's rule ("backoff resets only on successful registration, not
+/// when the socket opens") taken one step further, because here even a
+/// completed login proves nothing about the connection that follows it.
+const STABLE_AFTER: Duration = Duration::from_secs(30);
+
+/// Whether the connection made at `last_up` was gone too soon to forgive.
+fn flapped(last_up: Option<Instant>, now: Instant) -> bool {
+    last_up.is_some_and(|up| now.saturating_duration_since(up) < STABLE_AFTER)
+}
+
 /// Start a connection actor, returning a handle and the event stream.
 ///
 /// The same shape as [`crate::conn::actor::spawn`]. The actor runs until the
@@ -110,6 +128,9 @@ struct Shared {
     /// account that worked this morning is worth resuming this afternoon.
     ever_online: AtomicBool,
     backoff: Mutex<Backoff>,
+    /// When the last connection was handed to the stream, or `None` before the
+    /// first. See [`STABLE_AFTER`].
+    last_up: Mutex<Option<Instant>>,
     /// Wakes a login task that is waiting out its backoff.
     retry_now: Notify,
 }
@@ -167,7 +188,29 @@ pub(crate) async fn login(
         })
         .await
         .map_err(Error::Io)?;
-    let (features, stream) = stream.recv_features().await.map_err(Error::from)?;
+    let (mut features, stream) = stream.recv_features().await.map_err(Error::from)?;
+
+    // The library is told the server does not offer stream management, so it
+    // never enables it. This is a workaround, and it is here because of a bug
+    // found against a real server.
+    //
+    // Stream management (XEP-0198) lets a dropped connection be resumed with
+    // nothing lost. When resuming fails - the server restarted, or the phone was
+    // off for longer than the server keeps a session - the server answers
+    // `<failed/>`, and XEP-0198 makes its `h` attribute optional. `xmpp-parsers`
+    // 0.23.0 declares it required (`#[xml(attribute)]` on an `Option<u32>`,
+    // where `max` two fields up has `attribute(default)`), so ejabberd's answer
+    // does not parse, the stream is torn down, and the library tries to resume
+    // again with the same stale state, for ever. Without stream management there
+    // is no state to resume. What is lost is lossless resumption; what covers
+    // for it is fetching missed messages from the server's archive.
+    //
+    // Delete this line when `xmpp-parsers` accepts a `<failed/>` with no `h`.
+    // The test `recovers_and_rejoins_when_the_server_restarts` in
+    // `tests/dev_xmpp.rs` is the reproduction, and checking whether it still
+    // passes with this removed is how to know.
+    features.stream_management = None;
+
     Ok((features, stream.box_stream()))
 }
 
@@ -187,6 +230,37 @@ async fn keep_trying(
     reports: mpsc::UnboundedSender<Report>,
     mut slot: oneshot::Sender<Connection>,
 ) {
+    // A replacement for a connection that was only just made is not the first
+    // try of anything: whatever dropped it is likely to drop this one, so wait
+    // as a failure would, and grow the wait if it keeps happening. A connection
+    // that stayed up long enough earns the slate being wiped.
+    let previous = shared.last_up.lock().ok().and_then(|up| *up);
+    if previous.is_some() {
+        if flapped(previous, Instant::now()) {
+            let delay = shared
+                .backoff
+                .lock()
+                .map(|mut backoff| backoff.next_delay())
+                .unwrap_or(Duration::from_secs(30));
+            let _ = reports.send(Report::Failed {
+                diagnosis: Diagnosis {
+                    message: "The server dropped the connection straight after \
+                              accepting it."
+                        .to_owned(),
+                    fatal: false,
+                },
+                retry: Some((delay, 1)),
+            });
+            tokio::select! {
+                () = sleep(delay) => {}
+                () = shared.retry_now.notified() => {}
+                () = slot.closed() => return,
+            }
+        } else if let Ok(mut backoff) = shared.backoff.lock() {
+            backoff.reset();
+        }
+    }
+
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -198,6 +272,9 @@ async fn keep_trying(
         };
         let error = match outcome {
             Ok((features, stream)) => {
+                if let Ok(mut up) = shared.last_up.lock() {
+                    *up = Some(Instant::now());
+                }
                 // If nobody is listening any more there is nothing to do with it.
                 let _ = slot.send(Connection {
                     stream,
@@ -361,6 +438,7 @@ impl Actor {
         let shared = Arc::new(Shared {
             ever_online: AtomicBool::new(false),
             backoff: Mutex::new(Backoff::default()),
+            last_up: Mutex::new(None),
             retry_now: Notify::new(),
         });
         let (report_tx, mut reports) = mpsc::unbounded_channel();
@@ -419,10 +497,10 @@ impl Actor {
                     };
                     match event {
                         Event::Stream(StreamEvent::Reset { bound_jid, .. }) => {
+                            // Not the place to forgive the backoff: a login that
+                            // succeeds says nothing about whether the connection
+                            // lasts. See `STABLE_AFTER`.
                             shared.ever_online.store(true, Ordering::Relaxed);
-                            if let Ok(mut backoff) = shared.backoff.lock() {
-                                backoff.reset();
-                            }
                             self.status(ConnectionStatus::Connected, None);
                             if let Ok(bound) = bound_jid.try_into_full() {
                                 let fx = session.on_online(&bound);
@@ -548,5 +626,40 @@ impl Actor {
                 count: total,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_connection_has_nothing_to_have_flapped() {
+        assert!(!flapped(None, Instant::now()));
+    }
+
+    #[test]
+    fn a_connection_that_was_just_made_and_is_already_gone_flapped() {
+        let up = Instant::now();
+        assert!(flapped(Some(up), up));
+        assert!(flapped(Some(up), up + Duration::from_secs(5)));
+        assert!(flapped(
+            Some(up),
+            up + STABLE_AFTER - Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
+    fn one_that_lasted_is_forgiven() {
+        let up = Instant::now();
+        assert!(!flapped(Some(up), up + STABLE_AFTER));
+        assert!(!flapped(Some(up), up + Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn a_clock_that_runs_backwards_does_not_panic() {
+        let up = Instant::now() + Duration::from_secs(10);
+        // `now` earlier than `up`: saturates to no time at all, which is flapping.
+        assert!(flapped(Some(up), Instant::now()));
     }
 }

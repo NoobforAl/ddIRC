@@ -606,6 +606,37 @@ fn a_subject_is_the_topic() {
 }
 
 #[test]
+fn an_empty_subject_on_joining_is_not_a_topic_being_cleared() {
+    let mut s = in_room();
+    // What a room with no topic sends to everyone who joins.
+    let fx = feed(
+        &mut s,
+        &format!(
+            "<message xmlns='jabber:client' type='groupchat' from='{MUC}'><subject/></message>"
+        ),
+    );
+    assert!(fx.events.is_empty(), "{:?}", fx.events);
+}
+
+#[test]
+fn the_same_topic_again_is_not_news_but_a_new_or_cleared_one_is() {
+    let mut s = in_room();
+    let subject = |text: &str| {
+        format!("<message xmlns='jabber:client' type='groupchat' from='{MUC}/bob'><subject>{text}</subject></message>")
+    };
+    assert_eq!(feed(&mut s, &subject("release day")).events.len(), 1);
+    assert!(feed(&mut s, &subject("release day")).events.is_empty());
+    assert_eq!(feed(&mut s, &subject("party")).events.len(), 1);
+
+    // Cleared: we held one, so this is a change.
+    let fx = feed(&mut s, &subject(""));
+    assert!(matches!(
+        &fx.events[0],
+        IrcEvent::TopicChanged { topic, .. } if topic.is_empty()
+    ));
+}
+
+#[test]
 fn a_message_from_the_room_itself_is_a_notice() {
     let mut s = in_room();
     let fx = feed(

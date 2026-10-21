@@ -77,7 +77,7 @@ COMPOSE ?= docker compose -f dev/compose.yaml
 # profiles so they do not start with the server. Stopping has to name them
 # explicitly, because `docker compose down` on its own walks straight past a
 # profiled container and leaves it running.
-PROFILES ?= --profile proxy --profile tor
+PROFILES ?= --profile proxy --profile tor --profile xmpp
 
 # The terminal client and server (`ddirc-cli`), run against each other. No
 # Docker: the server is the Rust one, so this is the quickest way to see either
@@ -96,6 +96,7 @@ CLI       := $(CARGO) run $(MANIFEST) -p ddirc-cli --
         build-android build-android-release keystore keystore-secrets \
         build-linux build-macos build-ios codegen icons clean \
         dev-server dev-server-stop dev-server-clean dev-server-logs \
+        dev-xmpp dev-xmpp-stop test-integration-xmpp \
         dev-proxy dev-tor dev-tor-logs dev-onion-cert \
         dev-tui dev-tui-server dev-tui-clean
 
@@ -129,6 +130,9 @@ help:
 	@echo "  make dev-proxy         SOCKS5 on 127.0.0.1:1080, in front of it"
 	@echo "  make dev-tor           real Tor on 127.0.0.1:9050, for public nets"
 	@echo "  make dev-tor-logs      follow Tor's bootstrap"
+	@echo "  make dev-xmpp          local XMPP server on 127.0.0.1:5223 (TLS)"
+	@echo "                         alice@localhost and bob@localhost, password hunter2"
+	@echo "  make dev-xmpp-stop     stop it"
 	@echo "  make dev-onion-cert    reissue the server cert for its onion name"
 	@echo ""
 	@echo "  make dev-tui-server    the terminal server manager, on 127.0.0.1:6698"
@@ -176,6 +180,10 @@ test:
 # machines with no Docker.
 test-integration:
 	$(CARGO) test $(MANIFEST) -p ddirc-core --test dev_server -- --ignored
+
+## The same for XMPP; `make dev-xmpp` must be up.
+test-integration-xmpp:
+	$(CARGO) test $(MANIFEST) -p ddirc-core --test dev_xmpp -- --ignored --test-threads=1
 
 ## The app, in a developer's hands: built if needed, launched, and left
 ## attached to this terminal.
@@ -429,6 +437,37 @@ dev-onion-cert:
 
 dev-server-logs:
 	$(COMPOSE) logs -f
+
+## A local XMPP server, with two accounts to talk between.
+#
+# Separate from `dev-server`, which is IRC, and with its own profile so the two
+# can run side by side. The certificate is made first because the container
+# reads it at start.
+#
+# `ejabberdctl` by its bare name: it is on the container's PATH, and a path
+# starting with a slash is rewritten by Git for Windows into one on the host,
+# which fails with "no such file" - and, being ignored below, fails silently.
+# Registering a name that already exists is the one failure that is expected
+# (the accounts outlive a restart), so that exact reply is let through and
+# anything else stops the target.
+dev-xmpp:
+	@sh dev/xmpp/gen-certs.sh
+	$(COMPOSE) --profile xmpp up -d --wait xmppd
+	@for user in alice bob; do \
+	  out=$$($(COMPOSE) exec -T xmppd ejabberdctl \
+	    register $$user localhost hunter2 2>&1) \
+	  || case "$$out" in *"already registered"*) ;; \
+	       *) echo "could not register $$user: $$out"; exit 1;; esac; \
+	done
+	@echo ""
+	@echo "XMPP on 127.0.0.1:5223 (TLS from the first byte), domain: localhost"
+	@echo "  alice@localhost / bob@localhost   password: hunter2"
+	@echo "  rooms: anything@conference.localhost"
+	@echo "  certificate to trust: dev/xmpp/certs/localhost.crt"
+
+dev-xmpp-stop:
+	$(COMPOSE) --profile xmpp stop xmppd
+	$(COMPOSE) --profile xmpp rm -f xmppd
 
 ## The terminal server manager: who is connected, channels, kick and ban.
 #
