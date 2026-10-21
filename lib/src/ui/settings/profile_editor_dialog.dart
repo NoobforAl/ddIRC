@@ -22,6 +22,7 @@ import 'network_picker_dialog.dart';
 import 'persona_picker.dart';
 import 'proxy_form.dart';
 import 'settings_chrome.dart';
+import 'xmpp_provider_dialog.dart';
 
 /// What the editor closed with, so the caller knows whether to connect.
 enum ProfileEditorResult { saved, savedAndConnect, deleted }
@@ -990,6 +991,33 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
         'was joined, no presence was sent, and nothing was saved.';
   }
 
+  /// Pick a server to make an account on, and fill in where it lives.
+  ///
+  /// The address gets the server's domain, keeping whatever name was already
+  /// typed before the `@`, and the server and port are filled in only where
+  /// the provider says they are not the usual ones. The account itself is made
+  /// on the provider's website; nothing is created here.
+  Future<void> _chooseProvider() async {
+    final provider = await XmppProviderDialog.show(context);
+    if (provider == null || !mounted) return;
+    setState(() {
+      final address = _fields[_Input.nick]!;
+      final typed = address.text.trim();
+      final at = typed.indexOf('@');
+      final local = at == -1 ? typed : typed.substring(0, at);
+      address.text = '$local@${provider.domain}';
+      // With nothing typed yet, the cursor goes where the name will be.
+      if (local.isEmpty) {
+        address.selection = const TextSelection.collapsed(offset: 0);
+      }
+      _fields[_Input.host]!.text = provider.host ?? '';
+      _fields[_Input.port]!.text = (provider.port ?? Profile.xmppDefaultPort)
+          .toString();
+      // Where the server and port live, so a change there is not hidden.
+      if (provider.needsServer) _showAdvanced = true;
+    });
+  }
+
   /// The form for an XMPP account.
   ///
   /// Shorter than the IRC one, because an account is an address and a password:
@@ -1016,6 +1044,20 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
               'after the @, so there is usually nothing more to fill in. '
               'Leave off anything after a "/" — the server chooses that part.',
         ),
+        // An account is made on a server's own website, which a person with no
+        // account yet has no way to know to look for. Only when adding: editing
+        // one that exists is not the moment to be sent shopping.
+        if (_isNew)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+              child: SettingsTertiaryButton(
+                label: 'No account yet? Choose a server',
+                onPressed: _chooseProvider,
+              ),
+            ),
+          ),
         _field(
           _Input.password,
           'Password',

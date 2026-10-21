@@ -62,6 +62,19 @@ class NotificationContent {
 /// "interrupt me for every message". Badges and interruptions are different
 /// loudnesses of the same question, and only `none` and `mentions` carry over,
 /// as ways of asking for less.
+/// How old a line may be and still be news.
+///
+/// XMPP catches a connection up from the server's archive after a gap, and what
+/// comes back carries the time it was said. A message from yesterday is
+/// something to read, not something to interrupt anyone for - the same rule a
+/// room's replayed mention already follows - and a notification for each of
+/// five hundred would be the opposite of help.
+const staleAfter = Duration(minutes: 2);
+
+/// Whether a line said at [at] is history as of [now], and so not worth a
+/// notification however it was addressed.
+bool isHistory(DateTime at, DateTime now) => now.difference(at) > staleAfter;
+
 bool shouldNotify({
   required bool enabled,
   required bool appInForeground,

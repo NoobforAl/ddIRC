@@ -33,6 +33,7 @@ class ChannelList extends StatefulWidget {
     required this.networkName,
     required this.onSelect,
     required this.onBrowse,
+    this.onContacts,
     this.onDisconnect,
     this.onChannelSettings,
   });
@@ -48,6 +49,12 @@ class ChannelList extends StatefulWidget {
   /// The answer to the empty state's old advice, which was to type a command
   /// naming a channel — useful only to somebody who already knew one.
   final VoidCallback onBrowse;
+
+  /// Opens the contact list. Offered only on an account that has one - XMPP -
+  /// and in the place browsing takes on a network that has a directory of
+  /// rooms to browse, because it is the same kind of question: who and what is
+  /// here to talk to.
+  final VoidCallback? onContacts;
 
   final VoidCallback? onDisconnect;
 
@@ -240,9 +247,18 @@ class _ChannelListState extends State<ChannelList> {
                         // people who reach this screen are exactly the ones
                         // who do not yet know a channel to type.
                         TextButton.icon(
-                          onPressed: widget.onBrowse,
-                          icon: const Icon(Icons.travel_explore, size: 16),
-                          label: const Text('Browse channels'),
+                          onPressed: widget.onContacts ?? widget.onBrowse,
+                          icon: Icon(
+                            widget.onContacts != null
+                                ? Icons.people_alt_outlined
+                                : Icons.travel_explore,
+                            size: 16,
+                          ),
+                          label: Text(
+                            widget.onContacts != null
+                                ? 'Open contacts'
+                                : 'Browse channels',
+                          ),
                           style: TextButton.styleFrom(
                             foregroundColor: t.accent,
                             textStyle: const TextStyle(fontSize: 12.5),
@@ -313,13 +329,32 @@ class _ChannelListState extends State<ChannelList> {
           ),
           // Beside the network's name, because browsing is a question about
           // the network rather than about anything already in the list below.
-          IconButton(
-            onPressed: widget.onBrowse,
-            icon: const Icon(Icons.travel_explore, size: 18),
-            color: t.muted,
-            visualDensity: VisualDensity.compact,
-            tooltip: 'Browse this network’s channels',
-          ),
+          //
+          // On an XMPP account the contact list is what there is to open: a
+          // server has no directory of rooms the way an IRC network has, and a
+          // button that could only answer "not available" is worse than none.
+          if (widget.onContacts != null)
+            IconButton(
+              onPressed: widget.onContacts,
+              icon: Badge(
+                isLabelVisible: session.subscriptionRequests.isNotEmpty,
+                label: Text('${session.subscriptionRequests.length}'),
+                child: const Icon(Icons.people_alt_outlined, size: 18),
+              ),
+              color: t.muted,
+              visualDensity: VisualDensity.compact,
+              tooltip: session.subscriptionRequests.isEmpty
+                  ? 'Contacts'
+                  : 'Contacts — ${session.subscriptionRequests.length} waiting',
+            )
+          else
+            IconButton(
+              onPressed: widget.onBrowse,
+              icon: const Icon(Icons.travel_explore, size: 18),
+              color: t.muted,
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Browse this network’s channels',
+            ),
         ],
       ),
     );

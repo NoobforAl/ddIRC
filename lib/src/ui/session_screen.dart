@@ -21,6 +21,7 @@ import '../theme.dart';
 import 'channel_list.dart';
 import 'connection_log_dialog.dart';
 import 'composer.dart';
+import 'contacts_dialog.dart';
 import 'conversation_tabs.dart';
 import 'layout.dart';
 import 'member_list.dart';
@@ -600,6 +601,72 @@ class _SessionScreenState extends State<SessionScreen> {
     if (!context.layout.membersPinned) Navigator.of(context).maybePop();
   }
 
+  /// Open the contact list of an XMPP account.
+  ///
+  /// Closes the channel drawer on the way for the reason browsing does, and a
+  /// conversation chosen from the list is opened directly: the dialog has
+  /// already closed itself, and there is no member drawer to close behind it.
+  void _openContacts() {
+    if (!context.layout.channelsPinned) Navigator.of(context).maybePop();
+    ContactsDialog.show(context, session, onOpenChat: session.openDirect);
+  }
+
+  /// Change the text of one of the user's own messages.
+  Future<void> _editMessage(ChatLine line) async {
+    final conversation = session.active;
+    final message = line.message;
+    if (conversation == null || message == null) return;
+    final text = await _EditMessageDialog.ask(
+      context,
+      message.spans.map((s) => s.text).join(),
+    );
+    if (text == null || !mounted) return;
+    final error = await session.editMessage(conversation, line, text);
+    if (!mounted) return;
+    session.raiseNotice(error == null ? null : noticeForFailure(error));
+  }
+
+  /// Take back one of the user's own messages, after saying what that means.
+  Future<void> _deleteMessage(ChatLine line) async {
+    final conversation = session.active;
+    if (conversation == null || line.message == null) return;
+    final agreed = await showSoftDialog<bool>(
+      context: context,
+      builder: (context) {
+        final t = context.tokens;
+        return AlertDialog(
+          backgroundColor: t.surface,
+          title: Text('Delete this message?', style: TextStyle(color: t.text)),
+          content: Text(
+            'It is taken back for everyone in ${conversation.name}. Their apps '
+            'are asked to remove it, and most will; one that does not support '
+            'it, or already saved a copy, may keep it.',
+            style: TextStyle(color: t.muted, fontSize: 13, height: 1.45),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              style: TextButton.styleFrom(foregroundColor: t.muted),
+              child: const Text('Keep it'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: t.bad,
+                foregroundColor: t.onAccent,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    if (agreed != true || !mounted) return;
+    final error = await session.retractMessage(conversation, line);
+    if (!mounted) return;
+    session.raiseNotice(error == null ? null : noticeForFailure(error));
+  }
+
   /// Open the server's directory of channels.
   ///
   /// Closes the channel drawer on the way, on a narrow screen: the dialog
@@ -659,6 +726,20 @@ class _SessionScreenState extends State<SessionScreen> {
       );
       return;
     }
+    // Said before the sheet rather than after it: a file the server will not
+    // take is not worth asking anybody to confirm.
+    final limit = session.isXmpp ? session.uploadLimit : null;
+    if (limit != null && BigInt.from(prepared.size) > limit) {
+      session.raiseNotice(
+        Notice.error(
+          'That file is too large for this server',
+          detail:
+              'It takes up to ${FileTransfer.describeSize(limit)}; this is '
+              '${FileTransfer.describeSize(BigInt.from(prepared.size))}.',
+        ),
+      );
+      return;
+    }
 
     final agreed = await SendFileSheet.ask(
       context,
@@ -666,6 +747,9 @@ class _SessionScreenState extends State<SessionScreen> {
       target: conversation.name,
       cleaned: prepared.cleaned,
       sizeBytes: prepared.size,
+      uploadedTo: session.isXmpp
+          ? (session.network ?? session.config.host)
+          : null,
     );
     if (!agreed || !mounted) return;
 
@@ -752,6 +836,7 @@ class _SessionScreenState extends State<SessionScreen> {
           ProfileScope.of(context).byId(session.profileId)?.name ?? 'ddIRC',
       onSelect: _select,
       onBrowse: _browseChannels,
+      onContacts: session.isXmpp ? _openContacts : null,
       onDisconnect: _disconnect,
       onChannelSettings: _openChannelSettings,
     );
@@ -942,6 +1027,7 @@ class _SessionScreenState extends State<SessionScreen> {
                       // nothing to pop would leave the app.
                       onBrowse: () =>
                           ChannelBrowserDialog.show(context, session),
+                      onContacts: session.isXmpp ? _openContacts : null,
                     )
                   : MessageView(
                       // Rebuild the scroll state when switching conversations.
@@ -954,6 +1040,13 @@ class _SessionScreenState extends State<SessionScreen> {
                       highlight: _searching ? _searchField.text : null,
                       onPersonTap: _showPerson,
                       onReply: active.pending ? null : _replyTo,
+                      // Only where a message can be taken back at all.
+                      onEdit: session.isXmpp && !active.pending
+                          ? _editMessage
+                          : null,
+                      onDelete: session.isXmpp && !active.pending
+                          ? _deleteMessage
+                          : null,
                       onQuote: active.pending ? null : _quote,
                       onMention: active.pending ? null : _mention,
                       onLoadOlder: () => session.loadOlder(active),
@@ -1017,7 +1110,14 @@ class _SessionScreenState extends State<SessionScreen> {
       onSubmit: _submit,
       // Only where there is somewhere to send it, and only when the setting is
       // on.
-      onAttach: active != null && SettingsScope.of(context).fileTransfers
+      //
+      // On XMPP, whether the server takes files at all; on IRC, the switch for
+      // DCC. They are different features and answer to different things.
+      onAttach:
+          active != null &&
+              (session.isXmpp
+                  ? session.canUpload
+                  : SettingsScope.of(context).fileTransfers)
           ? _attachFile
           : null,
     );
@@ -1030,9 +1130,13 @@ class _SessionScreenState extends State<SessionScreen> {
 /// `/join` is typed into it, so the two routes are both named here: the button
 /// for people who do not know a channel to type, the command for those who do.
 class _NoChannel extends StatelessWidget {
-  const _NoChannel({super.key, required this.onBrowse});
+  const _NoChannel({super.key, required this.onBrowse, this.onContacts});
 
   final VoidCallback onBrowse;
+
+  /// On an account with a contact list, what to open instead of a directory
+  /// of channels it does not have.
+  final VoidCallback? onContacts;
 
   @override
   Widget build(BuildContext context) {
@@ -1044,15 +1148,22 @@ class _NoChannel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'No channel open',
+              onContacts != null ? 'No conversation open' : 'No channel open',
               textAlign: TextAlign.center,
               style: TextStyle(color: t.muted, fontSize: 14, height: 1.6),
             ),
             const SizedBox(height: 10),
             FilledButton.tonalIcon(
-              onPressed: onBrowse,
-              icon: const Icon(Icons.travel_explore, size: 17),
-              label: const Text('Browse channels'),
+              onPressed: onContacts ?? onBrowse,
+              icon: Icon(
+                onContacts != null
+                    ? Icons.people_alt_outlined
+                    : Icons.travel_explore,
+                size: 17,
+              ),
+              label: Text(
+                onContacts != null ? 'Open contacts' : 'Browse channels',
+              ),
               style: FilledButton.styleFrom(
                 backgroundColor: t.surfaceHover,
                 foregroundColor: t.accent,
@@ -1061,7 +1172,9 @@ class _NoChannel extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'or type /join #channel below',
+              onContacts != null
+                  ? 'or type /join room@conference.example.org below'
+                  : 'or type /join #channel below',
               textAlign: TextAlign.center,
               style: TextStyle(color: t.muted, fontSize: 12.5, height: 1.5),
             ),
@@ -2217,6 +2330,75 @@ class _RetryNowState extends State<_RetryNow>
           ],
         ),
       ),
+    );
+  }
+}
+
+/// A box to change the text of one of your own messages in.
+class _EditMessageDialog extends StatefulWidget {
+  const _EditMessageDialog({required this.text});
+
+  final String text;
+
+  /// The new text, or null if the user backed out or changed nothing.
+  static Future<String?> ask(BuildContext context, String text) {
+    return showSoftDialog<String>(
+      context: context,
+      builder: (_) => _EditMessageDialog(text: text),
+    );
+  }
+
+  @override
+  State<_EditMessageDialog> createState() => _EditMessageDialogState();
+}
+
+class _EditMessageDialogState extends State<_EditMessageDialog> {
+  late final _controller = TextEditingController(text: widget.text);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _controller.text.trim();
+    // Nothing to send if nothing changed, and an empty message is deleting by
+    // another name, which has its own button and its own question.
+    Navigator.of(context)
+        .pop(text.isEmpty || text == widget.text.trim() ? null : text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return AlertDialog(
+      backgroundColor: t.surface,
+      title: Text('Edit message', style: TextStyle(color: t.text)),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        minLines: 1,
+        maxLines: 6,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _save(),
+        style: TextStyle(color: t.text, fontSize: 14),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          style: TextButton.styleFrom(foregroundColor: t.muted),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          style: FilledButton.styleFrom(
+            backgroundColor: t.accent,
+            foregroundColor: t.onAccent,
+          ),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

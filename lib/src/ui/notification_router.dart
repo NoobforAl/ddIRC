@@ -89,6 +89,11 @@ class NotificationRouter {
     final message = line.message;
     if (message == null) return;
 
+    // Said a while ago and only now arriving: caught up from an archive. Only
+    // XMPP does that; on IRC a line's time is when it arrived, or a server's
+    // own stamp that this app has always treated as live.
+    if (session.isXmpp && isHistory(line.at, DateTime.now())) return;
+
     if (!shouldNotify(
       enabled: settings.notifications,
       appInForeground: presence.inForeground,

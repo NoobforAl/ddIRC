@@ -23,7 +23,14 @@ class SendFileSheet extends StatelessWidget {
     required this.target,
     required this.cleaned,
     required this.sizeBytes,
+    this.uploadedTo,
   });
+
+  /// The server a file is uploaded to, when it is sent that way (XMPP) rather
+  /// than offered to a person's machine (IRC's DCC). Changes what the sheet
+  /// warns about, because the two disclose different things: DCC reveals an
+  /// address, an upload hands the file to a server.
+  final String? uploadedTo;
 
   final String filename;
 
@@ -41,6 +48,7 @@ class SendFileSheet extends StatelessWidget {
     required String target,
     required CleanedFile cleaned,
     required int sizeBytes,
+    String? uploadedTo,
   }) async {
     final agreed = await showSoftDialog<bool>(
       context: context,
@@ -49,6 +57,7 @@ class SendFileSheet extends StatelessWidget {
         target: target,
         cleaned: cleaned,
         sizeBytes: sizeBytes,
+        uploadedTo: uploadedTo,
       ),
     );
     return agreed ?? false;
@@ -62,6 +71,7 @@ class SendFileSheet extends StatelessWidget {
         target.startsWith('&') ||
         target.startsWith('+') ||
         target.startsWith('!');
+    final server = uploadedTo;
 
     return AlertDialog(
       backgroundColor: t.surface,
@@ -90,11 +100,16 @@ class SendFileSheet extends StatelessWidget {
           ),
           const SizedBox(height: 10),
 
-          // The property of DCC that never goes away.
+          // The property of DCC that never goes away - and for an upload, its
+          // own: the server keeps the file, and anyone with the link has it.
           _Note(
-            icon: Icons.podcasts,
+            icon: server != null ? Icons.cloud_upload_outlined : Icons.podcasts,
             colour: t.warn,
-            text: toChannel
+            text: server != null
+                ? 'This file is uploaded to $server, which keeps it and sends '
+                      '$target a link. Anyone who gets the link can download '
+                      'it, and it is not encrypted end to end.'
+                : toChannel
                 ? 'This offer carries your address, and everyone in $target '
                       'will see it. Anyone there can connect to this machine '
                       'to collect the file.'
