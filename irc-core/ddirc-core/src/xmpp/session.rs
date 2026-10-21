@@ -32,6 +32,7 @@ use tokio_xmpp::minidom::Element;
 use tokio_xmpp::parsers::carbons;
 use tokio_xmpp::parsers::delay::Delay;
 use tokio_xmpp::parsers::iq::Iq;
+use tokio_xmpp::parsers::mam;
 use tokio_xmpp::parsers::message::{Id, Lang, Message, MessageType};
 use tokio_xmpp::parsers::message_correct::Replace;
 use tokio_xmpp::parsers::muc::muc::History;
@@ -39,6 +40,7 @@ use tokio_xmpp::parsers::muc::user::{Affiliation, MucUser, Role, Status};
 use tokio_xmpp::parsers::muc::Muc;
 use tokio_xmpp::parsers::presence::{Presence, Show, Type as PresenceType};
 use tokio_xmpp::parsers::roster::Roster;
+use tokio_xmpp::parsers::rsm::SetQuery;
 use tokio_xmpp::parsers::stanza_error::{DefinedCondition, ErrorType, StanzaError};
 use tokio_xmpp::parsers::stanza_id::StanzaId;
 use tokio_xmpp::Stanza;
@@ -57,6 +59,17 @@ use crate::xmpp::state::{clean_name, mentions, Occupant, Room};
 /// sending. On receiving, the excess is dropped: nobody reads past this, and a
 /// body of megabytes is a way to make a client slow.
 const MAX_BODY_CHARS: usize = 4_000;
+
+/// How many messages one request to a room's archive asks for.
+const CATCH_UP_PAGE: usize = 100;
+
+/// How many a catch-up fetches in all before it stops, however much is left.
+///
+/// A phone off for a week would otherwise pull a week of a busy room on
+/// reconnecting, which is slow, which costs data, and which nobody reads. What
+/// was missed beyond this is still in the archive; it is the *replay* that is
+/// bounded.
+const CATCH_UP_TOTAL: usize = 500;
 
 /// How many times a room refusing our nick as taken is answered by trying
 /// another before giving up.
@@ -93,7 +106,16 @@ impl Effects {
 enum Pending {
     Roster,
     Carbons,
-    Kick { room: BareJid },
+    Kick {
+        room: BareJid,
+    },
+    /// A request to a room's archive for what was said while we were away. The
+    /// id of this request is also the `queryid` its results carry, which is how
+    /// a result is known to answer it.
+    CatchUp {
+        room: BareJid,
+        fetched: usize,
+    },
 }
 
 /// One account's conversation with its server.
@@ -473,11 +495,22 @@ impl Session {
                 };
                 fx.send(reply);
             }
-            Iq::Result { from, id, .. } => {
+            Iq::Result {
+                from, id, payload, ..
+            } => {
                 if !self.came_from_expected(&id, from.as_ref()) {
                     return;
                 }
-                self.pending.remove(&id);
+                if let Some(Pending::CatchUp { room, fetched }) = self.pending.remove(&id) {
+                    // The end of a page. More, if the archive says there is and
+                    // we have not already had our fill.
+                    let fin = payload.and_then(|p| mam::Fin::try_from(p).ok());
+                    if let Some(fin) = fin.filter(|f| !f.complete && fetched < CATCH_UP_TOTAL) {
+                        if let Some(last) = fin.set.last {
+                            self.send_catch_up(&room, last, fetched, fx);
+                        }
+                    }
+                }
             }
             Iq::Error {
                 from, id, error, ..
@@ -490,9 +523,12 @@ impl Session {
                         "Could not remove them from {room}: {}.",
                         describe(&error.defined_condition)
                     )),
-                    // Carbons and the roster are conveniences. A server that
-                    // lacks them is still a server worth using.
-                    Some(Pending::Carbons) | Some(Pending::Roster) | None => {}
+                    // Carbons, the roster and an archive are conveniences. A
+                    // server that lacks them is still a server worth using.
+                    Some(Pending::Carbons)
+                    | Some(Pending::Roster)
+                    | Some(Pending::CatchUp { .. })
+                    | None => {}
                 }
             }
         }
@@ -517,7 +553,7 @@ impl Session {
         };
         let from = from.to_bare();
         match pending {
-            Pending::Kick { room } => &from == room,
+            Pending::Kick { room } | Pending::CatchUp { room, .. } => &from == room,
             Pending::Roster | Pending::Carbons => {
                 from == self.account
                     || from.domain() == self.account.domain() && from.node().is_none()
@@ -666,6 +702,9 @@ impl Session {
             if is_self {
                 room.joined = true;
                 room.nick = nick.clone();
+                // A room we have shown messages from before, rejoined: whatever
+                // was said while we were gone is in its archive.
+                let resume_from = room.last_id.clone();
                 fx.event(IrcEvent::Joined {
                     channel: channel.clone(),
                     nick,
@@ -675,6 +714,9 @@ impl Session {
                     channel,
                     members: room.members(),
                 });
+                if let Some(after) = resume_from {
+                    self.send_catch_up(jid, after, 0, fx);
+                }
             }
             return;
         }
@@ -746,6 +788,10 @@ impl Session {
         let Some(from) = message.from.clone() else {
             return;
         };
+        if let Some(result) = message.extract_valid_payload::<mam::Result_>() {
+            self.on_archived(&from, result, fx);
+            return;
+        }
         match message.type_ {
             MessageType::Groupchat => self.on_groupchat(&from, message, fx),
             MessageType::Error => {
@@ -764,19 +810,43 @@ impl Session {
 
     fn on_groupchat(&mut self, from: &Jid, mut message: Message, fx: &mut Effects) {
         let room_jid = from.to_bare();
-        let Some(room) = self.rooms.get_mut(&room_jid) else {
+        let time = message_time(&mut message);
+        self.show_room_message(&room_jid, from, message, time, None, fx);
+    }
+
+    /// Show a message said in a room, live or replayed from its archive.
+    ///
+    /// `archived` is the archive's id for it when it was replayed. A replayed
+    /// message differs from a live one in three ways: it carries the time it
+    /// was said rather than the time it arrived, it never raises a mention (it
+    /// is old news, and a notification for each of five hundred would be the
+    /// opposite of help), and it does not touch the topic, which would be set
+    /// back to whatever it was then.
+    fn show_room_message(
+        &mut self,
+        room_jid: &BareJid,
+        from: &Jid,
+        mut message: Message,
+        time: Option<i64>,
+        archived: Option<String>,
+        fx: &mut Effects,
+    ) {
+        let replayed = archived.is_some();
+        let Some(room) = self.rooms.get_mut(room_jid) else {
             // From a room we are not in: not ours to show.
             return;
         };
         let channel = room.name();
         let sender = from.resource().map(|r| clean_name(r.as_str()));
-        let time = message_time(&mut message);
 
         let body = message
             .get_best_body_cloned(vec![""])
             .map(|(_, body)| clean_text(&body));
         let Some(body) = body.filter(|b| !b.trim().is_empty()) else {
-            // A subject with no body is the room's topic.
+            // A subject with no body is the room's topic - unless it is old.
+            if replayed {
+                return;
+            }
             if let Some((_, subject)) = message.get_best_subject_cloned(vec![""]) {
                 let topic = truncate(&clean_text(&subject).replace('\n', " "), limits::MAX_TOPIC);
                 // Nothing changed, nothing to say. A room with no topic still
@@ -802,12 +872,21 @@ impl Session {
 
         // The id the room itself assigned, the only one that means anything
         // later; anyone can put any id on a stanza they send.
-        let msgid = message
-            .extract_valid_payload::<StanzaId>()
-            .filter(|s| s.by.to_bare() == room_jid)
-            .map(|s| s.id)
-            .or_else(|| message.id.as_ref().map(|id| id.0.clone()))
-            .map(|id| truncate(&id, 200));
+        let room_id = archived.or_else(|| {
+            message
+                .extract_valid_payload::<StanzaId>()
+                .filter(|s| s.by.to_bare() == *room_jid)
+                .map(|s| truncate(&s.id, 200))
+        });
+        if let Some(id) = &room_id {
+            // Seen already - live, and again in the archive page - is shown
+            // once. And this is now the place to catch up from.
+            if !room.remember(id) {
+                return;
+            }
+            room.last_id = Some(id.clone());
+        }
+        let msgid = room_id.or_else(|| message.id.as_ref().map(|id| truncate(&id.0, 200)));
 
         let correction = message.extract_valid_payload::<Replace>().is_some();
         let (is_action, text) = split_action(&body);
@@ -834,7 +913,7 @@ impl Session {
             // From the room itself rather than from anyone in it.
             None => (room_jid.to_string(), false, None, true),
         };
-        let is_mention = !is_self && mentions(&room.nick, &text);
+        let is_mention = !replayed && !is_self && mentions(&room.nick, &text);
 
         fx.event(IrcEvent::Message(Box::new(ChatMessage {
             target: Target::Channel(channel),
@@ -849,6 +928,64 @@ impl Session {
             server_time_ms: time,
             reply_to,
         })));
+    }
+
+    /// A message the archive sends in answer to a catch-up.
+    ///
+    /// Believed only if it answers a request we sent and comes from the place
+    /// we sent it. Anyone can address a message to us that claims to be an
+    /// archived one; without this, anyone could write into a room's history as
+    /// we show it.
+    fn on_archived(&mut self, from: &Jid, result: mam::Result_, fx: &mut Effects) {
+        let Some(query) = result.queryid.as_ref().map(|q| q.0.clone()) else {
+            return;
+        };
+        let room = match self.pending.get_mut(&query) {
+            Some(Pending::CatchUp { room, fetched }) if from.resource().is_none() => {
+                if from.to_bare() != *room {
+                    return;
+                }
+                *fetched += 1;
+                room.clone()
+            }
+            _ => return,
+        };
+        let time = result.forwarded.delay.as_ref().map(delay_millis);
+        let inner = result.forwarded.message;
+        let Some(said_by) = inner.from.clone() else {
+            return;
+        };
+        // Only what was said in the room: its own address is the only one an
+        // occupant's is a resource of.
+        if said_by.to_bare() != room || inner.type_ != MessageType::Groupchat {
+            return;
+        }
+        self.show_room_message(&room, &said_by, inner, time, Some(result.id), fx);
+    }
+
+    /// Ask a room's archive for what came after `after`.
+    fn send_catch_up(&mut self, room: &BareJid, after: String, fetched: usize, fx: &mut Effects) {
+        let id = self.next_id();
+        self.pending.insert(
+            id.clone(),
+            Pending::CatchUp {
+                room: room.clone(),
+                fetched,
+            },
+        );
+        let query = mam::Query {
+            queryid: Some(mam::QueryId(id.clone())),
+            node: None,
+            form: None,
+            set: Some(SetQuery {
+                max: Some(CATCH_UP_PAGE),
+                after: Some(after),
+                before: None,
+                index: None,
+            }),
+            flip_page: false,
+        };
+        fx.send(Iq::from_set(id, query).with_to(Jid::from(room.clone())));
     }
 
     fn on_chat(&mut self, from: &Jid, message: &mut Message, fx: &mut Effects) {
