@@ -91,13 +91,10 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master, 2026-09-12
+      # Rust only: this suite never touches Dart.
+      - uses: ./.github/actions/setup
         with:
-          toolchain: "1.99.1"
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          workspaces: core
+          flutter: "false"
 
       # Makes the certificate, starts ejabberd on loopback, waits for its
       # healthcheck, and registers alice and bob.
