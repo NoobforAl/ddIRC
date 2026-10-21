@@ -115,7 +115,7 @@ tokio-xmpp = { version = "6", default-features = false, features = ["aws_lc_rs"]
 # read with `rustls-pki-types`, which is already here, and not with
 # `rustls-pemfile`, which is unmaintained (RUSTSEC-2025-0134, see SECURITY.md)
 # and which the `irc` crate is the only remaining reason to have.
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 rustls-native-certs = "0.8"
 # `ChannelBinding` is in the signature of `ServerConnector`, and `tokio-xmpp`
 # does not re-export it. Already resolved by `tokio-xmpp` itself.
