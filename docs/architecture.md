@@ -89,9 +89,19 @@ flowchart LR
 | `store/` | The message history database. Closed unless the user turned it on. |
 | `xmpp/` | The XMPP core, beside `conn/` and built the same way. It reports through the same `IrcEvent` and takes the same `ClientCommand`, so everything above it is shared. |
 | `xmpp/session.rs` | What XMPP *means*, as a pure state machine: stanzas in, events and stanzas out. No socket, no clock. Rooms, occupants, carbons, the archive catch-up, and the rule that nothing is answered that was not asked. |
+| `xmpp/session/features.rs` | What a person does on top of chatting: the contact list, how they are, correcting and taking back a message, sharing a file. The same pure state machine, in its own file. |
+| `xmpp/contacts.rs`, `xmpp/edits.rs` | The roster and presence, with everything bounded and presence believed only of people on the list; the index that lets a correction or a retraction find the message it names - and, above all, who wrote it. |
+| `xmpp/upload.rs` | HTTP Upload: validating the slot a server hands out (https, no credentials, a host and not an address) and a small `PUT` over a stream the connector opened. |
 | `xmpp/actor.rs` | The task that owns the stream. Holds the login and the reconnect policy, which are ours rather than the library's (see below). |
 | `xmpp/connector.rs` | Direct TLS, through SOCKS5 when there is a proxy, with the proxy given the name unresolved. |
 | `xmpp/{config,auth,diagnose,probe,state}.rs` | Validation; which login mechanisms are acceptable; failures turned into sentences and a retry decision; *Test connection*; the rooms a session holds. |
+
+Contacts, corrections, uploads and one-to-one catch-up added six events
+(`Contact`, `ContactRemoved`, `SubscriptionRequest`, `MessageEdited`,
+`MessageRetracted`, `UploadAvailable`) and six commands to the shared types, and
+IRC answers each command with an error that says it is not available. The uploaded
+bytes travel on a connection of their own, to a web server, so the actor runs
+each upload as a task beside the stream and reports back to it.
 
 The XMPP side exists to prove the core is not IRC-shaped by accident: the
 second protocol was added without changing the event type, the command type,
@@ -302,6 +312,15 @@ proxy; and the crate's `dns`, `direct-tls` and `starttls` features would have
 added a DNS resolver that looks names up locally instead of handing them to the
 proxy. The connector is ours (`ddirc-core/src/xmpp/connector.rs`), and it uses
 the same single `aws-lc-rs` provider as everything else.
+
+File upload added two direct dependencies, `url` and `httparse`, to `ddirc-core`.
+Both were already compiled into the app - Tor's directory client depends on
+them - so `Cargo.lock` gained two edges and the binary no code. An HTTP client
+(`reqwest`) was the alternative and was refused for the reason above: it would
+dial by itself and bypass the proxy. What a `PUT` to an address a server chose
+needs is small - parse and refuse the address, write a head, stream the body,
+read a status line - and each of those steps is a place a server could do harm,
+so each is ours and is tested.
 
 The terminal interfaces added **four direct dependencies**, all in `ddirc-cli` and
 none of them in the app (`ddirc-bridge` does not depend on it): `ratatui` to

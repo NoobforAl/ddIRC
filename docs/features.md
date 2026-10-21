@@ -78,12 +78,46 @@ another of your devices appears here too (carbons).
 - **Markdown goes as typed.** On IRC it is turned into formatting codes first;
   an XMPP message cannot carry those, and other XMPP clients read Markdown.
 - **Missed messages come from the server.** After a reconnect, a room you had
-  been reading is asked for what was said while you were away, up to 500
-  messages, shown with the time they were said and never raising a
-  notification. A conversation with a person relies on the server delivering
-  what it held for you when you log in.
-- **Not yet:** browsing a server's rooms, `/whois`, file transfer, and
-  end-to-end encryption (OMEMO). Each says so rather than doing nothing.
+  been reading is asked for what was said while you were away, and so are your
+  conversations with people (from the last message you saw, or - the first time
+  a run of the app connects, with history on - from when you last saw anything).
+  Up to 500 messages each, shown with the time they were said, never raising a
+  notification, and never twice: what was already on screen is dropped.
+- **Contacts.** The people button at the top of the channel list (where an IRC
+  network has *Browse channels*) opens your contact list: who is online and what
+  they say about themselves, anyone waiting for an answer, and a box to add
+  someone by address. Adding a contact asks them whether you may see when they
+  are online; nothing shows until they say yes. A request to see *you* waits in
+  the same place for **Accept** or **Decline** and is never answered on your
+  behalf, because saying yes tells someone you exist and are reading. Remove a
+  contact from the menu on their row.
+- **Your status.** *Available*, *away*, *busy* or *away for a while*, with a line
+  of text if you want one, set from the top of the contact list. It is sent to
+  everyone who can see you and to each room you are in, exactly as written, and
+  sent again when you reconnect. Left alone, the app sends a plain *here* and
+  nothing else.
+- **Editing and deleting.** In the menu of a message you sent (right-click, or
+  hold). An edited message keeps its place and says *edited* on its stamp; a
+  deleted one is taken back from everyone and removed from the scrollback and
+  from your saved history, and a line says that it happened. Only a message sent
+  in this connection can be changed - the app remembers the last two thousand -
+  and one that other people's apps do not understand is shown to them as a new
+  message or a note that something was retracted.
+- **Files.** The attach button appears once the server has said it takes
+  uploads. The file goes to the server over HTTPS - through the proxy when there
+  is one, with the same metadata stripping as on IRC - and the other person gets
+  a link. The sheet says what that means: the server keeps the file, anyone
+  with the link can fetch it, and it is not encrypted end to end. A file larger
+  than the server allows is refused before you are asked to confirm. A link
+  someone sends you is shown as a link; nothing is fetched until you open it.
+- **Choosing a server.** *No account yet? Choose a server*, under the address
+  when adding an account, lists a few servers that take sign-ups. Each was
+  dialled, its certificate verified and its sign-up page fetched before it was
+  listed - see `lib/src/model/xmpp_providers.dart` for what was checked and what
+  was left out. The app opens the sign-up page and fills in where the account
+  will live; it makes no account itself.
+- **Not yet:** browsing a server's rooms, `/whois`, and end-to-end encryption
+  (OMEMO). Each says so rather than doing nothing.
 - **Stream management is off**, so a dropped connection is a new login and a
   rejoin rather than a seamless resume. The reason, and what restoring it
   would take, is in [SECURITY.md](../SECURITY.md#xmpp).

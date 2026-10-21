@@ -59,6 +59,14 @@ runs its server somewhere other than the address's own domain; without them the
 server is worked out from the address and the port is 5223. `--channel` names a
 room.
 
+An account also has commands an IRC network does not: `/accept <address>` and
+`/decline <address>` answer someone who asked to see when you are online (the
+request is printed when it arrives and is never answered for you),
+`/addcontact <address> [name]` and `/rmcontact <address>` change your contact
+list, `/away [text]`, `/dnd [text]` and `/back` say how you are, and `/file
+<path>` sends a file to the current conversation. On IRC the same commands
+answer that they are not available.
+
 In the full-screen client, rooms and people are told apart by what has been
 opened, since both are addresses: `/join room@conference.example.org` does not
 add a `#`, and `/topic` and `/kick` act on a room but not on a conversation with

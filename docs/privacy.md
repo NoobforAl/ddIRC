@@ -69,8 +69,27 @@ mirror IRC's:
 - **Never answered**: version, local time, last activity, the list of features,
   delivery or read receipts, typing notifications. A request for any of them
   gets `service-unavailable`. A ping is answered, because it reveals nothing.
-- **A request to see when you are online** is shown to you as a notice and is
-  not accepted for you.
+- **A request to see when you are online** is listed in your contacts, waiting,
+  and is not accepted for you. Accepting (or declining) is a presence stanza to
+  that person and nothing else. The core refuses to answer anyone who has not
+  asked.
+- **Your contact list and who is online** are what the server tells you; the app
+  asks for the list at login and shows presence only for people on it. A status
+  you set is the one thing sent about you that you wrote, and it goes to your
+  contacts and your rooms as typed.
+- **Files** are uploaded to your own server over HTTPS, by the same road as the
+  rest of the connection. The server sees the file (it keeps it), its name and
+  size, and who asked; the address it hands back is checked before anything is
+  sent to it and a server cannot make the app upload to a machine on your own
+  network. The app never fetches a link someone sends you. Images lose their
+  metadata first, as they do on IRC.
+- **Corrections and deletions** are messages like any other: the text of an edit
+  goes to the same people as the original did, and a deletion asks their apps to
+  remove it. Whether they do is up to their apps.
+- **Catching up** asks your own server's archive for what came after the last
+  thing this connection saw (or after a time the app remembers, with history
+  on). The server already holds those messages; nothing about them is sent
+  anywhere else.
 - **Through a proxy** the server's name is handed to the proxy unresolved, and
   nothing in this process looks it up. A proxy that is down is an error and
   never a direct connection.
