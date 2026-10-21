@@ -946,6 +946,44 @@ fn saying_something_to_a_person_is_echoed_because_they_will_not() {
 }
 
 #[test]
+fn a_private_reply_to_someone_in_a_room_is_not_said_to_the_room() {
+    let mut s = in_room();
+    let fx = s.on_command(ClientCommand::SendMessage {
+        target: format!("{MUC}/bob"),
+        text: "just between us".to_owned(),
+    });
+    let Stanza::Message(m) = &fx.send[0] else {
+        panic!("a message");
+    };
+    assert_eq!(
+        m.type_,
+        MessageType::Chat,
+        "a groupchat message here would be heard by everyone in the room"
+    );
+    assert_eq!(m.to.as_ref().unwrap().to_string(), format!("{MUC}/bob"));
+    // Shown as a conversation with that person, filed where theirs arrive.
+    let shown = messages(&fx)[0];
+    assert!(shown.is_self);
+    assert_eq!(shown.target, Target::Direct(format!("{MUC}/bob")));
+}
+
+#[test]
+fn nothing_can_be_said_to_a_room_not_yet_entered() {
+    let mut s = session();
+    s.on_online(&bound());
+    for target in [MUC.to_owned(), format!("{MUC}/bob")] {
+        let fx = s.on_command(ClientCommand::SendMessage {
+            target,
+            text: "hello?".to_owned(),
+        });
+        assert!(fx.send.is_empty());
+        assert!(
+            matches!(&fx.events[0], IrcEvent::Error { message, .. } if message.contains("not in"))
+        );
+    }
+}
+
+#[test]
 fn an_action_goes_out_as_me_and_is_shown_as_an_action() {
     let mut s = in_room();
     let fx = s.on_command(ClientCommand::SendAction {
