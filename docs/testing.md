@@ -95,6 +95,16 @@ were found by them and by review respectively, not by anything scripted.
 live session, so it needs the `docker` command as well as the server;
 `DDIRC_XMPP_LOG=1` prints the library's own log for it.
 
+The server also publishes `5443` on loopback, which is where the upload slot it
+hands out points; `a_file_is_uploaded_and_the_link_reaches_the_other_person`
+uploads 300 kB through it and fetches the link back to check the bytes are the
+ones that were sent. Contacts, corrections and chat catch-up have tests of the
+same kind. One of them is deliberately strict: it delivers a message to an
+earlier session, so ejabberd cannot hold it as an offline message, and then asks
+a fresh session for it by time - the only way to get it is the archive. These
+tests share two accounts, so they leave the contact list empty when they finish
+and clear it when they start.
+
 ## Continuous integration
 
 One workflow starts everything, and it decides the order:
@@ -143,7 +153,8 @@ on unchanged code the day a new lint ships.
 `test.yml` runs the suites. **hermetic** is `make test` - the Dart widget tests
 and the Rust unit and transcript tests, needing no network and no Docker.
 **integration** starts the dev server with `make dev-server` and runs the
-end-to-end suite against it.
+end-to-end suite against it. **integration-xmpp** does the same for XMPP,
+with `make dev-xmpp` and `make test-integration-xmpp`.
 
 The integration job starts the server through the Compose file rather than a
 `services:` block. The Compose file already describes the server, its

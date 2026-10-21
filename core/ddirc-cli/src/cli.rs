@@ -71,6 +71,12 @@ COMMANDS (once connected; F1 shows them in the full-screen interface):
     /topic <text>      /kick <nick> [reason]        /whois <nick>
     /list              /close                       /clear
     /quit [reason]     Anything else is sent to the current conversation
+
+XMPP accounts also have:
+    /accept <address>  /decline <address>           answer a request to see you
+    /addcontact <address> [name]   /rmcontact <address>
+    /away [text]       /dnd [text]       /back      how you are
+    /file <path>       send a file to this conversation
 ";
 
 pub const SERVER_USAGE: &str = "\

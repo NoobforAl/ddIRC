@@ -320,8 +320,40 @@ Everything above applies to XMPP accounts too, through a core of its own
   `service-unavailable`, because an IQ must be answered and that is the answer
   that says nothing. Only a ping is answered in kind. This is the CTCP decision
   again, and it holds in `session.rs`, where tests send each of those requests.
-- **A request to see us online is never accepted for us.** It is shown as a
-  notice from the sender, like a first message from a stranger.
+- **A request to see us online is never accepted for us.** It is reported, kept
+  in the contact list waiting for the user, and answered only by the user. The
+  command that answers it refuses anyone who has not asked, so it cannot be used
+  to tell a stranger we are here.
+- **Contacts are believed from the right party.** Presence is believed only from
+  people on the list (a stranger can send presence to anyone, and must not be
+  able to put themselves on it, with a name and a status they chose). A roster
+  push is believed only from our own server - no `from`, or our bare address,
+  and not one of our own other resources - and is answered. Every part of it is
+  bounded: the list, the waiting requests, the places one person is signed in
+  from, and a status text.
+- **A correction or a retraction is applied only for the author.** Anyone may
+  send a stanza that says "replace message X". The core keeps who wrote each
+  recent message, and a correction or retraction from anyone else is shown as
+  what it is - a message from them - or ignored. The id it names is matched in
+  the right space: a correction by the id the sender put on the original, a
+  retraction by the room's own id in a room. The app checks the author again
+  before it changes a line, and the store checks it a third time before it
+  changes or removes a saved one.
+- **Where an upload goes is the server's to say and ours to refuse.** The slot's
+  address must be `https`, carry no credentials, and name a host rather than an
+  address, so a server cannot aim an upload at a machine on the user's own
+  network (a single-label name is refused too, unless it is inside the account's
+  own domain, which a development server on `localhost` is). Header values that
+  could inject a second header are refused. The upload goes by the connection's
+  own road, so a proxy covers it and the hostname is handed over unresolved. A
+  redirect is not followed. Nothing is ever fetched from a link someone sends.
+  A hostile server can still point at a *name* that resolves somewhere private;
+  with a proxy the proxy resolves it, and without one a valid certificate for
+  that name is still required.
+- **Catching up is believed only from where the request went.** An archive
+  result must carry the query id we sent and come from the room's own address -
+  or, for one-to-one chats, from our own account - and anything else is
+  dropped. A replayed message already shown is not shown again.
 - **Only the right party may say a thing.** A carbon copy is believed only from
   our own account (anyone can otherwise forge one, putting words in our mouth or
   a stranger's message under a trusted name); a message ID only from the room
