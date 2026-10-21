@@ -55,6 +55,29 @@ outright rather than quietly undoing the proxy. See
 It does not cover what a server can infer — connection timing, idle patterns,
 and the IP address itself, which is what the proxy and Tor support exist for.
 
+## XMPP
+
+An XMPP account sends what a login needs and then very little, and the choices
+mirror IRC's:
+
+- **On login**: the stream header naming the account's domain and address, the
+  login (SCRAM when the server offers it, PLAIN over the TLS that has already
+  verified the server's certificate against that domain), a request to bind a
+  resource, and a request to enable carbons. Then a bare `<presence/>`: no
+  capabilities hash, no client name, no status text. The resource is chosen by
+  the server, so the client volunteers no name for itself.
+- **Never answered**: version, local time, last activity, the list of features,
+  delivery or read receipts, typing notifications. A request for any of them
+  gets `service-unavailable`. A ping is answered, because it reveals nothing.
+- **A request to see when you are online** is shown to you as a notice and is
+  not accepted for you.
+- **Through a proxy** the server's name is handed to the proxy unresolved, and
+  nothing in this process looks it up. A proxy that is down is an error and
+  never a direct connection.
+- **Joining a room** announces your nick and your presence to its members, as
+  joining a channel does, and asks the room for no history. History is fetched
+  only after a *re*connect, and only to fill the gap.
+
 ## Proxy
 
 SOCKS5, and nothing else. **A fresh install routes everything through the
