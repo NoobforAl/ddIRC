@@ -31,3 +31,36 @@ jobs:
       # truth for what "clean" means - its own comment says this is what CI
       # should run - so a local check and CI cannot drift apart.
       - run: make lint
+
+  # What `make lint` cannot see: the dependency tree, and the workflows
+  # themselves. Its own job so a Rust toolchain and a Flutter cache are not
+  # paid for by a check that reads one lockfile and some YAML.
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Advisories, yanked releases, licences and sources, against core/deny.toml.
+      # Every exception there carries its reason; a new one is a review comment,
+      # not a quiet edit. The advisory database is fetched live, so a crate that
+      # was fine yesterday can fail today without a line of ours changing - that
+      # is the check working, and the fix is usually `cargo update -p`.
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: core/Cargo.toml
+          command: check
+
+  # Workflow files are code that only runs in CI, which is the worst place to
+  # find that an expression is misspelled or a `needs` names a job that does not
+  # exist. actionlint checks both, and runs shellcheck over every `run:` block.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The project's own download script, at the same pinned commit as the
+      # version it fetches, rather than a floating image tag. shellcheck is
+      # already on the runner and actionlint finds it there.
+      - run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/914e7df21a07ef503a81201c76d2b11c789d3fca/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
