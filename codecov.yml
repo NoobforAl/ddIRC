@@ -1,0 +1,60 @@
+# What Codecov measures and when it objects.
+#
+# Two reports arrive for every commit - Dart from `flutter test --coverage`,
+# Rust from `cargo llvm-cov` (see .github/workflows/coverage.yml) - and each is
+# tagged with a flag so the dashboard can show them apart as well as together.
+
+codecov:
+  # Do not judge a commit whose own tests did not pass: a red build has no
+  # trustworthy coverage, and a status on top of the red is noise.
+  require_ci_to_pass: true
+
+coverage:
+  precision: 1
+  round: down
+  range: "60...90"
+  status:
+    # The whole project must not fall by more than a point from the commit
+    # before: a guard against a slow slide, loose enough that deleting a
+    # well-covered file does not fail an unrelated change.
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    # What this change itself adds. Informational for now: it comments on the
+    # pull request without turning it red, until there is a history that says
+    # what a fair bar is for this code.
+    patch:
+      default:
+        target: auto
+        informational: true
+
+# Machine output and things that are not the product. The generated bridge is
+# several thousand lines nobody wrote and nobody should be rewarded for
+# regenerating.
+ignore:
+  - "lib/src/rust/**"
+  - "core/ddirc-bridge/src/frb_generated.rs"
+  - "core/vendor/**"
+  - "rust_builder/**"
+  - "test/**"
+  - "tool/**"
+  - "**/tests/**"
+  - "**/benches/**"
+  - "android/**"
+  - "ios/**"
+  - "linux/**"
+  - "macos/**"
+  - "windows/**"
+
+flags:
+  dart:
+    paths:
+      - lib/
+  rust:
+    paths:
+      - core/
+
+comment:
+  layout: "condensed_header, diff, flags, files"
+  require_changes: true

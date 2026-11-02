@@ -2,6 +2,7 @@
 
 [![Lint](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/lint.yml)
 [![Test](https://github.com/NoobforAl/ddIRC/actions/workflows/test.yml/badge.svg)](https://github.com/NoobforAl/ddIRC/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/NoobforAl/ddIRC/graph/badge.svg)](https://codecov.io/gh/NoobforAl/ddIRC)
 
 A minimal, modern chat client for IRC and XMPP. Android-first, built on a
 reusable native core.
