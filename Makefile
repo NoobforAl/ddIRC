@@ -92,7 +92,7 @@ TUI_FLAGS ?=
 CLI       := $(CARGO) run $(MANIFEST) -p ddirc-cli --
 
 .DEFAULT_GOAL := help
-.PHONY: help outdated fix fmt lint test test-integration dev build build-release installer check-iscc \
+.PHONY: help outdated fix fmt lint deny test coverage coverage-dart coverage-rust test-integration dev build build-release installer check-iscc \
         build-android build-android-release keystore keystore-secrets \
         build-linux build-linux-release installer-linux test-installer-linux \
         build-macos build-ios codegen icons clean \
@@ -107,7 +107,9 @@ help:
 	@echo "  make fix      format + auto-fix Dart and Rust, then lint"
 	@echo "  make fmt      format only"
 	@echo "  make lint     analyze Dart, clippy Rust (warnings are errors)"
+	@echo "  make deny     cargo-deny: advisories, licences, sources (needs network)"
 	@echo "  make test     run the Dart and Rust test suites (hermetic)"
+	@echo "  make coverage the same suites, measured: coverage/*.lcov (what CI sends to Codecov)"
 	@echo "  make test-integration  end-to-end, needs make dev-server"
 	@echo "  make dev      run the app on Windows with hot reload (r) and its log"
 	@echo "  make build    debug build for Windows"
@@ -176,6 +178,34 @@ lint:
 test:
 	$(FLUTTER) test
 	$(CARGO) test $(MANIFEST) --workspace
+
+## What is in the dependency tree, rather than what is in our code.
+#
+# Clippy and the analyzer read our source; this reads Cargo.lock. It fails on a
+# known vulnerability, a yanked release, a licence that cannot ship in a
+# GPL-3.0-or-later app, or a crate from outside crates.io. Policy and the few
+# reasoned exceptions are in core/deny.toml. It fetches the advisory database,
+# so it is not part of `lint`, which has to work offline; CI runs it beside it.
+# Needs `cargo install cargo-deny`.
+deny:
+	$(CARGO) deny --manifest-path $(RUST)/Cargo.toml check
+
+## The same suites as `test`, measured. Writes coverage/dart.lcov and
+## coverage/rust.lcov, which is what CI hands to Codecov.
+#
+# Needs `cargo install cargo-llvm-cov` and `rustup component add llvm-tools`.
+# The Rust numbers leave out frb_generated.rs: it is machine output, a third of
+# the crate's lines, and measuring it would only reward regenerating it.
+coverage: coverage-dart coverage-rust
+
+coverage-dart:
+	$(FLUTTER) test --coverage --coverage-path coverage/dart.lcov
+
+coverage-rust:
+	@mkdir -p coverage
+	$(CARGO) llvm-cov $(MANIFEST) --workspace --lcov \
+		--output-path $(CURDIR)/coverage/rust.lcov \
+		--ignore-filename-regex 'frb_generated\.rs'
 
 ## End-to-end against the local server; `make dev-server` must be up.
 #

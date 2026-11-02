@@ -5,13 +5,18 @@
 # event. This file does, and it decides the order:
 #
 #       changes ──┬── lint ──┐
-#                 └── test ──┴── build ── ci
+#                 ├── test ──┴── build ── ci
+#                 └── coverage ───────────┘
 #
 # **A build is never started for a change that does not pass lint and the
 # tests.** Build is the slow one - Rust cross-compiled, a Windows installer, a
 # Linux one - and a change that fails a formatter or a test would otherwise pay
 # for all of it before anyone read the first red mark. Lint and test run side by
 # side, so the wait for them is the longer of the two, not the sum.
+#
+# **Coverage runs beside them and gates nothing.** It is a measurement sent to
+# Codecov, not a verdict, so `build` does not wait for it; `ci` does, so a run
+# that could not measure is still seen.
 #
 # **A change that touches only documentation runs nothing.** `changes` reads
 # which files changed; when every one is prose, the three jobs are skipped, and
@@ -89,6 +94,15 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/test.yml
 
+  # Beside lint and test, not before the build. `secrets: inherit` is what hands
+  # the repository's CODECOV_TOKEN to the called workflow; without it the
+  # upload would run tokenless and be refused on a protected branch.
+  coverage:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    uses: ./.github/workflows/coverage.yml
+    secrets: inherit
+
   # Only after both. If either fails this is skipped, not run: the default for a
   # job whose `needs` did not succeed, and the whole point.
   build:
@@ -98,7 +112,7 @@ jobs:
 
   ci:
     if: always()
-    needs: [changes, lint, test, build]
+    needs: [changes, lint, test, coverage, build]
     runs-on: ubuntu-latest
     steps:
       # Skipped is fine - a documentation-only change skips all three - but a

@@ -1,0 +1,87 @@
+# How much of the code the tests actually run, sent to Codecov.
+#
+# Called by ci.yml, never started by an event of its own, like Lint and Test.
+# It runs the same hermetic suites as test.yml's `hermetic` job, measured - not
+# the integration suites, which need Docker and would put a number on the
+# network rather than on our code - so the figure is the same on every commit
+# and on every machine, `make coverage` included.
+#
+# **It does not gate the build.** Coverage is a report, not a verdict: a slow
+# instrumented compile or a Codecov outage must not hold up a change that
+# passes lint and the tests. ci.yml lists it in `needs` of the `ci` check so a
+# failure to *measure* is still visible, but `build` does not wait for it.
+#
+# **The token.** Codecov's `CODECOV_TOKEN` is a repository secret, and a reusable
+# workflow only sees it when the caller passes `secrets: inherit`. Pull requests
+# from forks and from Dependabot are never given repository secrets, so on a
+# pull request the upload is allowed to fail rather than turn the PR red for a
+# reason its author cannot fix. On `main` it is not: a push that cannot report
+# is a broken pipeline, and should say so.
+name: Coverage
+
+on:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # As in test.yml: line tables are all a coverage run reads, and the build is
+  # faster to link and smaller to cache without the rest.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  dart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: ./.github/actions/setup
+
+      # `flutter test` builds every dependency's native assets, and the tray
+      # package compiles against GTK 3, X11 and Xi on Linux (see test.yml).
+      - uses: ./.github/actions/linux-deps
+        with:
+          build: "false"
+
+      - run: make coverage-dart
+
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/dart.lcov
+          flags: dart
+          # Only this report. The action otherwise searches the workspace and
+          # would pick up the other job's file twice, under the wrong flag.
+          disable_search: true
+          fail_ci_if_error: ${{ github.event_name == 'push' }}
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Rust only: this half never touches Dart. `llvm-tools` is what
+      # `cargo llvm-cov` shells out to for the instrumented binaries' data.
+      - uses: ./.github/actions/setup
+        with:
+          flutter: "false"
+          rust-components: llvm-tools
+
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2.89.0
+        with:
+          tool: cargo-llvm-cov
+
+      - run: make coverage-rust
+
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/rust.lcov
+          flags: rust
+          disable_search: true
+          fail_ci_if_error: ${{ github.event_name == 'push' }}

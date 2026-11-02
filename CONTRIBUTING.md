@@ -39,6 +39,13 @@ make fix
 Formats and auto-fixes both halves, then re-lints, so a fix that breaks
 something is caught in the same command. Run it last, before committing.
 
+Two more checks sit beside `make lint` in CI, and are worth running when you
+touch what they read: `make deny` checks the dependency tree (advisories,
+licences, sources; policy and the reasoned exceptions are in `core/deny.toml`),
+and `make coverage` runs the same hermetic suites measured, which is what CI
+sends to [Codecov](https://codecov.io/gh/NoobforAl/ddIRC). Coverage is a report,
+not a gate on the build.
+
 CI runs lint and test as separate workflows so a formatting slip and a broken
 test report as two different failures. It is the **second** check, not the
 first: a red CI on a pull request that was never run locally wastes a reviewer's
