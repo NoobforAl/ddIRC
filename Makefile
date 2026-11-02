@@ -507,6 +507,10 @@ dev-server-logs:
 # Registering a name that already exists is the one failure that is expected
 # (the accounts outlive a restart), so that exact reply is let through and
 # anything else stops the target.
+#
+# `--wait` trusts the container's healthcheck, which only says the node is up;
+# wait-ready.sh then completes real TLS handshakes, so the tests never start
+# against a listener that is not accepting yet.
 dev-xmpp:
 	@sh dev/xmpp/gen-certs.sh
 	$(COMPOSE) --profile xmpp up -d --wait xmppd
@@ -516,6 +520,7 @@ dev-xmpp:
 	  || case "$$out" in *"already registered"*) ;; \
 	       *) echo "could not register $$user: $$out"; exit 1;; esac; \
 	done
+	@sh dev/xmpp/wait-ready.sh
 	@echo ""
 	@echo "XMPP on 127.0.0.1:5223 (TLS from the first byte), domain: localhost"
 	@echo "  alice@localhost / bob@localhost   password: hunter2"

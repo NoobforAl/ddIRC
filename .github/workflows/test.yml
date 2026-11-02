@@ -97,7 +97,9 @@ jobs:
           flutter: "false"
 
       # Makes the certificate, starts ejabberd on loopback, waits for its
-      # healthcheck, and registers alice and bob.
+      # healthcheck *and then for real TLS handshakes* (the healthcheck only
+      # says the node is up; a run once started the tests against a listener that
+      # was not accepting yet), and registers alice and bob.
       - run: make dev-xmpp
 
       - run: make test-integration-xmpp
