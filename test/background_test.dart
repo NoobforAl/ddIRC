@@ -265,7 +265,10 @@ void main() {
       final start = calls.firstWhere((c) => c.method == 'start');
       // The notification says what it is doing from the first frame it
       // exists, rather than being blank until something changes.
-      expect(start.arguments['status'], connectionSummary(0));
+      expect(
+        (start.arguments as Map<Object?, Object?>)['status'],
+        connectionSummary(0),
+      );
     });
 
     test('asks about the notification before starting, not after', () async {
@@ -397,7 +400,7 @@ void main() {
       final w = await workspace();
       w.closeAll();
       w.closeAll();
-      expect(() => w.dispose(), returnsNormally);
+      expect(w.dispose, returnsNormally);
     });
 
     test('leaves nothing connected', () async {
@@ -414,7 +417,7 @@ void main() {
         // The two must not drift: a quit that says goodbye and a teardown that
         // does not would mean the servers hear from us only sometimes.
         final w = await workspace();
-        expect(() => w.dispose(), returnsNormally);
+        expect(w.dispose, returnsNormally);
       },
     );
   });

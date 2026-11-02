@@ -224,10 +224,10 @@ pub fn encode(spans: &[TextSpan]) -> String {
             // digit of the text as the second, which is the classic mIRC
             // encoding bug and produces a different colour *and* a missing
             // character.
-            out.push_str(&format!("{:02}", fg));
+            out.push_str(&format!("{fg:02}"));
             if let Some(bg) = span.style.bg {
                 out.push(',');
-                out.push_str(&format!("{:02}", bg));
+                out.push_str(&format!("{bg:02}"));
             }
             // A colour with no background, followed by text that opens with a
             // comma and a digit, would have that comma read as the separator

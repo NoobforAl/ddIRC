@@ -135,7 +135,7 @@ class _ContactsDialogState extends State<ContactsDialog> {
           children: [
             _SelfRow(session: session, onTap: _status),
             if (requests.isNotEmpty) ...[
-              _Heading('Waiting for your answer'),
+              const _Heading('Waiting for your answer'),
               for (final jid in requests)
                 _RequestRow(
                   jid: jid,
@@ -148,7 +148,7 @@ class _ContactsDialogState extends State<ContactsDialog> {
                 'than that.',
               ),
             ],
-            _Heading('Add a contact'),
+            const _Heading('Add a contact'),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 0, 18, 4),
               child: Row(

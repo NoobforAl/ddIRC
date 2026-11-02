@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/foundation.dart'
     show TargetPlatform, ValueListenable, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/physics.dart' show SpringSimulation;
@@ -1472,7 +1474,7 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     final message = line.message!;
     final box = _lineKeys[i].currentContext?.findRenderObject() as RenderBox?;
     if (box == null || !box.hasSize) return;
-    if (at == null) HapticFeedback.selectionClick();
+    if (at == null) unawaited(HapticFeedback.selectionClick());
     final where = at ?? box.localToGlobal(box.size.center(Offset.zero));
     // A table or a code block is copied whole, the way it was written.
     final block = _blocks().firstWhere(
@@ -2772,7 +2774,7 @@ class _CodeBlockState extends State<_CodeBlock> {
     final label = TextStyle(color: t.muted, fontSize: 11, height: 1.2);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Container(
+      child: DecoratedBox(
         decoration: BoxDecoration(
           color: t.bg.withValues(alpha: 0.6),
           border: Border.all(color: t.rule),

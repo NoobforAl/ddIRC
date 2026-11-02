@@ -75,10 +75,9 @@ async fn handle(
     let _ = inbound.set_nodelay(true);
 
     greet(&mut inbound).await?;
-    let (host, port) = match request(&mut inbound).await? {
-        Some(target) => target,
+    let Some((host, port)) = request(&mut inbound).await? else {
         // `request` has already sent the reply saying why.
-        None => return Ok(()),
+        return Ok(());
     };
 
     // A circuit per connection.
@@ -166,12 +165,11 @@ async fn request(inbound: &mut TcpStream) -> io::Result<Option<(String, u16)>> {
             inbound.read_exact(&mut len).await?;
             let mut name = vec![0u8; len[0] as usize];
             inbound.read_exact(&mut name).await?;
-            match String::from_utf8(name) {
-                Ok(name) => name,
-                Err(_) => {
-                    reply(inbound, REP_FAILED).await?;
-                    return Ok(None);
-                }
+            if let Ok(name) = String::from_utf8(name) {
+                name
+            } else {
+                reply(inbound, REP_FAILED).await?;
+                return Ok(None);
             }
         }
         ATYP_V6 => {

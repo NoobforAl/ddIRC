@@ -13,7 +13,7 @@ import 'package:ddirc/src/model/personas.dart';
 import 'package:ddirc/src/model/profile.dart';
 
 void main() {
-  setUp(() => Personas.instance.resetForTest());
+  setUp(Personas.instance.resetForTest);
 
   group('Personas', () {
     test('creates, renames, and forgets identities', () async {

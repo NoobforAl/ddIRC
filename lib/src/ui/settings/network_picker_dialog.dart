@@ -273,7 +273,7 @@ class _NetworkRow extends StatelessWidget {
                       ),
                       if (network.sasl) ...[
                         const SizedBox(width: 7),
-                        _Tag(label: 'SASL'),
+                        const _Tag(label: 'SASL'),
                       ],
                     ],
                   ),

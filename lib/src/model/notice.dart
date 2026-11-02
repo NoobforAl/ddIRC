@@ -104,7 +104,7 @@ Notice noticeForFailure(String message) {
   }
 
   if (lower.contains('cancelled')) {
-    return Notice.info('Cancelled', detail: null);
+    return const Notice.info('Cancelled', detail: null);
   }
 
   return Notice.error(text);

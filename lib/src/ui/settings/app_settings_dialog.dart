@@ -540,8 +540,8 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SettingsNote(text: block.explanation, isError: true),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
               child: SettingsSecondaryButton(
                 label: 'Open notification settings…',
                 onPressed: openSystemNotificationSettings,
@@ -566,10 +566,10 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
       future: batteryOptimizationExempt(),
       builder: (context, snapshot) {
         if (snapshot.data != false) return const SizedBox.shrink();
-        return Column(
+        return const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SettingsNote(
+            SettingsNote(
               text:
                   'Some phones suspend ddIRC anyway, regardless of this '
                   'switch, unless it is separately exempted from battery '
@@ -577,10 +577,10 @@ class _AppSettingsDialogState extends State<AppSettingsDialog>
                   'keeps dropping for no reason shown here.',
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+              padding: EdgeInsets.fromLTRB(18, 0, 18, 10),
               child: SettingsSecondaryButton(
                 label: 'Exempt ddIRC from battery optimization…',
-                onPressed: () => requestBatteryOptimizationExemption(),
+                onPressed: requestBatteryOptimizationExemption,
               ),
             ),
           ],

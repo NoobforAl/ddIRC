@@ -371,7 +371,7 @@ class _DdIrcAppState extends State<DdIrcApp> {
                         home: BootScreen(
                           load: _start,
                           builder: (context) =>
-                              AppLockGate(child: const WorkspaceScreen()),
+                              const AppLockGate(child: WorkspaceScreen()),
                         ),
                       ),
                     ),

@@ -38,3 +38,6 @@ rcgen.workspace = true
 # tree underneath it.
 log = "0.4"
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+
+[lints]
+workspace = true

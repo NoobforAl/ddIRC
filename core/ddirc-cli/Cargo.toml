@@ -35,3 +35,6 @@ tui-input = { version = "0.15", default-features = false, features = ["crossterm
 # "really remove them?" question.
 tui-popup = "0.7"
 unicode-width = "0.2"
+
+[lints]
+workspace = true

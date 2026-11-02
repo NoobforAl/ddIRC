@@ -185,7 +185,7 @@ void main() {
       // through Tor would ask an exit relay for 127.0.0.1 and reach either
       // that relay's own loopback or nothing.
       final settings = await onTor();
-      final local = Profile(
+      const local = Profile(
         id: 'local-server',
         name: 'Local',
         host: '127.0.0.1',

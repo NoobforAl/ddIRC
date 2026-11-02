@@ -74,7 +74,7 @@ class _FileTransferSectionState extends State<FileTransferSection> {
             label: 'Sending',
             value: 'The offer carries your address — you are asked each time',
           ),
-          SettingsReadout(
+          const SettingsReadout(
             label: 'Filenames',
             value: 'Reduced to a bare name — an offer cannot choose a path',
           ),

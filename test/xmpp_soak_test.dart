@@ -33,12 +33,12 @@ Future<SessionModel> _session() async {
   return SessionModel(
     connectionId: BigInt.zero,
     profileId: 'p1',
-    config: rust.ServerConfig(
+    config: const rust.ServerConfig(
       host: 'example.org',
       port: 5223,
       nickname: 'alice@example.org',
-      altNicks: const [],
-      channels: const [],
+      altNicks: [],
+      channels: [],
     ),
     settings: settings,
     isXmpp: true,
@@ -69,7 +69,7 @@ void main() {
     () async {
       final s = await _session();
       s.receiveForTesting(
-        rust.IrcEvent.joined(channel: _room, nick: 'alice', isSelf: true),
+        const rust.IrcEvent.joined(channel: _room, nick: 'alice', isSelf: true),
       );
       const target = rust.Target.channel(name: _room);
 

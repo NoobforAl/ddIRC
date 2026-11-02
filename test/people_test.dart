@@ -68,7 +68,7 @@ Color? _colorOf(WidgetTester tester, String text) =>
     tester.widget<Text>(find.text(text)).style?.color;
 
 void main() {
-  setUp(() => People.instance.resetForTest());
+  setUp(People.instance.resetForTest);
 
   group('PersonCard', () {
     test('is blank until something is set, and copyWith can clear', () {
@@ -82,10 +82,10 @@ void main() {
     });
 
     test('round-trips through a store row', () {
-      final card = PersonCard(
+      const card = PersonCard(
         alias: 'Al',
         note: 'ops',
-        color: const Color(0xFFE57373),
+        color: Color(0xFFE57373),
         pixelSeed: 7,
       );
       final row = card.toRow('p1', 'alice');
@@ -147,7 +147,7 @@ void main() {
   testWidgets('the roster shows the name, note, colour and picture', (
     tester,
   ) async {
-    People.instance.set(
+    await People.instance.set(
       'p1',
       'alice',
       const PersonCard(
@@ -191,7 +191,7 @@ void main() {
   testWidgets('the scrollback shows the name and colour, and opens the card', (
     tester,
   ) async {
-    People.instance.set(
+    await People.instance.set(
       'p1',
       'alice',
       const PersonCard(alias: 'Al', color: Color(0xFF123456)),

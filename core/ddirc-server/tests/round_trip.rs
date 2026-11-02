@@ -484,7 +484,7 @@ async fn a_client_that_goes_silent_is_asked_then_dropped_and_its_nick_freed() {
     let mut after = String::new();
     loop {
         match tokio::time::timeout(TIMEOUT, ghost.read(&mut buf)).await {
-            Ok(Ok(0)) | Ok(Err(_)) => break,
+            Ok(Ok(0) | Err(_)) => break,
             Ok(Ok(n)) => after.push_str(&String::from_utf8_lossy(&buf[..n])),
             Err(_) => panic!("the server never hung up; heard: {after:?}"),
         }

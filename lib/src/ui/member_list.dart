@@ -97,7 +97,7 @@ class _MemberListState extends State<MemberList> {
   Widget build(BuildContext context) {
     final t = context.tokens;
     final members = widget.members;
-    return Container(
+    return ColoredBox(
       color: t.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

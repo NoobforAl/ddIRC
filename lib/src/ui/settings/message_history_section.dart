@@ -140,7 +140,7 @@ class _MessageHistorySectionState extends State<MessageHistorySection> {
           value: history.path ?? 'Unavailable on this platform',
         ),
         SettingsReadout(label: 'Held', value: _held),
-        SettingsReadout(
+        const SettingsReadout(
           label: 'Restored',
           value:
               'The last ${MessageHistory.restoreLines} lines of a conversation '

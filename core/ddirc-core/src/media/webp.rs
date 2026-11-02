@@ -59,17 +59,16 @@ pub(super) fn strip(bytes: &[u8]) -> Result<Stripped, StripError> {
             return Err(StripError::malformed(KIND, "chunk runs past the end"));
         };
 
-        match describe(&kind) {
-            Some(what) => removed.push(Removed { what, bytes: total }),
-            None => {
-                let start = payload.len();
-                payload.extend_from_slice(chunk);
-                // Correct the announcement of what this file contains, or a
-                // decoder goes looking for chunks that have just left.
-                if &kind == b"VP8X" {
-                    if let Some(flags) = payload.get_mut(start + 8) {
-                        *flags &= !(FLAG_EXIF | FLAG_XMP);
-                    }
+        if let Some(what) = describe(&kind) {
+            removed.push(Removed { what, bytes: total })
+        } else {
+            let start = payload.len();
+            payload.extend_from_slice(chunk);
+            // Correct the announcement of what this file contains, or a
+            // decoder goes looking for chunks that have just left.
+            if &kind == b"VP8X" {
+                if let Some(flags) = payload.get_mut(start + 8) {
+                    *flags &= !(FLAG_EXIF | FLAG_XMP);
                 }
             }
         }

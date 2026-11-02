@@ -140,7 +140,7 @@ void main() {
     joined(s, '#one');
 
     s.receiveForTesting(
-      IrcEvent.joined(channel: '#one', nick: 'alice', isSelf: false),
+      const IrcEvent.joined(channel: '#one', nick: 'alice', isSelf: false),
     );
 
     expect(names(s.tabs), ['#one']);

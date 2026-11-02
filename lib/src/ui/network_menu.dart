@@ -34,9 +34,9 @@ Future<NetworkMenuAction?> showNetworkMenu(
     context,
     at: at,
     items: [
-      PopupMenuItem(
+      const PopupMenuItem(
         value: NetworkMenuAction.edit,
-        child: const MenuRow(icon: Icons.edit_outlined, label: 'Edit network…'),
+        child: MenuRow(icon: Icons.edit_outlined, label: 'Edit network…'),
       ),
       PopupMenuItem(
         value: NetworkMenuAction.delete,

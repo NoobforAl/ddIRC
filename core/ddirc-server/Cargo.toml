@@ -39,3 +39,6 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "test
 # that verifies certificates and has no bypass. Not a cycle — `ddirc-core` does
 # not depend on this crate.
 ddirc-core = { path = "../ddirc-core" }
+
+[lints]
+workspace = true
