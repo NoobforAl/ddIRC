@@ -45,6 +45,12 @@ dependencies:
 
   # Hides the native title bar so the app can draw its own window controls.
   # Pinned like every other dependency.
+  #
+  # Held at 0.5.2 on purpose. 0.6.0 removes the global `windowManager` that
+  # lib/src/ui/window_chrome.dart is written against (40 analyzer errors) and
+  # drops screen_retriever, so taking it means rewriting the Windows title bar
+  # and checking it on a real window, not bumping a number. Do that as its own
+  # change; Dependabot is told to skip 0.6 until then.
   window_manager: 0.5.2
 
   # A tray icon, so a window closed to the background has somewhere to be
@@ -52,7 +58,7 @@ dependencies:
   # feature, which is why this is not optional once the window can hide.
   # Same family as window_manager, and inert on mobile. Pinned like every
   # other dependency.
-  tray_manager: 0.8.0
+  tray_manager: 0.8.2
 
   # Desktop notifications, so a message can reach someone whose window is
   # behind something else. Same family as window_manager and tray_manager
@@ -101,7 +107,7 @@ dependencies:
   # unlike the notification/background-service permissions this app asks for
   # by hand — see `lib/src/ui/settings/qr_scan_dialog.dart`. Pinned like every
   # other dependency.
-  mobile_scanner: 7.4.2
+  mobile_scanner: 7.5.0
 
   # Opens a link from a message in the browser, after the app has shown the
   # whole address and been told to — see `lib/src/ui/link.dart`. http and
