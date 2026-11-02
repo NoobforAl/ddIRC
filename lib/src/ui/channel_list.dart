@@ -218,7 +218,7 @@ class _ChannelListState extends State<ChannelList> {
     // dialog repaints the whole list rather than one stale row.
     SettingsScope.of(context);
 
-    return Container(
+    return ColoredBox(
       color: t.surface,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -361,7 +361,7 @@ class _ChannelListState extends State<ChannelList> {
   }
 
   Widget _footer(Tokens t) {
-    return Container(
+    return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(color: t.rule, width: Tokens.hairline),

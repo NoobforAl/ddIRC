@@ -910,7 +910,7 @@ class _ProfileEditorDialogState extends State<ProfileEditorDialog> {
     // The one field whose sensible value differs between the two. A port the
     // user typed themselves is left alone: only the standard one is swapped.
     final ircPort = '${core.defaultTlsPort()}';
-    final xmppPort = '${Profile.xmppDefaultPort}';
+    const xmppPort = '${Profile.xmppDefaultPort}';
     final port = _fields[_Input.port]!;
     if (port.text.trim() == (_isXmpp ? xmppPort : ircPort)) {
       port.text = next == NetworkProtocol.xmpp ? xmppPort : ircPort;

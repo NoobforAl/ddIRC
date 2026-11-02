@@ -8,6 +8,57 @@ edition = "2021"
 rust-version = "1.92"
 license = "GPL-3.0-or-later"
 
+[workspace.lints.rust]
+# The bridge's expanded macros test this cfg; declaring it once here keeps the
+# check-cfg lint quiet for every crate rather than only the one that needs it.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+unused_lifetimes = "warn"
+unused_import_braces = "warn"
+trivial_numeric_casts = "warn"
+
+# `make lint` runs clippy with `-D warnings`, so every "warn" here is a gate.
+#
+# Not clippy::pedantic wholesale: it is several hundred findings of taste
+# (`# Errors` sections, `#[must_use]` on every getter) and a lint that is
+# always red is a lint nobody reads. What follows is chosen the other way:
+# either nothing in the tree trips it today, so it is a guard against the next
+# change, or it was a handful of places that were fixed when it was added.
+#
+# `unimplemented` and `undocumented_unsafe_blocks` are left out on purpose:
+# the only code that trips them is flutter_rust_bridge's generated
+# `frb_generated.rs`, which is rewritten by `make codegen`.
+[workspace.lints.clippy]
+# Left behind from debugging.
+dbg_macro = "warn"
+todo = "warn"
+# Leaks, a lock held across an await, an Rc where a Mutex was meant.
+mem_forget = "warn"
+rc_mutex = "warn"
+await_holding_lock = "warn"
+large_futures = "warn"
+# Allocations spelled the long way round.
+str_to_string = "warn"
+implicit_clone = "warn"
+inefficient_to_string = "warn"
+cloned_instead_of_copied = "warn"
+stable_sort_primitive = "warn"
+flat_map_option = "warn"
+# Loops and matches that hide a bug when a type changes underneath them.
+explicit_iter_loop = "warn"
+explicit_into_iter_loop = "warn"
+needless_continue = "warn"
+range_plus_one = "warn"
+match_wildcard_for_single_variants = "warn"
+enum_glob_use = "warn"
+single_match_else = "warn"
+manual_let_else = "warn"
+unnested_or_patterns = "warn"
+manual_assert = "warn"
+used_underscore_binding = "warn"
+invalid_upcast_comparisons = "warn"
+needless_raw_string_hashes = "warn"
+uninlined_format_args = "warn"
+
 [workspace.dependencies]
 # `ctcp` is deliberately NOT enabled, and adding it would be a privacy
 # regression rather than a feature. The name suggests it is what lets a client

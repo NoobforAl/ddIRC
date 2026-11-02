@@ -39,13 +39,13 @@ Future<SessionModel> _session({int contacts = 0, int requests = 0}) async {
   final s = SessionModel(
     connectionId: BigInt.zero,
     profileId: 'p1',
-    config: rust.ServerConfig(
+    config: const rust.ServerConfig(
       host: 'example.org',
       port: 5223,
       nickname:
           'a-very-long-account-name-for-a-test@a-very-long-domain.example.org',
-      altNicks: const [],
-      channels: const [],
+      altNicks: [],
+      channels: [],
     ),
     settings: settings,
     isXmpp: true,
@@ -60,7 +60,7 @@ Future<SessionModel> _session({int contacts = 0, int requests = 0}) async {
           subscription: rust.Subscription.values[i % 4],
           asked: i % 5 == 0,
           availability: rust.Availability.values[i % 5],
-          status: i % 2 == 0 ? 'status text $i ${'w' * 120}' : '',
+          status: i.isEven ? 'status text $i ${'w' * 120}' : '',
         ),
       ),
     );

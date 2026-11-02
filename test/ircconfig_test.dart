@@ -139,7 +139,7 @@ void main() {
 
   group('malformed input', () {
     test('a network missing its host is dropped, not the whole file', () {
-      final text = '''
+      const text = '''
 ddirc: 1
 networks:
   - name: 'Broken'

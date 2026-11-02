@@ -197,11 +197,11 @@ void main() {
     test('a message request not yet accepted cannot be answered', () async {
       final (mcp, session, _) = await _service();
       session.receiveForTesting(
-        IrcEvent.message(
+        const IrcEvent.message(
           message: ChatMessage(
-            target: const Target.direct(nick: 'stranger'),
+            target: Target.direct(nick: 'stranger'),
             sender: 'stranger',
-            spans: const [TextSpan(text: 'hi', style: _plain)],
+            spans: [TextSpan(text: 'hi', style: _plain)],
             isSelf: false,
             isMention: false,
             isAction: false,

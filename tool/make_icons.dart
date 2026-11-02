@@ -425,6 +425,7 @@ String svg() {
   String n(double v) => (v * 1000).toStringAsFixed(1);
   final lines = [
     for (final (x1, y1, cx, cy, x2, y2, w) in MarkSpec.strokes)
+      // ignore: no_adjacent_strings_in_list
       '  <path d="M ${n(x1)} ${n(y1)} Q ${n(cx)} ${n(cy)} ${n(x2)} ${n(y2)}" '
           'stroke-width="${n(w)}" />',
   ].join('\n');

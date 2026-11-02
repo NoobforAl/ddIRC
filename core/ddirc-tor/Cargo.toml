@@ -37,3 +37,6 @@ ddirc-core = { path = "../ddirc-core" }
 # Without a subscriber installed, `RUST_LOG` sets nothing and a stalled
 # bootstrap is silent, which is worse than no test at all.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

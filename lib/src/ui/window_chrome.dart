@@ -28,8 +28,8 @@ Future<void> prepareWindow(Tokens t) async {
   await windowManager.ensureInitialized();
   await windowManager.waitUntilReadyToShow(
     WindowOptions(
-      size: Size(1180, 780),
-      minimumSize: Size(420, 480),
+      size: const Size(1180, 780),
+      minimumSize: const Size(420, 480),
       center: true,
       backgroundColor: t.bg,
       // The frame is ours from here on; the OS draws nothing — including

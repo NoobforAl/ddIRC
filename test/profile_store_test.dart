@@ -35,12 +35,13 @@ void main() {
     binding.defaultBinaryMessenger.setMockMethodCallHandler(_keychain, (
       call,
     ) async {
-      final key = call.arguments['key'] as String?;
+      final args = call.arguments as Map<Object?, Object?>;
+      final key = args['key'] as String?;
       switch (call.method) {
         case 'read':
           return fakeKeychain[key];
         case 'write':
-          fakeKeychain[key!] = call.arguments['value'] as String;
+          fakeKeychain[key!] = args['value'] as String;
           return null;
         case 'delete':
           fakeKeychain.remove(key);

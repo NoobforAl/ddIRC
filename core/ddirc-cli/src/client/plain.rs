@@ -52,16 +52,13 @@ pub async fn run(connection: Connection) -> ExitCode {
             }
 
             line = stdin.next_line() => {
-                let line = match line {
-                    Ok(Some(line)) => line,
+                let Ok(Some(line)) = line else {
                     // EOF (Ctrl-D) or a closed stdin means we are done.
-                    Ok(None) | Err(_) => {
-                        let _ = handle.send(ClientCommand::Disconnect {
-                            reason: Some("ddirc-cli".to_owned()),
-                        }).await;
-                        say_goodbye(&mut events).await;
-                        return ExitCode::SUCCESS;
-                    }
+                    let _ = handle.send(ClientCommand::Disconnect {
+                        reason: Some("ddirc-cli".to_owned()),
+                    }).await;
+                    say_goodbye(&mut events).await;
+                    return ExitCode::SUCCESS;
                 };
 
                 let action = if xmpp {

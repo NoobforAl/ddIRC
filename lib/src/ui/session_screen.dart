@@ -908,7 +908,7 @@ class _SessionScreenState extends State<SessionScreen> {
               if (layout.channelsPinned)
                 SizedBox(
                   width: _channelPanelWidth,
-                  child: Container(
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
                       border: Border(
                         right: BorderSide(
@@ -924,7 +924,7 @@ class _SessionScreenState extends State<SessionScreen> {
               if (_membersBeside && active != null && active.isChannel)
                 SizedBox(
                   width: _memberPanelWidth,
-                  child: Container(
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
                       border: Border(
                         left: BorderSide(color: t.rule, width: Tokens.hairline),
@@ -1326,7 +1326,7 @@ class _Header extends StatelessWidget {
                 ),
                 if (unread > 0)
                   Padding(
-                    padding: EdgeInsets.only(top: 8, right: 8),
+                    padding: const EdgeInsets.only(top: 8, right: 8),
                     child: _Dot(color: t.accent, size: 6),
                   ),
               ],
@@ -2027,7 +2027,7 @@ class _CommandSuggestions extends StatelessWidget {
     if (commands.isEmpty) return const Reveal();
 
     return Reveal(
-      child: Container(
+      child: DecoratedBox(
         decoration: BoxDecoration(
           color: t.surface,
           border: Border(

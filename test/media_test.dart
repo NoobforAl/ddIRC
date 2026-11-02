@@ -224,7 +224,7 @@ void largeFileTests() {
       settings,
       strip: (bytes) async {
         stripped++;
-        return CleanOutcome.alreadyClean(kind: 'JPEG');
+        return const CleanOutcome.alreadyClean(kind: 'JPEG');
       },
     );
 

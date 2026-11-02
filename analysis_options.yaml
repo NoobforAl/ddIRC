@@ -1,6 +1,20 @@
 analyzer:
+  # The type system, turned up. Each of these makes the analyzer refuse a place
+  # where Dart quietly falls back to `dynamic`, which is where a wrong type
+  # stops being a compile error and becomes a crash on a user's phone.
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    # Generated code is excluded below; for the rest, these two are not style.
+    unawaited_futures: error
+    close_sinks: warning
+    cancel_subscriptions: warning
   exclude:
     - rust_builder/cargokit/**
+    # Written by `make codegen`; whatever it emits is not ours to fix.
+    - lib/src/rust/**
     - build/**
     - android/**
     - ios/**
@@ -31,8 +45,55 @@ linter:
   # `// ignore_for_file: name_of_lint` syntax on the line or in the file
   # producing the lint.
   rules:
-    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
-    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+    # Beyond flutter_lints. Chosen for what each one catches, not for taste:
+    # formatting is `dart format`'s job and is already a gate.
+
+    # A Future nobody waits for loses its error. The bridge to Rust is async
+    # all the way down, so this is the mistake most likely to be made.
+    - unawaited_futures
+    - cancel_subscriptions
+    - close_sinks
+    - use_build_context_synchronously
+    - no_adjacent_strings_in_list
+    - test_types_in_equals
+    - throw_in_finally
+    - literal_only_boolean_expressions
+    - avoid_type_to_string
+    - invalid_case_patterns
+
+    # Types said out loud where an inferred one would hide a change.
+    - always_declare_return_types
+    - avoid_dynamic_calls
+    - avoid_void_async
+    - type_annotate_public_apis
+    - avoid_catching_errors
+    - only_throw_errors
+
+    # Immutability, which in a widget tree is also performance.
+    - prefer_const_constructors
+    - prefer_const_constructors_in_immutables
+    - prefer_const_declarations
+    - prefer_const_literals_to_create_immutables
+    - prefer_final_fields
+    - unnecessary_lambdas
+    - unnecessary_null_aware_operator_on_extension_on_nullable
+    - unnecessary_breaks
+    - unnecessary_statements
+    - sized_box_for_whitespace
+    - sort_child_properties_last
+    - use_colored_box
+    - use_decorated_box
+
+    # Dead weight and surprises.
+    - avoid_print
+    - avoid_unused_constructor_parameters
+    - avoid_empty_else
+    - avoid_relative_lib_imports
+    - deprecated_member_use_from_same_package
+    - prefer_null_aware_method_calls
+    - use_is_even_rather_than_modulo
+    - use_string_buffers
+    - use_super_parameters
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

@@ -127,15 +127,15 @@ fn explain_io(error: &std::io::Error, server: &str) -> Diagnosis {
 fn explain_tls(error: &tokio_xmpp::rustls::Error, server: &str) -> Diagnosis {
     use tokio_xmpp::rustls::{CertificateError, Error as Tls};
     match error {
-        Tls::InvalidCertificate(CertificateError::NotValidForName)
-        | Tls::InvalidCertificate(CertificateError::NotValidForNameContext { .. }) => {
+        Tls::InvalidCertificate(CertificateError::NotValidForName |
+CertificateError::NotValidForNameContext { .. }) => {
             Diagnosis::fatal(format!(
                 "The certificate {server} presented is for a different name than the account's \
                  domain. ddIRC will not connect to a server that cannot prove it is the right one."
             ))
         }
-        Tls::InvalidCertificate(CertificateError::Expired)
-        | Tls::InvalidCertificate(CertificateError::ExpiredContext { .. }) => Diagnosis::fatal(
+        Tls::InvalidCertificate(CertificateError::Expired |
+CertificateError::ExpiredContext { .. }) => Diagnosis::fatal(
             format!("The certificate {server} presented has expired. If this device's clock is wrong, fix that first."),
         ),
         Tls::InvalidCertificate(CertificateError::UnknownIssuer) => Diagnosis::fatal(format!(

@@ -204,7 +204,7 @@ class ForegroundService implements BackgroundKeeper {
     } catch (e) {
       debugPrint('could not close down cleanly: $e');
     } finally {
-      await _invoke('stop');
+      await _invoke<void>('stop');
       _running = false;
       // Finishes the activity. The process is then an ordinary cached one and
       // is reclaimed in Android's own time, which is the platform's business
@@ -251,10 +251,10 @@ class ForegroundService implements BackgroundKeeper {
     if (wanted && !_running) {
       await _askAboutNotifications();
       _status = connectionSummary(workspace.sessions.length);
-      await _invoke('start', {'status': _status});
+      await _invoke<void>('start', {'status': _status});
       _running = true;
     } else if (!wanted && _running) {
-      await _invoke('stop');
+      await _invoke<void>('stop');
       _running = false;
       _status = null;
     } else if (_running) {
@@ -266,7 +266,7 @@ class ForegroundService implements BackgroundKeeper {
     final text = connectionSummary(workspace.sessions.length);
     if (text == _status) return;
     _status = text;
-    await _invoke('update', {'status': text});
+    await _invoke<void>('update', {'status': text});
   }
 
   /// Ask for the notification permission, and carry on either way.

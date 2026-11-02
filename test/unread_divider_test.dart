@@ -196,8 +196,8 @@ void main() {
 
     conversation.lines.add(
       ChatLine.message(
-        rust.ChatMessage(
-          target: const rust.Target.channel(name: '#test'),
+        const rust.ChatMessage(
+          target: rust.Target.channel(name: '#test'),
           sender: 'me',
           spans: [rust.TextSpan(text: 'hello?', style: _plain)],
           isSelf: true,

@@ -200,11 +200,11 @@ void main() {
     _joined(s, '#chat');
     s.select('#here');
     s.receiveForTesting(
-      rust.IrcEvent.message(
+      const rust.IrcEvent.message(
         message: rust.ChatMessage(
-          target: const rust.Target.channel(name: '#chat'),
+          target: rust.Target.channel(name: '#chat'),
           sender: 'bob',
-          spans: const [rust.TextSpan(text: 'hi', style: _plain)],
+          spans: [rust.TextSpan(text: 'hi', style: _plain)],
           isSelf: false,
           isMention: false,
           isAction: false,

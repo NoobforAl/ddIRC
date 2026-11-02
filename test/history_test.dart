@@ -72,7 +72,7 @@ void main() {
     test('with its sender, its prefix and every flag', () {
       final original = _message(
         'alice',
-        [rust.TextSpan(text: 'the build is green', style: _plain)],
+        [const rust.TextSpan(text: 'the build is green', style: _plain)],
         prefix: '@',
         isMention: true,
         isAction: true,
@@ -92,8 +92,8 @@ void main() {
 
     test('with its styling, not flattened to plain text', () {
       final original = _message('alice', [
-        rust.TextSpan(text: 'shipped ', style: _plain),
-        rust.TextSpan(text: 'at last', style: _bold),
+        const rust.TextSpan(text: 'shipped ', style: _plain),
+        const rust.TextSpan(text: 'at last', style: _bold),
       ]);
 
       // The styles reach the boundary intact. Turning them into mIRC codes and
@@ -108,7 +108,7 @@ void main() {
 
     test('as a direct message when the conversation is a person', () {
       final restored = _throughTheStore(
-        _message('alice', [rust.TextSpan(text: 'hello', style: _plain)]),
+        _message('alice', [const rust.TextSpan(text: 'hello', style: _plain)]),
         isChannel: false,
       );
       // The target is rebuilt from the conversation rather than stored per
@@ -134,7 +134,9 @@ void main() {
         profileId: 'p1',
         conversation: '#test',
         atMs: DateTime(2026, 3, 1).millisecondsSinceEpoch,
-        spans: [rust.TextSpan(text: 'something new happened', style: _plain)],
+        spans: [
+          const rust.TextSpan(text: 'something new happened', style: _plain),
+        ],
         isSelf: false,
         isMention: false,
         isAction: false,
@@ -160,7 +162,7 @@ void main() {
         conversation: '#test',
         atMs: DateTime(2026, 3, 1).millisecondsSinceEpoch,
         sender: 'alice',
-        spans: [rust.TextSpan(text: 'hello', style: _plain)],
+        spans: [const rust.TextSpan(text: 'hello', style: _plain)],
         isSelf: false,
         isMention: false,
         isAction: false,
@@ -184,7 +186,7 @@ void main() {
     test('puts the old lines in front of the new ones', () {
       final conversation = Conversation(name: '#test', isChannel: true);
       conversation.add(
-        _message('bob', [rust.TextSpan(text: 'live', style: _plain)]),
+        _message('bob', [const rust.TextSpan(text: 'live', style: _plain)]),
         active: true,
       );
 
@@ -255,4 +257,4 @@ void main() {
 }
 
 ChatLine _plainLine() =>
-    _message('alice', [rust.TextSpan(text: 'hello', style: _plain)]);
+    _message('alice', [const rust.TextSpan(text: 'hello', style: _plain)]);

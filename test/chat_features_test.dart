@@ -232,11 +232,11 @@ void main() {
 
       s.settings.accept('p1', 'troll');
       s.receiveForTesting(
-        rust.IrcEvent.message(
+        const rust.IrcEvent.message(
           message: rust.ChatMessage(
-            target: const rust.Target.direct(nick: 'troll'),
+            target: rust.Target.direct(nick: 'troll'),
             sender: 'troll',
-            spans: [const rust.TextSpan(text: 'psst', style: _plain)],
+            spans: [rust.TextSpan(text: 'psst', style: _plain)],
             isSelf: false,
             isMention: false,
             isAction: false,

@@ -488,14 +488,14 @@ void main() {
   });
 
   group('the colour spine', () {
-    setUp(() => People.instance.resetForTest());
-    tearDown(() => People.instance.resetForTest());
+    setUp(People.instance.resetForTest);
+    tearDown(People.instance.resetForTest);
 
     testWidgets('carries a chosen colour down a whole run, labels and all', (
       tester,
     ) async {
       const chosen = Color(0xFF123456);
-      People.instance.set('p1', 'alice', const PersonCard(color: chosen));
+      await People.instance.set('p1', 'alice', const PersonCard(color: chosen));
       await _pump(
         tester,
         _conversation([

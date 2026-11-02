@@ -36,6 +36,8 @@ class _FakeCore implements RustLibApi {
   Future<void> _record(String call) async {
     calls.add(call);
     final failure = failWith;
+    // A bare String on purpose: errors from the Rust side reach Dart as text.
+    // ignore: only_throw_errors
     if (failure != null) throw failure;
   }
 
@@ -91,12 +93,12 @@ Future<SessionModel> _session() async {
   return SessionModel(
     connectionId: BigInt.zero,
     profileId: 'p1',
-    config: rust.ServerConfig(
+    config: const rust.ServerConfig(
       host: 'example.org',
       port: 5223,
       nickname: 'alice@example.org',
-      altNicks: const [],
-      channels: const [],
+      altNicks: [],
+      channels: [],
     ),
     settings: settings,
     isXmpp: true,

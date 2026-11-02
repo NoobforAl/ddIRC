@@ -240,19 +240,19 @@ pub fn load_or_create(dir: &Path) -> Result<Identity, IdentityError> {
 
     prepare_dir(dir)?;
 
-    let (ca_pem, ca_key_pem) = match (read(&cert_path)?, read_private(&key_path)?) {
-        (Some(cert), Some(key)) => (cert, key),
-        // One without the other cannot be repaired, only replaced: a
-        // certificate whose key is gone can sign nothing, and a key whose
-        // certificate is gone has no name. Reissuing both is the only move
-        // that leaves a working server.
-        _ => {
+    let (ca_pem, ca_key_pem) =
+        if let (Some(cert), Some(key)) = (read(&cert_path)?, read_private(&key_path)?) {
+            (cert, key)
+        } else {
+            // One without the other cannot be repaired, only replaced: a
+            // certificate whose key is gone can sign nothing, and a key whose
+            // certificate is gone has no name. Reissuing both is the only move
+            // that leaves a working server.
             let (cert, key) = issue_ca()?;
             write_private(&key_path, &key)?;
             write(&cert_path, &cert)?;
             (cert, key)
-        }
-    };
+        };
 
     let ca_key =
         KeyPair::from_pem(&ca_key_pem).map_err(|_| IdentityError::Corrupt(key_path.clone()))?;
@@ -291,7 +291,7 @@ fn ca_params() -> Result<CertificateParams, IdentityError> {
 }
 
 fn params(names: &[&str]) -> Result<CertificateParams, IdentityError> {
-    let names: Vec<String> = names.iter().map(|n| (*n).to_string()).collect();
+    let names: Vec<String> = names.iter().map(|n| (*n).to_owned()).collect();
     let mut p = CertificateParams::new(names)?;
     p.not_before = date_time_ymd(VALID_FROM.0, VALID_FROM.1, VALID_FROM.2);
     p.not_after = date_time_ymd(VALID_UNTIL.0, VALID_UNTIL.1, VALID_UNTIL.2);
