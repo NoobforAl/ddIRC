@@ -1,0 +1,73 @@
+# cargo-deny: what Dependabot does not look at.
+#
+# Dependabot keeps versions fresh; this says whether a version in the tree is
+# one we may ship - a known vulnerability, a licence that cannot sit inside a
+# GPL-3.0-or-later app, a crate fetched from somewhere other than crates.io.
+# Run by `make deny` and by the Lint workflow.
+
+[graph]
+all-features = false
+
+[advisories]
+# A yanked release is one its author withdrew; shipping it is shipping a
+# version nobody stands behind.
+yanked = "deny"
+# Arti and its dependencies carry a few unmaintained-crate notices that no
+# upgrade on our side can clear. Those are listed in `ignore` below with the
+# reason, one at a time, rather than switched off as a class.
+ignore = [
+    # `rsa` through arti's key handling (`tor-llcrypto`, `ssh-key-fork-arti`).
+    # The Marvin attack is a timing side channel in RSA *decryption*; arti uses
+    # the crate for legacy Tor identity signatures it verifies, never to decrypt
+    # anything with a key of ours. There is no patched release to move to.
+    { id = "RUSTSEC-2023-0071", reason = "arti only verifies RSA signatures; no fixed release exists" },
+    # A proc-macro, so it runs at build time and ships nothing. Pulled in by
+    # arti's `slotmap-careful`.
+    { id = "RUSTSEC-2024-0436", reason = "build-time proc-macro only, via arti" },
+    # Via the `irc` crate, which reads a PEM client certificate with it. Marked
+    # unmaintained, not vulnerable; moves when `irc` does.
+    { id = "RUSTSEC-2025-0134", reason = "unmaintained only; pulled in by the irc crate" },
+]
+
+[licenses]
+# `allo-isolate` (pulled in by flutter_rust_bridge) declares no licence in its
+# manifest; its repository is MIT OR Apache-2.0.
+# Everything the tree may contain. Permissive licences, plus the weak-copyleft
+# ones that are compatible with GPL-3.0-or-later when linked.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "0BSD",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "Unlicense",
+    "GPL-3.0-or-later",
+    "LGPL-3.0-or-later",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Two versions of a crate is normal and is what Cargo does; it is reported so
+# it can be seen, not refused, because most of it is arti's own pinning.
+multiple-versions = "warn"
+# The workspace crates depend on each other by path and are never published,
+# which is all a "wildcard" is here.
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[[licenses.clarify]]
+crate = "allo-isolate"
+expression = "MIT OR Apache-2.0"
+license-files = []
