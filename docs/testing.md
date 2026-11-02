@@ -235,6 +235,14 @@ and the Rust unit and transcript tests, needing no network and no Docker.
 end-to-end suite against it. **integration-xmpp** does the same for XMPP,
 with `make dev-xmpp` and `make test-integration-xmpp`.
 
+`make dev-xmpp` does not stop at the container's healthcheck. That check is
+`ejabberdctl status`, which says the Erlang node is up and nothing about whether
+port 5223 is accepting TLS, and a CI run once started the suite in the gap: every
+test failed at the handshake with an EOF, and the same commit passed on a re-run.
+`dev/xmpp/wait-ready.sh` therefore completes a certificate-verified handshake
+three times in a row before the target returns, which also rules out a server
+that answers once and then restarts.
+
 The integration job starts the server through the Compose file rather than a
 `services:` block. The Compose file already describes the server, its
 healthcheck and its loopback binding, and a service container would be a second
