@@ -342,7 +342,7 @@ pub enum IrcEvent {
     ///
     /// Reported, never answered — nothing has been sent back and no
     /// connection has been made. Accepting means dialling an address a
-    /// stranger chose, or listening for them, and that is the user's call.
+    /// stranger chose, and that is the user's call.
     FileOffered {
         /// Names the offer for as long as it is worth answering. Passed back
         /// to accept or decline it, so the UI refers to an offer the core
@@ -458,6 +458,11 @@ pub struct DccOffer {
     /// Identifies a reverse offer when accepting it. Present exactly when
     /// this is one.
     pub token: Option<u64>,
+
+    /// Whether [`Self::host`] is on a private network. Decided here so Dart does
+    /// not hold a second copy of the address ranges: the card warns on this, and
+    /// the core is what enforces the rule.
+    pub local_network: bool,
 }
 
 /// A SOCKS5 proxy to dial through.
@@ -861,7 +866,9 @@ impl From<events::IrcEvent> for IrcEvent {
 
 impl From<dcc::DccOffer> for DccOffer {
     fn from(offer: dcc::DccOffer) -> Self {
+        let local_network = offer.destination() == Some(dcc::Destination::LocalNetwork);
         Self {
+            local_network,
             filename: offer.filename,
             // Rendered here rather than on the far side: Dart has no address
             // type, and formatting an `IpAddr` in two places is how the two

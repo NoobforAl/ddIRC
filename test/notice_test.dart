@@ -22,14 +22,34 @@ void main() {
     test('refusing to publish an address while sending is a warning', () {
       final notice = noticeForFailure(
         'sending a file would publish your address, which is the thing the '
-        'proxy is there to hide. Send with the proxy off for this network, or '
+        'proxy is there to hide. Turn off the proxy or built-in Tor to send, or '
         'ask them to send to you instead.',
       );
 
       expect(notice.level, NoticeLevel.warning);
       expect(notice.message, 'Not sent — that would give away your address');
       // The core's own words are kept underneath, because they say what to do.
-      expect(notice.detail, contains('proxy off for this network'));
+      expect(notice.detail, contains('Turn off the proxy or built-in Tor'));
+    });
+
+    test('refusing an offer aimed somewhere unsafe is a warning', () {
+      const atThisMachine =
+          'this offer points at 127.0.0.1, which is this machine or not a real '
+          'address, so it cannot be where someone\'s file is. Nothing was '
+          'dialled.';
+      const throughProxy =
+          'this offer points at 192.168.1.1, a private address, and the '
+          'connection would be made from the proxy\'s end. Nothing was '
+          'dialled.';
+      for (final refusal in [atThisMachine, throughProxy]) {
+        final notice = noticeForFailure(refusal);
+        expect(notice.level, NoticeLevel.warning);
+        expect(
+          notice.message,
+          'Not downloaded — that offer pointed somewhere unsafe',
+        );
+        expect(notice.detail, refusal);
+      }
     });
 
     test('refusing a reverse offer behind a proxy is a warning too', () {

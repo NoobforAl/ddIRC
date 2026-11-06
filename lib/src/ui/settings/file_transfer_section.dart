@@ -186,8 +186,8 @@ class _RiskDialog extends StatelessWidget {
           text:
               'You can accept what is offered and send files of your own, and '
               'nothing is ever accepted for you. While a proxy or Tor is on, '
-              'sending is refused, and so is an offer that asks you to listen '
-              'for the sender.',
+              'sending is refused. ddIRC also refuses an offer that asks you to '
+              'listen for the sender, or one that points at your own machine.',
         ),
         SettingsActions(
           children: [

@@ -1,4 +1,4 @@
-//! Tor, bundled — beta.
+//! Tor, bundled.
 //!
 //! Half of this already worked. Anyone running Tor themselves could point the
 //! proxy setting at `127.0.0.1:9050`, and everything above that — the proxy

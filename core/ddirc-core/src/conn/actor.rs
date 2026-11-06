@@ -1628,6 +1628,20 @@ impl Actor {
             return;
         };
 
+        // Before the resume request below as well as before the dial: an offer
+        // that may not be taken up gets nothing said to its sender either.
+        if let Some(addr) = pending.offer.addr {
+            let allowed = transfer::check_destination(
+                addr,
+                self.config.proxy.is_some(),
+                transfer::is_this_machine(&self.config.host),
+            );
+            if let Err(e) = allowed {
+                self.emit(ended(id, pending.channel, pending.offer.filename, Err(e)));
+                return;
+            }
+        }
+
         let (cancel_tx, mut cancel_rx) = mpsc::channel(1);
         self.transfers.running.insert(id, cancel_tx);
 
@@ -3280,6 +3294,39 @@ mod tests {
             .unwrap();
         }
         dir
+    }
+
+    #[tokio::test]
+    async fn accepting_an_offer_aimed_at_this_machine_is_refused_and_says_nothing() {
+        // The actor's server is `example.test`, so loopback cannot be the sender.
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        let dir = inbox_with_partial("cat.jpg", 400);
+        let mut offer = offer_for("cat.jpg", Some(5001), Some(1000));
+        offer.addr = Some(std::net::IpAddr::from([127, 0, 0, 1]));
+        actor.transfers.offers.insert(
+            1,
+            PendingOffer {
+                channel: "#chat".to_owned(),
+                from: "alice".to_owned(),
+                offer,
+            },
+        );
+
+        actor
+            .accept_file(&mut outgoing, 1, dir.to_string_lossy().into_owned())
+            .await;
+
+        // The sender hears nothing, not even the resume request the partial file
+        // would otherwise have prompted.
+        assert!(outgoing.is_empty());
+        assert!(actor.transfers.running.is_empty());
+        match rx.try_recv() {
+            Ok(IrcEvent::FileTransferEnded { id, error, .. }) => {
+                assert_eq!(id, 1);
+                assert!(error.unwrap().contains("Nothing was dialled"));
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 
     #[tokio::test]

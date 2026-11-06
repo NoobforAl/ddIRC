@@ -14,19 +14,26 @@
 //! setting can be "route everything through Tor" that would be the file
 //! transfer quietly undoing the setting. The answer implemented here is a
 //! single rule — **a transfer discloses no more than the connection that
-//! negotiated it** — which comes out as four cases:
+//! negotiated it** — which comes out as these cases:
 //!
 //! | | No proxy | Proxy configured |
 //! |---|---|---|
 //! | **Accepting** a normal offer | dial them directly | dial them **through the proxy** |
-//! | **Accepting** a reverse offer | listen, and send our address back | **refused** — listening means disclosing where we are |
+//! | **Accepting** a reverse offer | **refused** — not built | **refused** — listening means disclosing where we are |
 //! | **Sending** | listen, and offer our address | **refused** — see below |
 //!
-//! The two refusals are the important entries. Accepting a reverse offer from
-//! behind Tor has no way to keep the promise, because the whole shape of it is
-//! "tell me where you are and I will connect to you"; refusing with a reason
-//! the user can read is far better than a transfer that works and silently
-//! publishes their address.
+//! The refusals on the right are the important entries. Accepting a reverse
+//! offer from behind Tor has no way to keep the promise, because the whole shape
+//! of it is "tell me where you are and I will connect to you"; refusing with a
+//! reason the user can read is far better than a transfer that works and silently
+//! publishes their address. The one with no proxy breaks no promise. Listening
+//! and answering with a token is simply not written, and the two cases have
+//! different errors because only one of them is about a proxy.
+//!
+//! # Where an offer may point
+//!
+//! The address in an offer is a stranger's choice, and accepting means connecting
+//! to it. [`check_destination`] has the rule; [`Destination`] has the kinds.
 //!
 //! Sending from behind a proxy *has* an answer — a reverse offer of our own,
 //! where they listen and we dial out through the proxy — and it is not built
@@ -53,7 +60,7 @@ use tokio::sync::mpsc;
 use tokio_socks::tcp::Socks5Stream;
 
 use crate::api::types::ProxyConfig;
-use crate::dcc::offer::DccOffer;
+use crate::dcc::offer::{DccOffer, Destination};
 
 /// How much is moved per read or write.
 ///
@@ -105,6 +112,31 @@ pub enum TransferError {
     )]
     WouldDiscloseAddress,
 
+    /// An incoming *reverse* offer with no proxy. Nothing would be disclosed
+    /// that a normal transfer does not disclose; listening for one is just not
+    /// built. Separate from the error above, whose reason would be untrue here.
+    #[error(
+        "this offer asks your client to listen for the sender, which ddIRC does \
+         not do. Ask them to send it normally instead."
+    )]
+    ReverseOfferUnsupported,
+
+    /// An offer naming this machine, or no real place, on a connection that
+    /// gives no reason to believe it.
+    #[error(
+        "this offer points at {0}, which is this machine or not a real address, \
+         so it cannot be where someone's file is. Nothing was dialled."
+    )]
+    UnsafeDestination(IpAddr),
+
+    /// An offer naming a private address, with a proxy configured. The proxy
+    /// would make the connection, so it would land on the proxy's own network.
+    #[error(
+        "this offer points at {0}, a private address, and the connection would \
+         be made from the proxy's end. Nothing was dialled."
+    )]
+    PrivateDestinationThroughProxy(IpAddr),
+
     /// Sending while a proxy is configured.
     ///
     /// Deliberately a separate error from the one above. They are refused for
@@ -113,7 +145,7 @@ pub enum TransferError {
     /// exactly what it did.
     #[error(
         "sending a file would publish your address, which is the thing the \
-         proxy is there to hide. Send with the proxy off for this network, or \
+         proxy is there to hide. Turn off the proxy or built-in Tor to send, or \
          ask them to send to you instead."
     )]
     WouldDiscloseAddressBySending,
@@ -333,7 +365,7 @@ pub async fn accept(
         return Err(TransferError::WouldDiscloseAddress);
     }
     let (Some(addr), Some(port)) = (offer.addr, offer.port) else {
-        return Err(TransferError::WouldDiscloseAddress);
+        return Err(TransferError::ReverseOfferUnsupported);
     };
     if offer.size.is_some_and(|size| size > MAX_TRANSFER_BYTES) {
         return Err(TransferError::TooLarge(
@@ -390,6 +422,53 @@ pub async fn accept(
             Err(e)
         }
     }
+}
+
+/// Whether an accepted offer may connect to `addr`.
+///
+/// Checked before anything is said or dialled. Without it, a stranger's offer
+/// could aim the receiver at its own loopback services or its router.
+///
+/// A blanket refusal of everything private would be simpler and wrong: DCC
+/// advertises the sender's local address, so a private address is what an offer
+/// from someone on the same network looks like, and for most people behind a
+/// router that is the only transfer that works. So a private address stays
+/// allowed with no proxy, and the card names it before anyone presses download.
+///
+/// - **Public** is always allowed.
+/// - **Through a proxy**, nothing else is. The proxy makes the connection, so a
+///   private address or loopback would land on the proxy's network, which is
+///   never where the sender meant.
+/// - **A local network** is allowed with no proxy.
+/// - **This machine** is allowed only when the IRC server is on this machine too,
+///   where the sender really is here: that is the app's own local server. Anywhere
+///   else, nobody's file is on your loopback.
+/// - **Anywhere else** is refused.
+pub fn check_destination(
+    addr: IpAddr,
+    proxied: bool,
+    server_on_this_machine: bool,
+) -> Result<(), TransferError> {
+    match Destination::of(addr) {
+        Destination::Public => Ok(()),
+        Destination::LocalNetwork if proxied => {
+            Err(TransferError::PrivateDestinationThroughProxy(addr))
+        }
+        Destination::LocalNetwork => Ok(()),
+        Destination::ThisMachine if server_on_this_machine && !proxied => Ok(()),
+        Destination::ThisMachine | Destination::Nowhere => {
+            Err(TransferError::UnsafeDestination(addr))
+        }
+    }
+}
+
+/// Whether a server address names this machine.
+pub fn is_this_machine(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.to_canonical().is_loopback())
 }
 
 /// Offer a file: listen, wait for them to dial, and send it.
@@ -800,6 +879,91 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(error, TransferError::WouldDiscloseAddress));
+    }
+
+    #[tokio::test]
+    async fn a_reverse_offer_with_no_proxy_does_not_blame_a_proxy() {
+        let offer = DccOffer {
+            filename: "cat.jpg".to_owned(),
+            addr: None,
+            port: None,
+            size: Some(10),
+            token: Some(7),
+        };
+        let (progress, _rx) = progress();
+        let dir = std::env::temp_dir();
+
+        let error = accept(
+            &offer,
+            &dir,
+            "alice",
+            None,
+            0,
+            progress,
+            &mut never_cancelled(),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, TransferError::ReverseOfferUnsupported));
+        assert!(!error.to_string().contains("proxy"));
+    }
+
+    #[test]
+    fn where_an_offer_may_point() {
+        let check = |address: &str, proxied, local_server| {
+            check_destination(address.parse().unwrap(), proxied, local_server)
+        };
+
+        // A public address, whatever the road.
+        assert!(check("93.184.216.34", false, false).is_ok());
+        assert!(check("93.184.216.34", true, false).is_ok());
+
+        // A local network is what an offer from the same LAN looks like, so it
+        // stays possible, but not through a proxy, which is not on that LAN.
+        assert!(check("192.168.1.20", false, false).is_ok());
+        assert!(matches!(
+            check("192.168.1.20", true, false),
+            Err(TransferError::PrivateDestinationThroughProxy(_))
+        ));
+
+        // Loopback only makes sense when the server is on this machine as well.
+        assert!(matches!(
+            check("127.0.0.1", false, false),
+            Err(TransferError::UnsafeDestination(_))
+        ));
+        assert!(check("127.0.0.1", false, true).is_ok());
+        assert!(matches!(
+            check("127.0.0.1", true, true),
+            Err(TransferError::UnsafeDestination(_))
+        ));
+
+        // Nobody's file is at any of these, on any connection.
+        for address in ["0.0.0.0", "224.0.0.1", "255.255.255.255"] {
+            assert!(matches!(
+                check(address, false, true),
+                Err(TransferError::UnsafeDestination(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn a_server_on_this_machine_is_recognised() {
+        for host in ["127.0.0.1", "::1", "localhost", "LOCALHOST", "localhost."] {
+            assert!(is_this_machine(host), "{host}");
+        }
+        for host in ["irc.libera.chat", "192.168.1.5", "localhost.example.org"] {
+            assert!(!is_this_machine(host), "{host}");
+        }
+    }
+
+    #[test]
+    fn the_sending_refusal_names_a_way_out_that_works_under_built_in_tor() {
+        // Built-in Tor overrides every per-network setting, so advice to change
+        // this network's proxy would do nothing.
+        let message = TransferError::WouldDiscloseAddressBySending.to_string();
+        assert!(message.contains("built-in Tor"));
+        assert!(!message.contains("for this network"));
     }
 
     #[tokio::test]

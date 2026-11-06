@@ -575,13 +575,29 @@ the connection that negotiated it:
 | | No proxy | Proxy configured |
 |---|---|---|
 | **Accepting** a normal offer | dial them directly | dial them **through the proxy** |
-| **Accepting** a reverse offer | listen, and tell them where | **refused** — listening means disclosing where you are |
+| **Accepting** a reverse offer | **refused** — not built | **refused** — listening means disclosing where you are |
 | **Sending** | listen, and offer your address | **refused** — see below |
 
 Sending from behind a proxy wants a reverse offer of our own, where they listen
 and we dial out, and that half is not built. It is refused rather than falling
 back to a direct offer, because a fallback is exactly the thing the rule exists
 to prevent.
+
+**Where an offer may point.** The address in an offer is the sender's choice, so
+it is checked before anything is dialled or said to them:
+
+| The offer names | No proxy | Proxy configured |
+|---|---|---|
+| A public address | dialled | dialled through the proxy |
+| A private address | dialled, and the card names the address first | **refused** — it would land on the proxy's network |
+| This machine | **refused**, unless your IRC server is on this machine too | **refused** |
+| Anything else (multicast, unspecified, reserved) | **refused** | **refused** |
+
+A private address has to stay possible, because that is what an offer from
+somebody on the same network looks like, and for most people behind a router it
+is the only transfer that works. The same number could be your router, and only
+you know which you expected, so the card says *Connects to 192.168.1.20 on your
+own network* before you press anything.
 
 ## Agents (MCP)
 

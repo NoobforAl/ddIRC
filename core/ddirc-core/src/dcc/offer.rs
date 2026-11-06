@@ -9,9 +9,10 @@
 //!   client that writes to the name it was given writes wherever it was told
 //!   to. [`safe_filename`] reduces it to a bare name or refuses it.
 //! - **The address** is somewhere this machine will be asked to connect. It is
-//!   parsed into an [`IpAddr`] and nothing more; deciding whether to dial it is
-//!   not this module's business, and loopback and private ranges are left for
-//!   the caller to judge rather than quietly accepted here.
+//!   parsed into an [`IpAddr`] and nothing more. [`DccOffer::destination`] says
+//!   what kind of place it names; deciding whether to dial it is the transfer's
+//!   business (`transfer::check_destination`), because the answer depends on the
+//!   connection and not only on the offer.
 //!
 //! Parsing is deliberately total: every malformed offer is [`None`], never a
 //! panic and never a partial value.
@@ -54,6 +55,74 @@ impl DccOffer {
     /// address to dial.
     pub fn is_reverse(&self) -> bool {
         self.token.is_some()
+    }
+
+    /// What kind of place the offer asks us to connect to. [`None`] for a
+    /// reverse offer, which names no address.
+    pub fn destination(&self) -> Option<Destination> {
+        self.addr.map(Destination::of)
+    }
+}
+
+/// The kind of place an offer's address names.
+///
+/// Separate from whether it may be dialled, which also depends on the
+/// connection the offer came over. See `transfer::check_destination`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Destination {
+    /// Somewhere on the public internet.
+    Public,
+    /// A private, link-local or carrier-shared range. A real sender can be here:
+    /// DCC advertises the sender's local address, so this is what an offer from
+    /// someone on the same network, or the same VPN, looks like. It is also what
+    /// an offer aimed at the receiver's router looks like, and the two cannot be
+    /// told apart from the number, which is why the card names the address.
+    LocalNetwork,
+    /// This machine.
+    ThisMachine,
+    /// Everything else: unspecified, multicast, documentation, reserved, or a
+    /// tunnelling form that hides where the packet really ends up. Nobody's file
+    /// is there. The default on purpose, so that a range nobody thought about is
+    /// refused rather than dialled.
+    Nowhere,
+}
+
+impl Destination {
+    /// Classify an address.
+    ///
+    /// Built on the check XMPP uploads already use, so the two paths agree on
+    /// what "public" means. An IPv4-mapped address is judged as the IPv4 address
+    /// it is, or `::ffff:127.0.0.1` would pass for something other than loopback.
+    pub fn of(address: IpAddr) -> Self {
+        let address = address.to_canonical();
+        if crate::xmpp::upload::is_public_address(address) {
+            return Self::Public;
+        }
+        match address {
+            IpAddr::V4(v4) => {
+                let o = v4.octets();
+                if v4.is_loopback() {
+                    Self::ThisMachine
+                } else if v4.is_private()
+                    || v4.is_link_local()
+                    || (o[0] == 100 && (64..=127).contains(&o[1]))
+                {
+                    Self::LocalNetwork
+                } else {
+                    Self::Nowhere
+                }
+            }
+            IpAddr::V6(v6) => {
+                let first = v6.segments()[0];
+                if v6.is_loopback() {
+                    Self::ThisMachine
+                } else if (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80 {
+                    Self::LocalNetwork
+                } else {
+                    Self::Nowhere
+                }
+            }
+        }
     }
 }
 
@@ -319,6 +388,42 @@ fn parse_addr(s: &str) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_address_is_classified_by_where_it_really_goes() {
+        for (address, expected) in [
+            ("203.0.113.5", Destination::Nowhere), // documentation range
+            ("93.184.216.34", Destination::Public),
+            ("2606:4700::1111", Destination::Public),
+            ("192.168.1.20", Destination::LocalNetwork),
+            ("10.0.0.5", Destination::LocalNetwork),
+            ("172.16.0.1", Destination::LocalNetwork),
+            ("169.254.0.1", Destination::LocalNetwork),
+            ("100.64.0.1", Destination::LocalNetwork),
+            ("fd00::1", Destination::LocalNetwork),
+            ("fe80::1", Destination::LocalNetwork),
+            ("127.0.0.1", Destination::ThisMachine),
+            ("127.8.8.8", Destination::ThisMachine),
+            ("::1", Destination::ThisMachine),
+            ("::ffff:127.0.0.1", Destination::ThisMachine),
+            ("::ffff:192.168.1.1", Destination::LocalNetwork),
+            ("0.0.0.0", Destination::Nowhere),
+            ("255.255.255.255", Destination::Nowhere),
+            ("224.0.0.1", Destination::Nowhere),
+            // 6to4 wrapped around loopback: not this machine by its number, and
+            // not somewhere a sender can be either.
+            ("2002:7f00:1::", Destination::Nowhere),
+        ] {
+            let parsed: IpAddr = address.parse().unwrap();
+            assert_eq!(Destination::of(parsed), expected, "{address}");
+        }
+    }
+
+    #[test]
+    fn a_reverse_offer_names_no_destination() {
+        let offer = parse_send("DCC SEND f 0 0 10 7").unwrap();
+        assert_eq!(offer.destination(), None);
+    }
 
     #[test]
     fn a_plain_offer_parses() {

@@ -103,6 +103,16 @@ Notice noticeForFailure(String message) {
     );
   }
 
+  // The same judgement, for an offer aimed somewhere it should not be. Nothing
+  // went wrong: the check did what it is for. Its own title, because no address
+  // of the user's was at stake here.
+  if (lower.contains('nothing was dialled')) {
+    return Notice.warning(
+      'Not downloaded — that offer pointed somewhere unsafe',
+      detail: text,
+    );
+  }
+
   if (lower.contains('cancelled')) {
     return const Notice.info('Cancelled', detail: null);
   }

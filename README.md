@@ -9,8 +9,8 @@ reusable native core.
 
 > [!WARNING]
 > **This is beta software.** It connects and it works, but it has not been
-> through a security review, it has not been run by many people, and the Android
-> build has never been started on a real device. Read
+> through a security review, it has not been run by many people, and the iOS,
+> macOS and Linux builds have never been run. Read
 > [the local server](docs/local-server.md) before turning it on, and treat this the way you would treat any client
 > you had just compiled yourself.
 

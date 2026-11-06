@@ -134,6 +134,16 @@ send one.
   sending at all — is **refused with a reason**. There is no direct-connection
   fallback anywhere on this path, for the same reason there is none on the IRC
   path: a fallback is what would defeat the proxy at the moment it mattered.
+  A reverse offer is refused with no proxy too, because listening for one is not
+  built.
+- **An offer cannot aim the client just anywhere.** The address is the sender's
+  choice, so it is checked before anything is dialled or said to them. Loopback
+  is refused unless the IRC server is on this machine as well, and unspecified,
+  multicast and reserved addresses are always refused. Through a proxy, only a
+  public address is dialled. With no proxy a private address is allowed, because
+  that is what a sender on the same network looks like; the card names the address
+  before the download button is pressed, so this is a warning and not a
+  guarantee.
 - **Declining is silent.** Nothing is sent back, so a stranger fishing for a
   live client learns nothing from being refused.
 - **The UI never hands an address back to the core.** An offer is accepted by

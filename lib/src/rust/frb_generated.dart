@@ -2727,14 +2727,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   DccOffer dco_decode_dcc_offer(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return DccOffer(
       filename: dco_decode_String(arr[0]),
       host: dco_decode_opt_String(arr[1]),
       port: dco_decode_opt_box_autoadd_u_16(arr[2]),
       size: dco_decode_opt_box_autoadd_u_64(arr[3]),
       token: dco_decode_opt_box_autoadd_u_64(arr[4]),
+      localNetwork: dco_decode_bool(arr[5]),
     );
   }
 
@@ -3733,12 +3734,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_port = sse_decode_opt_box_autoadd_u_16(deserializer);
     var var_size = sse_decode_opt_box_autoadd_u_64(deserializer);
     var var_token = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_localNetwork = sse_decode_bool(deserializer);
     return DccOffer(
       filename: var_filename,
       host: var_host,
       port: var_port,
       size: var_size,
       token: var_token,
+      localNetwork: var_localNetwork,
     );
   }
 
@@ -4973,6 +4976,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_16(self.port, serializer);
     sse_encode_opt_box_autoadd_u_64(self.size, serializer);
     sse_encode_opt_box_autoadd_u_64(self.token, serializer);
+    sse_encode_bool(self.localNetwork, serializer);
   }
 
   @protected

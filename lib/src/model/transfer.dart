@@ -43,6 +43,7 @@ class FileTransfer extends ChangeNotifier {
     required String this.from,
     required this.total,
     required this.isReverse,
+    this.localAddress,
   }) : _stage = TransferStage.offered,
        incoming = true;
 
@@ -53,7 +54,8 @@ class FileTransfer extends ChangeNotifier {
     required this.total,
   }) : _stage = TransferStage.running,
        from = null,
-       isReverse = false;
+       isReverse = false,
+       localAddress = null;
 
   final BigInt id;
   final String filename;
@@ -70,10 +72,17 @@ class FileTransfer extends ChangeNotifier {
   /// the disk. Null when an old client omitted it, which is allowed.
   BigInt? total;
 
-  /// Whether accepting would mean listening for them rather than dialling
-  /// them — which is the case the core refuses behind a proxy, because
-  /// listening means telling them where you are.
+  /// Whether the offer asks us to listen for them rather than dial them, which
+  /// the core always refuses: behind a proxy because listening means telling
+  /// them where you are, and otherwise because it is not built.
   final bool isReverse;
+
+  /// The private address an offer would have us connect to, when it names one.
+  ///
+  /// That is what an offer from someone on the same network looks like, and also
+  /// what one aimed at your router looks like, and only the person can tell which
+  /// they expected. So the card says the address before the button is pressed.
+  final String? localAddress;
 
   TransferStage _stage;
   TransferStage get stage => _stage;
