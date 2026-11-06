@@ -311,8 +311,14 @@ pub fn safe_filename(name: &str) -> Option<String> {
         return None;
     }
 
+    // What can make a name read as something it is not. With U+202E,
+    // `invoice<U+202E>fdp.exe` shows as `invoiceexe.pdf` on the card and in a file
+    // manager, while the system still treats it as an `.exe`. Removed before the
+    // checks below, so an invisible character cannot hide a device name or a
+    // `.part` ending from them either.
     let replaced: String = bare
         .chars()
+        .filter(|c| !is_invisible_in_a_name(*c))
         .map(|c| match c {
             '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',
             other => other,
@@ -338,6 +344,17 @@ pub fn safe_filename(name: &str) -> Option<String> {
         name.insert(0, '_');
     }
     (name.len() <= 255).then_some(name)
+}
+
+/// Characters with no business in a filename: direction controls, including the
+/// plain marks that ordinary text may keep, plus line separators and zero-width
+/// characters. Nothing in a file's name needs them to be read correctly, and each
+/// makes two different names look the same.
+fn is_invisible_in_a_name(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00AD | 0x061C | 0x180E | 0x200B..=0x200F | 0x2028..=0x202E | 0x2060..=0x2069 | 0xFEFF
+    )
 }
 
 /// Whether Windows would treat `name` as a device rather than a file.
@@ -551,6 +568,30 @@ mod tests {
         assert!(safe_filename("evil\n.txt").is_none());
         assert!(safe_filename("evil\r\n.txt").is_none());
         assert!(safe_filename("bell\u{7}").is_none());
+    }
+
+    #[test]
+    fn a_name_cannot_hide_what_it_really_is() {
+        // Would read as `invoiceexe.pdf` while being an `.exe`.
+        assert_eq!(
+            safe_filename("invoice\u{202E}fdp.exe").unwrap(),
+            "invoicefdp.exe"
+        );
+        assert_eq!(safe_filename("a\u{2066}b\u{2069}.txt").unwrap(), "ab.txt");
+        assert_eq!(safe_filename("a\u{200B}b\u{FEFF}.txt").unwrap(), "ab.txt");
+        assert_eq!(safe_filename("a\u{2028}b.txt").unwrap(), "ab.txt");
+
+        // Removing them must not let a name past the checks they were hiding it
+        // from.
+        assert_eq!(safe_filename("NUL\u{200B}").unwrap(), "_NUL");
+        assert_eq!(safe_filename("x.pa\u{200D}rt").unwrap(), "x.part_");
+        assert!(safe_filename("\u{202E}\u{200B}").is_none());
+
+        // A name in a right-to-left script is a name.
+        assert_eq!(
+            safe_filename("\u{5E9}\u{5DC}\u{5D5}\u{5DD}.txt").unwrap(),
+            "\u{5E9}\u{5DC}\u{5D5}\u{5DD}.txt"
+        );
     }
 
     #[test]

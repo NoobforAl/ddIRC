@@ -103,7 +103,9 @@ only, and every property below is a deliberate one.
   re-encoding.** `media/` drops EXIF, XMP, IPTC, text chunks, comments,
   embedded thumbnails and timestamps from JPEG, PNG, GIF and WebP. The image
   data is copied across byte-identically, so nothing is lost to a re-compress
-  and no image codec enters the dependency tree.
+  and no image codec enters the dependency tree. Whatever follows the end of the
+  image goes too, and is reported: on a phone that can be a second image with its
+  own GPS data, or the video of a motion photo.
 - **A file it cannot parse is refused, not passed through.** Reporting a file
   as cleaned when its format was not understood would be the one failure that
   matters here, so an unknown or malformed file returns an error and leaves the
@@ -192,11 +194,20 @@ send one.
 ### Untrusted server data
 
 - **Control codes are stripped in Rust, not Dart.** `text/format.rs` parses mIRC
-  formatting into styled spans whose text is guaranteed free of C0 characters
-  and DEL. A malicious message cannot inject line breaks, break the layout, or
+  formatting into styled spans whose text is guaranteed free of C0 and C1
+  characters, DEL, line and paragraph separators, and bidirectional overrides and
+  isolates. A malicious message cannot inject line breaks, break the layout, or
   forge the styling reserved for system messages. Doing this in the core means
   the defence cannot be forgotten by a future UI change.
   Tab is stripped too — it can fake the indentation of a system line.
+- **The terminal client cleans every line it prints**, because a terminal obeys
+  what it is sent, and some fields (a channel name, a `WHOIS` host) reach it
+  without passing through the text above.
+- **A line from an IRC server is limited to 16 KiB.** A longer one ends the
+  connection. Without this, a server could exhaust the app's memory by never
+  sending a newline, ahead of every other bound here. The limit is the one change
+  in `core/vendor/irc-proto`, because the `irc` crate builds its line decoder
+  internally.
 - **Every collection is bounded.** Channels (512), members per channel (20 000),
   topic (1 000 chars), nick (64), channel name (200). Exceeding a bound stops
   growth rather than dropping the connection.
@@ -481,6 +492,11 @@ Everything above applies to XMPP accounts too, through a core of its own
   device starts with empty password fields: the same end state, arrived at
   visibly rather than silently. Apple's restore is not broken this way and
   excludes nothing.
+- **Android backs up settings and saved networks, and nothing else the app
+  writes.** The message history, logs, received files, Tor's state and the local
+  server's key are all excluded from backup and device transfer, by the same two
+  files, so they do not reach a cloud account. Moving to a new phone therefore
+  leaves message history behind.
 - **Importing a network may carry one; exporting one never does.** A `.irc`
   file written by hand may set `password`, `saslPassword`, `nickservPassword`
   and a proxy's `password`. They are read once, moved into the keychain by the

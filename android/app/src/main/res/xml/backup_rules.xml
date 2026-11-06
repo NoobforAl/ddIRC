@@ -5,13 +5,13 @@
   instead; the two files say the same thing and both have to, because minSdk
   is 29 and the app runs on both.
 
-  Everything is backed up except the two preference files holding secrets.
+  Settings and saved networks are backed up. Nothing else is.
 
-  Those are excluded because restoring them cannot work. The ciphertext is
-  encrypted with a key in the Android Keystore, and a Keystore key is
-  hardware-bound and non-exportable: it does not travel with the backup. So a
-  restore onto a new phone brings back ciphertext with no key to read it, and
-  flutter_secure_storage's answer to an unreadable entry is to delete it.
+  The two preference files holding secrets are excluded because restoring them
+  cannot work. The ciphertext is encrypted with a key in the Android Keystore, and
+  a Keystore key is hardware-bound and non-exportable: it does not travel with the
+  backup. So a restore onto a new phone brings back ciphertext with no key to read
+  it, and flutter_secure_storage's answer to an unreadable entry is to delete it.
 
   Left alone, that means every saved password vanishes silently on a phone
   migration while every network survives — profiles live in plain settings and
@@ -21,6 +21,14 @@
   Excluding them makes the outcome honest instead: the password fields are
   empty on the new device, which is a thing the user can see and fix, and is
   the true state of affairs either way.
+
+  The `file` domain is excluded for a different reason: privacy. Everything the app
+  writes for itself is there, under getApplicationSupportDirectory: the message
+  history, which is not encrypted, the chat and debug logs, files received from
+  other people, Tor's state, and the local server's CA key. The app promises these
+  stay on the device, and a backup would copy them to the user's cloud account
+  without anyone having been asked. Losing them on a new phone is the cost, and it
+  is the right way round: history can be left behind, and cannot be taken back.
 -->
 <full-backup-content>
     <!-- The credentials themselves. -->
@@ -28,4 +36,6 @@
     <!-- The Keystore-wrapped key that encrypts them, equally unusable once
          moved off the device that made it. -->
     <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+    <!-- History, logs, received files, Tor's state, the local server's key. -->
+    <exclude domain="file" path="."/>
 </full-backup-content>

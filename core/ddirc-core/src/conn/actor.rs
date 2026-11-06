@@ -3296,6 +3296,51 @@ mod tests {
         dir
     }
 
+    #[test]
+    fn a_line_with_no_end_is_refused_rather_than_held() {
+        use irc::proto::IrcCodec;
+        use tokio_util::bytes::BytesMut;
+        use tokio_util::codec::Decoder;
+
+        // The whole of the memory attack: bytes and never a newline. Fed the way
+        // a socket would, so the codec has to stop on its own partway.
+        let mut codec = IrcCodec::new("utf-8").unwrap();
+        let mut buffer = BytesMut::new();
+        let mut refused = false;
+        for _ in 0..128 {
+            buffer.extend_from_slice(&[b'x'; 8 * 1024]);
+            if codec.decode(&mut buffer).is_err() {
+                refused = true;
+                break;
+            }
+        }
+        assert!(refused, "held a megabyte waiting for a newline");
+        assert!(buffer.len() < 64 * 1024, "held {} bytes", buffer.len());
+
+        // The same length with an ending on it is no better.
+        let mut codec = IrcCodec::new("utf-8").unwrap();
+        let mut buffer = BytesMut::from(format!("{}\r\n", "x".repeat(32 * 1024)).as_str());
+        assert!(codec.decode(&mut buffer).is_err());
+    }
+
+    #[test]
+    fn the_longest_legal_line_still_arrives() {
+        use irc::proto::IrcCodec;
+        use tokio_util::bytes::BytesMut;
+        use tokio_util::codec::Decoder;
+
+        // 8191 bytes of tags and 512 of message, which is what IRCv3 allows.
+        let line = format!(
+            "@tag={} :alice!a@host PRIVMSG #chat :{}\r\n",
+            "t".repeat(8180),
+            "m".repeat(460)
+        );
+        let mut codec = IrcCodec::new("utf-8").unwrap();
+        let mut buffer = BytesMut::from(line.as_str());
+        let message = codec.decode(&mut buffer).unwrap();
+        assert!(message.is_some());
+    }
+
     #[tokio::test]
     async fn accepting_an_offer_aimed_at_this_machine_is_refused_and_says_nothing() {
         // The actor's server is `example.test`, so loopback cannot be the sender.
