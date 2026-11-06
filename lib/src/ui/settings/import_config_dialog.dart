@@ -6,6 +6,7 @@ import '../../model/profile.dart';
 import '../../model/proxy.dart';
 import '../../rust/api/client.dart' as core;
 import '../../rust/api/types.dart' as rust;
+import '../../text/visible.dart';
 import '../../theme.dart';
 import '../motion.dart';
 import '../touchable.dart';
@@ -72,11 +73,17 @@ class _Draft {
   final TextEditingController sasl;
   final TextEditingController nickserv;
 
-  /// Everything starts ticked. A file somebody chose to import, or a QR code
+  /// Most networks start ticked. A file somebody chose to import, or a QR code
   /// they chose to scan, is already the deliberate step — asking again per
   /// network would be asking the same question twice for no reason a shared
   /// file with one bad entry does not already cover by being untickable here.
-  bool selected = true;
+  ///
+  /// The exception is a network that sets its own route. Choosing to import a
+  /// file is choosing to add a server, and nobody doing that has chosen to send
+  /// their connection through a stranger's proxy or around their own. That is the
+  /// one thing in a file worth a second, separate yes, and leaving it off costs
+  /// someone importing their own network a single tap.
+  late bool selected = source.profile.proxyMode == ProxyMode.followDefault;
 
   /// Whether the credentials are showing. Closed by default: the common file
   /// has no password in it and nothing to answer for, and a dialog that
@@ -291,7 +298,9 @@ class _ImportConfigDialogState extends State<ImportConfigDialog> {
 
     return SettingsDialog(
       title: count == 1 ? 'Import a network' : 'Import networks',
-      subtitle: count == 1 ? _drafts.single.profile.name : '$count found',
+      subtitle: count == 1
+          ? showHidden(_drafts.single.profile.name)
+          : '$count found',
       children: [
         for (final draft in _drafts)
           _NetworkRow(
@@ -381,7 +390,7 @@ class _NetworkRow extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        profile.name,
+                        showHidden(profile.name),
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: t.text,
@@ -391,13 +400,16 @@ class _NetworkRow extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        profile.isXmpp
-                            ? '${profile.nickname} · XMPP'
-                            : '${profile.host}:${profile.port} · '
-                                  '${profile.nickname}',
+                        showHidden(
+                          profile.isXmpp
+                              ? '${profile.nickname} · XMPP'
+                              : '${profile.host}:${profile.port} · '
+                                    '${profile.nickname}',
+                        ),
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: t.faint, fontSize: 11.5),
                       ),
+                      _WhatItWillDo(profile: profile),
                     ],
                   ),
                 ),
@@ -428,6 +440,68 @@ class _NetworkRow extends StatelessWidget {
               ? _Credentials(draft: draft, busy: busy, onTest: onTest)
               : const SizedBox(width: double.infinity),
         ),
+      ],
+    );
+  }
+}
+
+/// What saving this network will do beyond listing it, in the file's own terms.
+///
+/// On the row and not behind the chevron, because this is what the tick is
+/// agreeing to, and a file can set all of it. Said whether or not it matters
+/// today: built-in Tor overrides a network's route, but only for as long as it is
+/// on, and what was saved stays saved.
+class _WhatItWillDo extends StatelessWidget {
+  const _WhatItWillDo({required this.profile});
+
+  /// How many channels to name before counting the rest.
+  static const _named = 3;
+
+  final Profile profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+
+    final route = switch (profile.proxyMode) {
+      ProxyMode.custom =>
+        'Connects through a proxy at '
+            '${showHidden(profile.proxy?.label ?? 'no address')}, whose owner '
+            'sees your address and where you connect. Built-in Tor overrides '
+            'this while it is on.',
+      ProxyMode.direct =>
+        'Connects directly, skipping any proxy set for the app. Built-in Tor '
+            'overrides this while it is on.',
+      ProxyMode.followDefault => null,
+    };
+    final channels = profile.channels;
+    final more = channels.length - _named;
+    final joins = channels.take(_named).map(showHidden).join(', ');
+    final plain = [
+      if (profile.autoConnect) 'Connects when the app starts',
+      if (channels.isNotEmpty)
+        'Joins $joins${more > 0 ? ' and $more more' : ''}',
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (route != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              route,
+              style: TextStyle(color: t.warn, fontSize: 11.5, height: 1.35),
+            ),
+          ),
+        for (final line in plain)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              line,
+              style: TextStyle(color: t.faint, fontSize: 11.5, height: 1.35),
+            ),
+          ),
       ],
     );
   }

@@ -9,6 +9,7 @@ import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../rust/api/types.dart';
+import '../text/visible.dart';
 import '../version.dart';
 import 'history.dart';
 import 'secrets.dart';
@@ -867,12 +868,18 @@ class McpService extends ChangeNotifier {
         'that is a message request the user has not accepted',
       );
     }
-    final text = args['text'];
-    if (text is! String || text.trim().isEmpty) {
+    final raw = args['text'];
+    if (raw is! String || raw.trim().isEmpty) {
       throw const _ToolError('text is required');
     }
-    if (text.length > maxText) {
+    if (raw.length > maxText) {
       throw const _ToolError('text is longer than $maxText characters');
+    }
+    // Here, ahead of the check for permission, so that a conversation set to
+    // always allow gets the same clean text as one where the user reads it.
+    final text = cleanForSending(raw);
+    if (text.isEmpty) {
+      throw const _ToolError('text has nothing in it that can be sent');
     }
 
     ReplyRef? replyTo;

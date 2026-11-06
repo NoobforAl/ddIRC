@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../model/mcp.dart';
+import '../text/visible.dart';
 import '../theme.dart';
 import 'settings/settings_chrome.dart';
 import 'motion.dart';
@@ -13,7 +14,12 @@ import 'motion.dart';
 /// point is that the user reads what goes out under their name. The answers
 /// are Send once, Always allow here, and Don't send; dismissing the sheet any
 /// other way is Don't send.
-class AgentApprovalSheet extends StatelessWidget {
+///
+/// An agent may be acting on what a stranger wrote, so the sheet has to hold up
+/// against text written to get past it. A long message could put an innocent line
+/// in view and the real one below the fold, so the answers that send stay disabled
+/// until the end has been on screen, and the sheet says how much there is.
+class AgentApprovalSheet extends StatefulWidget {
   const AgentApprovalSheet({super.key, required this.request});
 
   final McpSendRequest request;
@@ -28,9 +34,47 @@ class AgentApprovalSheet extends StatelessWidget {
   );
 
   @override
+  State<AgentApprovalSheet> createState() => _AgentApprovalSheetState();
+}
+
+class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
+  final _scroll = ScrollController();
+
+  /// Whether the end of the text has been on screen. Stays true once it has:
+  /// someone scrolling back up to reread is not someone who has seen less.
+  bool _seenEnd = false;
+
+  void _checkEnd() {
+    if (_seenEnd || !mounted || !_scroll.hasClients) return;
+    final position = _scroll.position;
+    // A little slack, because a fractional scroll position can stop just short
+    // of the end, and nobody can scroll a button into working from there.
+    if (position.pixels >= position.maxScrollExtent - 4) {
+      setState(() => _seenEnd = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = context.tokens;
+    final request = widget.request;
     final reply = request.replyTo;
+    final conversation = showHidden(request.conversation);
+    final lines = '\n'.allMatches(request.text).length + 1;
+    final characters = request.text.runes.length;
+
+    // Afterwards, because how far there is to scroll is only known once laid
+    // out. A message that fits has nothing to scroll, and so is seen in full.
+    if (!_seenEnd) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEnd());
+    }
+
     return AlertDialog(
       backgroundColor: t.surface,
       shape: RoundedRectangleBorder(
@@ -62,13 +106,14 @@ class AgentApprovalSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'To ${request.conversation} on ${request.networkName}',
+              'To $conversation on ${showHidden(request.networkName)}',
               style: TextStyle(color: t.muted, fontSize: 13),
             ),
             if (reply != null) ...[
               const SizedBox(height: 8),
               Text(
-                'In reply to ${reply.nick}: “${reply.excerpt}”',
+                'In reply to ${showHidden(reply.nick)}: '
+                '“${showHidden(reply.excerpt)}”',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: t.muted, fontSize: 12.5),
@@ -84,17 +129,45 @@ class AgentApprovalSheet extends StatelessWidget {
                 borderRadius: BorderRadius.circular(Tokens.radiusM),
                 border: Border.all(color: t.rule, width: Tokens.hairline),
               ),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  request.text,
-                  style: TextStyle(color: t.text, fontSize: 14, height: 1.4),
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (_) {
+                  _checkEnd();
+                  return false;
+                },
+                // Always showing, including on a phone, where a scrollbar is
+                // otherwise hidden: it is the sign that there is more below.
+                child: Scrollbar(
+                  controller: _scroll,
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _scroll,
+                    child: SelectableText(
+                      showHidden(request.text, keepLines: true),
+                      style: TextStyle(
+                        color: t.text,
+                        fontSize: 14,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
             const SizedBox(height: 10),
             Text(
-              'Nothing is sent unless you choose Send.',
-              style: TextStyle(color: t.faint, fontSize: 12),
+              '$lines ${lines == 1 ? 'line' : 'lines'} · '
+              '$characters ${characters == 1 ? 'character' : 'characters'}',
+              style: TextStyle(color: t.muted, fontSize: 12),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _seenEnd
+                  ? 'Nothing is sent unless you choose Send.'
+                  : 'Scroll to the end of the message to send it.',
+              style: TextStyle(
+                color: _seenEnd ? t.faint : t.warn,
+                fontSize: 12,
+              ),
             ),
           ],
         ),
@@ -107,12 +180,16 @@ class AgentApprovalSheet extends StatelessWidget {
           child: const Text("Don't send"),
         ),
         TextButton(
-          onPressed: () => Navigator.of(context).pop(McpDecision.always),
+          onPressed: _seenEnd
+              ? () => Navigator.of(context).pop(McpDecision.always)
+              : null,
           style: TextButton.styleFrom(foregroundColor: t.accent),
-          child: Text('Always allow in ${request.conversation}'),
+          child: Text('Always allow in $conversation'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(McpDecision.once),
+          onPressed: _seenEnd
+              ? () => Navigator.of(context).pop(McpDecision.once)
+              : null,
           style: FilledButton.styleFrom(
             backgroundColor: t.accent,
             foregroundColor: t.onAccent,

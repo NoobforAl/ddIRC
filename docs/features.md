@@ -220,7 +220,10 @@ by hand over its own channel — see *Being told that something was said*,
 below. Either source lands on the same review screen, one row per network
 found and a checkbox on each, before anything is saved — the same way
 picking a network from Browse fills in the editor rather than connecting on
-the spot.
+the spot. Each row says what saving it will do: its proxy, if it skips yours,
+whether it connects at launch, and the channels it joins. A network that sets
+its own route starts unticked, because choosing to add a server is not choosing
+to send your connection through somebody else's proxy.
 
 **Add a network**, beside Browse, opens a menu rather than a form directly:
 *by hand*, *by QR code*, or *by `.irc` file*. These three used to be three
@@ -622,7 +625,11 @@ two minutes — for *Send*, *Always allow in #channel*, or *Don't send*. There i
 no tool to join, leave, change nick or run a command, because a message is the
 only action whose whole effect can be read off a sheet before it happens. Text
 from an agent is always sent as text: a line that starts with `/` is a line
-that starts with `/`.
+that starts with `/`. Before the sheet appears it loses control and formatting
+codes, direction overrides, invisible tag characters and blank lines, so what you
+read is what goes out. The sheet says how long the message is, marks anything
+invisible that remains, and keeps *Send* and *Always allow* disabled until the end
+of the message has been on screen.
 
 How it is reached: the Streamable HTTP transport, answered with plain JSON, at
 `http://127.0.0.1:<port>/mcp` behind a random bearer token. The settings

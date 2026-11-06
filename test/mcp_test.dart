@@ -170,6 +170,32 @@ void main() {
       expect(mcp.pending.value, isEmpty);
     });
 
+    test('what the sheet shows is cleaned before it is asked about', () async {
+      final (mcp, _, _) = await _service();
+      final call = mcp.call('send_message', {
+        'network': 'p1',
+        'conversation': '#one',
+        'text': 'first line\n\n\n\x01VERSION\x01 \u202Esecond',
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      final request = mcp.pending.value.single;
+      expect(request.text, 'first line\nVERSION second');
+
+      request.decide(McpDecision.deny);
+      await call;
+    });
+
+    test('text that is nothing but filler is refused unasked', () async {
+      final (mcp, _, _) = await _service();
+      await mcp.call('send_message', {
+        'network': 'p1',
+        'conversation': '#one',
+        'text': '\x01\x02',
+      });
+      expect(mcp.pending.value, isEmpty);
+    });
+
     test('"always" stops asking for that conversation', () async {
       final (mcp, _, _) = await _service();
       final first = mcp.call('send_message', {

@@ -515,6 +515,12 @@ Everything above applies to XMPP accounts too, through a core of its own
   reads a decoded string locally; nothing about the payload is sent anywhere,
   and the camera permission it needs is requested and owned by
   `mobile_scanner` itself, not this app's code.
+- **A file cannot set a route without it being seen.** A shared `.irc` file or QR
+  code can name a proxy, or tell a network to skip yours. Each row on the import
+  screen says so, along with whether it connects at launch and the channels it
+  joins, and a network that sets its own route starts unticked. Anything invisible
+  in a name or address is drawn as its code. This is disclosure: someone who ticks
+  the row has still agreed to that proxy.
 
 ### App lock
 
@@ -555,8 +561,16 @@ in memory about open conversations and ask to send messages.
   been accepted cannot be answered at all.
 - **One write, no commands.** The only action is a message to a conversation
   that is already open. An agent's text is sent as text — it never reaches the
-  slash-command parser — and the core's own outgoing sanitiser still strips
-  line breaks and control characters, so it cannot inject IRC commands.
+  slash-command parser — and it is cleaned before the sheet appears: control and
+  formatting codes (so no hidden CTCP), direction overrides, invisible tag
+  characters and blank lines all go. Line breaks still separate messages, and the
+  core's outgoing sanitiser strips CR, LF and NUL from each, so it cannot inject
+  IRC commands.
+- **A long message cannot be approved unread.** The sheet gives its length, always
+  shows a scrollbar, marks anything invisible that remains, and keeps *Send* and
+  *Always allow* disabled until the end has been on screen. That proves the end was
+  shown, not that it was read. *Always allow* skips the sheet for that conversation
+  from then on, so an agent acting on what a stranger wrote can post there unread.
 - **Nothing while locked.** With the app lock on and the lock screen up,
   every call is refused.
 - **What it can read is what the screen can.** In-memory scrollback only; it
