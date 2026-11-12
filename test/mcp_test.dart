@@ -270,6 +270,25 @@ void main() {
       expect(prefs.getStringList('mcp.allowed'), isNull);
     });
 
+    test('a damaged entry is dropped rather than breaking the list', () async {
+      final later = DateTime.now()
+          .add(const Duration(hours: 3))
+          .millisecondsSinceEpoch;
+      SharedPreferences.setMockInitialValues({
+        'mcp.allowed.v2': [
+          // Each of these is missing a part of `<profile>\n<conversation>`.
+          '$later\nbad',
+          '$later\n\n#no-profile',
+          '$later\np1\n',
+          '$later\np1\n#fine',
+        ],
+      });
+      final mcp = await McpService.load();
+
+      // Read as the settings page reads it. Before the check, listing these threw.
+      expect(mcp.allowances.map((a) => a.conversation), ['#fine']);
+    });
+
     test('a direct message cannot be allowed, whatever is answered', () async {
       final (mcp, session, _) = await _service();
       session.receiveForTesting(
@@ -345,6 +364,27 @@ void main() {
         isFalse,
       );
       expect(mcp.pending.value, isEmpty);
+    });
+
+    test('a send approved as the app locks is not sent', () async {
+      final (mcp, _, locked) = await _service();
+      final call = mcp.call('send_message', {
+        'network': 'p1',
+        'conversation': '#one',
+        'text': 'one',
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      // The user answers and the app locks in the same breath. The answer comes
+      // first, so the lock finds nothing it can still refuse, and the send is
+      // what is left to stop.
+      mcp.pending.value.single.decide(McpDecision.forADay);
+      locked.value = true;
+
+      final result = await call;
+      expect(result['isError'], isTrue);
+      expect(jsonEncode(result), contains('locked'));
+      expect(mcp.activity.first.ok, isFalse, reason: 'newest first');
     });
 
     test('what an agent reads has lost its invisible characters', () async {

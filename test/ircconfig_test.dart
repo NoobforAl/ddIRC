@@ -83,6 +83,29 @@ void main() {
       );
     });
 
+    test('nor can one that follows a quoted key with no space between', () {
+      // In a flow mapping the colon after a quoted key needs no space, so these
+      // are an anchor and an alias that a test for "a word after a space" misses.
+      // Each one parses cleanly if it is let through, so it is the refusal and not
+      // some other error that makes these throw.
+      for (final extra in ['{"a":&x 1}', '{"a":&x [1], "b":*x}']) {
+        expect(
+          () => parseIrcConfig(
+            "networks:\n  - host: 'h.example'\n    port: 6697\n"
+            "    nickname: 'me'\n    extra: $extra\n",
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('alias or anchor'),
+            ),
+          ),
+          reason: extra,
+        );
+      }
+    });
+
     test('* and & inside a word or a quoted value are not aliases', () {
       final network = _parse(
         "networks:\n  - name: 'R&D* one'\n    host: 'h.example'\n    port: 6697\n"
@@ -104,9 +127,26 @@ void main() {
     });
 
     test('and a file larger than any config could be', () {
+      // A valid network followed by a comment, which the parser ignores. So the
+      // only thing that can refuse the longer one is the size check: the same
+      // test on a bare comment passed with that check taken out, because a
+      // document with no networks in it is refused anyway.
+      const network =
+          "networks:\n  - name: 'N'\n    host: 'h.example'\n    port: 6697\n"
+          "    nickname: 'me'\n";
+      String padded(int length) => '$network${'#' * (length - network.length)}';
+
+      expect(padded(maxIrcConfigBytes), hasLength(maxIrcConfigBytes));
+      expect(parseIrcConfig(padded(maxIrcConfigBytes)), hasLength(1));
       expect(
-        () => parseIrcConfig('#' * (maxIrcConfigBytes + 1)),
-        throwsFormatException,
+        () => parseIrcConfig(padded(maxIrcConfigBytes + 1)),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('too large'),
+          ),
+        ),
       );
     });
   });

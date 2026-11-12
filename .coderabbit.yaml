@@ -29,6 +29,9 @@ reviews:
     enabled: true
     # Each push is read again, so a fix is checked rather than assumed.
     auto_incremental_review: true
+    # Without this it stops reviewing automatically after 5 commits, which is
+    # exactly when a long-running security change is still being fixed. 0 is never.
+    auto_pause_after_reviewed_commits: 0
     # Dependabot opens a grouped bump every second month; `make deny`, the tests
     # and CodeQL are what judge those, and a summary of a lockfile is noise.
     ignore_usernames:
