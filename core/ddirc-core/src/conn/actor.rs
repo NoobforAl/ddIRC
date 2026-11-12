@@ -3312,19 +3312,31 @@ mod tests {
     #[test]
     fn unanswered_offers_do_not_pile_up_without_limit() {
         let (mut actor, _rx, mut outgoing) = actor(&[]);
-        for i in 0..(MAX_PENDING_OFFERS + 50) {
+        let total = MAX_PENDING_OFFERS + 50;
+        for i in 0..total {
             feed(
                 &mut actor,
                 &mut outgoing,
                 &format!(":a!a@h PRIVMSG ddirc :\u{01}DCC SEND f{i} 1 5000 10\u{01}"),
             );
+            // After every one, not only at the end: below the limit nothing is
+            // dropped, at it the count stops, and past it each new offer takes
+            // exactly one place. A cap that is off by one, or that only starts
+            // working after a while, shows here and not in a single final check.
+            assert_eq!(
+                actor.transfers.offers.len(),
+                (i + 1).min(MAX_PENDING_OFFERS),
+                "after offer {i}"
+            );
         }
 
-        assert_eq!(actor.transfers.offers.len(), MAX_PENDING_OFFERS);
-        // The newest are the ones kept.
-        let newest = actor.transfers.next_id;
-        assert!(actor.transfers.offers.keys().any(|id| *id + 1 >= newest));
-        assert!(actor.transfers.offers.keys().min() > Some(&1));
+        // Ids count up from 1, so what is kept is exactly the newest run of them:
+        // not merely some recent ones, and nothing older.
+        let mut kept: Vec<u64> = actor.transfers.offers.keys().copied().collect();
+        kept.sort_unstable();
+        let newest = u64::try_from(total).unwrap();
+        let oldest_kept = newest - u64::try_from(MAX_PENDING_OFFERS).unwrap() + 1;
+        assert_eq!(kept, (oldest_kept..=newest).collect::<Vec<_>>());
     }
 
     #[test]

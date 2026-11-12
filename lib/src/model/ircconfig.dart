@@ -133,7 +133,7 @@ List<ImportedNetwork> parseIrcConfig(String source) {
   if (_aliasOrAnchor.hasMatch(source)) {
     throw const FormatException(
       'This file uses a YAML alias or anchor (a word starting with * or & after '
-      'a space), which network configs do not support.',
+      'a space or a colon), which network configs do not support.',
     );
   }
   final budget = _CopyBudget();
@@ -300,7 +300,13 @@ Object? _plain(Object? node, _CopyBudget budget, int depth) {
 
 /// `*name` or `&name` where YAML could read it as one: at the start of a line, or
 /// after a space or the punctuation that opens a value.
-final _aliasOrAnchor = RegExp(r'(^|[\s\[{,])[*&]\S', multiLine: true);
+///
+/// The colon is there for a flow mapping, where the one after a quoted key needs
+/// no space (`{"a":&x 1, "b":*x}`). Without it that is an anchor and an alias this
+/// test never saw, and a way to build the nested aliases it exists to refuse. It
+/// also turns away a plain value such as `a:&b`, which YAML reads as one word;
+/// nothing this format writes looks like that.
+final _aliasOrAnchor = RegExp(r'(^|[\s\[{,:])[*&]\S', multiLine: true);
 
 String _key(Object? key) {
   if (key is Map || key is List) throw const _TooComplex();

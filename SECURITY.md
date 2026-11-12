@@ -213,7 +213,9 @@ send one.
 - **Every collection is bounded.** Channels (512), members per channel (20 000),
   topic (1 000 chars), nick (64), channel name (200), people in an XMPP room
   (20 000), unanswered DCC offers (256). Exceeding a bound stops growth rather than
-  dropping the connection. The local server is the exception: it has no limit on
+  dropping the connection. An XMPP room's own word that a presence is ours does not
+  buy a place in a full room, except once, to let us in: a room can mark any nick as
+  ours. The local server is the exception: it has no limit on
   connections, channels or what it queues for a client, because only this machine
   can reach it.
 - **Capability lists are bounded** (8 KiB). A server can otherwise stream
@@ -589,7 +591,8 @@ in memory about open conversations and ask to send messages.
   the agent.
 - **Nothing while locked.** With the app lock on, every call is refused from the
   moment the app is out of sight until it is unlocked, and sends waiting for an
-  answer are refused at that moment.
+  answer are refused at that moment. The lock is checked once more just before a
+  message goes out, so one approved in the instant the app locks is not sent.
 - **The port is kept between runs**, so a configured client keeps working. While
   ddIRC is not running, another local program could listen on it and collect the
   token from a client that tries to connect. *New token* takes that token back.

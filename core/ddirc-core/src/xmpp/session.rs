@@ -982,7 +982,18 @@ impl Session {
                     self.index
                         .forget_conversation(&format!("{channel}/{raw_nick}"));
                     room.remove(&nick);
-                    room.note_rename(new, nick);
+                    // Too many left unfinished makes the room forget one. The
+                    // app was last told that nick was here, so it is told now
+                    // that it is not, or it would show it for as long as the
+                    // room stays open. Quietly: nothing says it ever left.
+                    if let Some(gone) = room.note_rename(new, nick) {
+                        self.index.forget_author(&channel, &gone);
+                        fx.event(IrcEvent::MemberChanged {
+                            channel,
+                            previous: gone,
+                            member: None,
+                        });
+                    }
                 }
                 return;
             }
@@ -1029,8 +1040,10 @@ impl Session {
         }
 
         // Before anything is reported, because the app keeps its own list of whoever
-        // is reported. Never ourselves: our own presence is what ends the join.
-        if !is_self && !room.admits(&nick) {
+        // is reported. `is_self` is not trusted for this: it is true for any presence
+        // the room marks as ours, and a room can mark as many nicks as it likes. What
+        // may pass a full room is decided by `Room::admits`.
+        if !room.admits(&nick, is_self) {
             return;
         }
 

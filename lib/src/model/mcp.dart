@@ -215,11 +215,24 @@ class McpService extends ChangeNotifier {
   }
 
   /// Stored as `<milliseconds>\n<key>`, so a key holding a newline stays whole.
-  static Map<String, int> _readAllowed(List<String>? stored) => {
-    for (final line in stored ?? const <String>[])
-      if (line.indexOf('\n') case final split when split > 0)
-        line.substring(split + 1): ?int.tryParse(line.substring(0, split)),
-  };
+  ///
+  /// The key is itself `<profile>\n<conversation>`, and [allowances] splits it on
+  /// that newline. An entry without one cannot have been written by this class, so
+  /// it comes from a store that was edited or damaged, and is dropped here rather
+  /// than kept to make the settings page throw when it lists grants.
+  static Map<String, int> _readAllowed(List<String>? stored) {
+    final allowed = <String, int>{};
+    for (final line in stored ?? const <String>[]) {
+      final split = line.indexOf('\n');
+      if (split <= 0) continue;
+      final until = int.tryParse(line.substring(0, split));
+      final key = line.substring(split + 1);
+      final inner = key.indexOf('\n');
+      if (until == null || inner <= 0 || inner == key.length - 1) continue;
+      allowed[key] = until;
+    }
+    return allowed;
+  }
 
   Future<void> _saveAllowed() async {
     await _prefs?.setStringList(_kAllowed, [
@@ -1057,6 +1070,15 @@ class McpService extends ChangeNotifier {
         };
         await _saveAllowed();
       }
+    }
+
+    // Asked again here, after everything above that waited. The lock refuses what
+    // is waiting for an answer, and an answered send is no longer waiting: one
+    // approved in the moment the app locked, or while the grant was being saved,
+    // would otherwise go out behind the lock screen. A grant just made stays, since
+    // the user made it before the lock; it is only this send that is stopped.
+    if (_locked?.value ?? false) {
+      throw const _ToolError('ddIRC is locked. Ask the user to unlock it.');
     }
 
     final error = await session.say(conversation.name, text, replyTo: replyTo);

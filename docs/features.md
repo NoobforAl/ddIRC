@@ -619,10 +619,15 @@ What an agent can do:
 | `search_messages` | Text search over what the app holds in memory, newest first. |
 | `send_message` | Send to a conversation that is already open, optionally as a reply. |
 
-**Nothing is sent without you.** Every `send_message` raises a sheet in the
-app with the network, the conversation and the exact text, and waits — up to
-two minutes — for *Send*, *Allow in #channel for a day*, or *Don't send*. Direct
-messages cannot be allowed, and settings lists every channel that is. There is
+**Nothing is sent without you, unless you have allowed that channel.** Every
+`send_message` raises a sheet in the app with the network, the conversation and
+the exact text, and waits — up to two minutes — for *Send*, *Allow in #channel
+for a day* or *Don't send*. Choosing *Allow in #channel for a day* is a choice to
+stop being asked: for the next 24 hours an agent's messages to that channel are
+sent with no sheet, and so with nobody reading them first. Settings lists every channel that is allowed, how long each has left, and takes
+any of them back at once. Direct messages cannot be allowed. The lock is the
+other thing that stops them: while the app is locked nothing is sent, allowed
+channel or not. There is
 no tool to join, leave, change nick or run a command, because a message is the
 only action whose whole effect can be read off a sheet before it happens. Text
 from an agent is always sent as text: a line that starts with `/` is a line

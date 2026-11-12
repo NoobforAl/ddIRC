@@ -173,7 +173,7 @@ pub const MAX_OCCUPANTS: usize = 20_000;
 
 /// How many announced renames wait for their second half. It normally arrives at
 /// once, so this only fills if somebody announces renames and never finishes them.
-const MAX_RENAMES: usize = 64;
+pub const MAX_RENAMES: usize = 64;
 
 impl Room {
     pub fn new(jid: BareJid, nick: String) -> Self {
@@ -230,17 +230,43 @@ impl Room {
 
     /// Whether a presence from this nick can be kept. Someone already here always
     /// can, since it adds no one; a full room stops growing rather than leaving.
-    pub fn admits(&self, nick: &str) -> bool {
-        self.occupants.len() < MAX_OCCUPANTS || self.occupants.contains_key(nick)
+    ///
+    /// `claims_self` is only what the presence says: the room marks it with status
+    /// 110, and a room we do not trust can put that on any nick it likes. So a full
+    /// room makes room for it in just two cases, both of which a stranger cannot
+    /// repeat. It is the nick we hold, which is already counted and so adds no one.
+    /// Or we have not been let in yet, in which case it is the end of the list the
+    /// room sends first, and the first one marks us as joined - a second claim
+    /// finds the room full again. Without the second case a room that really has
+    /// [`MAX_OCCUPANTS`] people could never finish letting us in.
+    ///
+    /// A rename needs no exception: the old nick is removed when it is announced,
+    /// which leaves the place the new one takes.
+    pub fn admits(&self, nick: &str, claims_self: bool) -> bool {
+        self.occupants.len() < MAX_OCCUPANTS
+            || self.occupants.contains_key(nick)
+            || self.is_self(nick)
+            || (claims_self && !self.joined)
     }
 
-    /// Remember that `old` said it is becoming `new`. The oldest goes when full,
-    /// and the only cost is that its rename shows as a leave and a join.
-    pub fn note_rename(&mut self, new: String, old: String) {
-        if self.renaming.len() >= MAX_RENAMES && !self.renaming.contains_key(&new) {
-            self.renaming.pop_first();
-        }
+    /// Remember that `old` said it is becoming `new`, and return whichever nick
+    /// was forgotten to make room for it, if any.
+    ///
+    /// A map keyed by name cannot say which entry is oldest, so the first by name
+    /// goes: every entry here is equally an announcement nobody finished, and a
+    /// rename that does complete does so at once. Its only cost is that the one
+    /// forgotten shows as a leave rather than a rename. The caller has to say so,
+    /// because the app has had no word of that nick since it was announced, and
+    /// would keep showing it for as long as the room is open.
+    #[must_use = "the nick it returns has to be reported as gone"]
+    pub fn note_rename(&mut self, new: String, old: String) -> Option<String> {
+        let dropped = if self.renaming.len() >= MAX_RENAMES && !self.renaming.contains_key(&new) {
+            self.renaming.pop_first().map(|(_, old)| old)
+        } else {
+            None
+        };
         self.renaming.insert(new, old);
+        dropped
     }
 
     pub fn remove(&mut self, nick: &str) -> Option<Occupant> {
@@ -281,21 +307,94 @@ mod tests {
             ));
         }
 
-        assert!(!room.admits("someone new"));
-        assert!(room.admits("n7"), "someone here can still change");
+        assert!(!room.admits("someone new", false));
+        assert!(room.admits("n7", false), "someone here can still change");
 
         room.remove("n7");
-        assert!(room.admits("someone new"), "and a place that opens is free");
+        assert!(
+            room.admits("someone new", false),
+            "and a place that opens is free"
+        );
+    }
+
+    #[test]
+    fn a_full_room_still_lets_us_in_once_and_only_once() {
+        let mut room = a_room();
+        for i in 0..MAX_OCCUPANTS {
+            room.upsert(occupant(
+                &format!("n{i}"),
+                Affiliation::None,
+                Role::Participant,
+            ));
+        }
+
+        // We are the last of the list a room sends first, so a room with exactly
+        // as many people as we keep must still be able to finish letting us in.
+        assert!(room.admits("whoever the room calls us", true));
+        // Said by anyone else it is a stranger's word, and the room is full.
+        assert!(!room.admits("someone new", false));
+
+        // The first such presence is what marks us joined, so the same claim from a
+        // room that wants to grow ours without bound finds it shut.
+        room.joined = true;
+        assert!(!room.admits("made up 1", true));
+        assert!(!room.admits("made up 2", true));
+        // The nick we hold is already counted, so it is never refused.
+        assert!(room.admits("me", true));
+        assert!(room.admits("me", false));
     }
 
     #[test]
     fn renames_nobody_finishes_do_not_pile_up() {
         let mut room = a_room();
         for i in 0..(MAX_RENAMES * 3) {
-            room.note_rename(format!("new{i:04}"), format!("old{i:04}"));
+            let _ = room.note_rename(format!("new{i:04}"), format!("old{i:04}"));
         }
 
         assert_eq!(room.renaming.len(), MAX_RENAMES);
+    }
+
+    #[test]
+    fn a_rename_that_is_forgotten_is_handed_back_so_it_can_be_reported() {
+        let mut room = a_room();
+        for i in 0..MAX_RENAMES {
+            assert_eq!(
+                room.note_rename(format!("new{i:03}"), format!("old{i:03}")),
+                None,
+                "there is room for {MAX_RENAMES} of them"
+            );
+        }
+
+        // One more, and the first by name makes way. Its old nick is what the app
+        // is still showing.
+        assert_eq!(
+            room.note_rename("new999".to_owned(), "old999".to_owned()),
+            Some("old000".to_owned())
+        );
+        assert_eq!(room.renaming.len(), MAX_RENAMES);
+        assert!(!room.renaming.contains_key("new000"));
+    }
+
+    #[test]
+    fn announcing_a_rename_again_forgets_nobody() {
+        let mut room = a_room();
+        for i in 0..MAX_RENAMES {
+            let _ = room.note_rename(format!("new{i:03}"), format!("old{i:03}"));
+        }
+
+        // The same new nick again: it replaces its own entry. Dropping the guard
+        // that checks for that would evict the first one as well, and this is the
+        // only place that would show.
+        assert_eq!(
+            room.note_rename("new010".to_owned(), "someone else".to_owned()),
+            None
+        );
+        assert_eq!(room.renaming.len(), MAX_RENAMES);
+        assert!(
+            room.renaming.contains_key("new000"),
+            "nothing was made to leave"
+        );
+        assert_eq!(room.renaming["new010"], "someone else");
     }
 
     fn occupant(nick: &str, affiliation: Affiliation, role: Role) -> Occupant {
