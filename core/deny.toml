@@ -24,8 +24,9 @@ ignore = [
     # A proc-macro, so it runs at build time and ships nothing. Pulled in by
     # arti's `slotmap-careful`.
     { id = "RUSTSEC-2024-0436", reason = "build-time proc-macro only, via arti" },
-    # Via the `irc` crate, which reads a PEM client certificate with it. Marked
-    # unmaintained, not vulnerable; moves when `irc` does.
+    # Via the `irc` crate, which reads an extra root certificate with it: in a
+    # shipped build, only the local server's own, a file the app wrote itself.
+    # Marked unmaintained, not vulnerable; moves when `irc` does.
     { id = "RUSTSEC-2025-0134", reason = "unmaintained only; pulled in by the irc crate" },
 ]
 

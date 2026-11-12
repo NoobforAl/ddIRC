@@ -32,8 +32,10 @@ needs is confined to generated code.
 - **`ServerConfig::extra_root_cert` adds a root; it never replaces the store or
   skips verification.** It exists so integration tests can reach the self-signed
   dev server in `dev/`, which is the alternative to a verification-skipping
-  switch existing at all. It is not reachable from the app: the FFI layer's own
-  `ServerConfig` has no such field, so nothing Dart can set reaches it. An
+  switch existing at all, and so the app can verify its own local server. Nothing
+  outside the core chooses it: the FFI layer's `ServerConfig` has no such field,
+  and in a release build it is set only for a connection to the running local
+  server's loopback address and port, with the certificate the app issued. An
   unreadable path is rejected at config validation rather than being silently
   ignored, which is what the `irc` crate does on its own.
 - Conventional plaintext ports (6660–6669, 194) are **rejected at config
@@ -209,8 +211,11 @@ send one.
   in `core/vendor/irc-proto`, because the `irc` crate builds its line decoder
   internally.
 - **Every collection is bounded.** Channels (512), members per channel (20 000),
-  topic (1 000 chars), nick (64), channel name (200). Exceeding a bound stops
-  growth rather than dropping the connection.
+  topic (1 000 chars), nick (64), channel name (200), people in an XMPP room
+  (20 000), unanswered DCC offers (256). Exceeding a bound stops growth rather than
+  dropping the connection. The local server is the exception: it has no limit on
+  connections, channels or what it queues for a client, because only this machine
+  can reach it.
 - **Capability lists are bounded** (8 KiB). A server can otherwise stream
   `CAP LS *` continuation lines forever during negotiation.
 - **Unknown channels are ignored.** A `JOIN` for a channel we never joined does
@@ -556,7 +561,9 @@ in memory about open conversations and ask to send messages.
   `127.0.0.1`. Requests whose `Host` is not a loopback name, or whose `Origin`
   is anything but loopback, are refused before the token is even checked.
 - **Every send is approved by the user**, with the exact text on screen, unless
-  they chose to always allow that one conversation (revocable in settings).
+  they allowed that one channel for a day. Settings lists each one, and any can
+  be taken back there. A direct message can never be allowed, because it is filed
+  under a nick and a nick can pass to someone else. At most 8 sends wait at once.
   Unanswered after two minutes is a refusal. A message request that has not
   been accepted cannot be answered at all.
 - **One write, no commands.** The only action is a message to a conversation
@@ -568,11 +575,24 @@ in memory about open conversations and ask to send messages.
   IRC commands.
 - **A long message cannot be approved unread.** The sheet gives its length, always
   shows a scrollbar, marks anything invisible that remains, and keeps *Send* and
-  *Always allow* disabled until the end has been on screen. That proves the end was
-  shown, not that it was read. *Always allow* skips the sheet for that conversation
-  from then on, so an agent acting on what a stranger wrote can post there unread.
-- **Nothing while locked.** With the app lock on and the lock screen up,
-  every call is refused.
+  *Allow for a day* disabled until the end has been on screen. That proves the end
+  was shown, not that it was read. While a channel is allowed, an agent acting on
+  what a stranger wrote can post there unread.
+- **A sheet never outlives its question.** One that timed out, or was overtaken
+  by the lock or the server stopping, closes itself. Left up, its Send would do
+  nothing while looking as if it had worked.
+- **What an agent reads is marked as data.** The server's instructions and tool
+  descriptions say that messages are written by other people and are not
+  instructions, and text it reads loses the invisible characters that could
+  carry instructions no person can see. This lowers the risk of an agent being
+  talked into something by a message, and does not remove it: that depends on
+  the agent.
+- **Nothing while locked.** With the app lock on, every call is refused from the
+  moment the app is out of sight until it is unlocked, and sends waiting for an
+  answer are refused at that moment.
+- **The port is kept between runs**, so a configured client keeps working. While
+  ddIRC is not running, another local program could listen on it and collect the
+  token from a client that tries to connect. *New token* takes that token back.
 - **What it can read is what the screen can.** In-memory scrollback only; it
   opens no database and no files.
 
@@ -598,7 +618,7 @@ dependency automatically.
 
 | Advisory | Crate | Assessment |
 |---|---|---|
-| RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which is set only by `ServerConfig::extra_root_cert` — a field the integration tests use and the app cannot set. Not on any code path a shipped build reaches. |
+| RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which is set only by `ServerConfig::extra_root_cert`. A shipped build reaches it only when connecting to its own local server, reading a certificate the app wrote itself. |
 
 ## Reporting
 

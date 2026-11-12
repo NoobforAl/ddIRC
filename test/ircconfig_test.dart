@@ -39,7 +39,78 @@ Profile _profile({
 List<Profile> _parse(String source) =>
     parseIrcConfig(source).map((n) => n.profile).toList();
 
+/// A small file whose aliases multiply tenfold at each of [levels].
+String _aliasBomb(int levels) {
+  final out = StringBuffer(
+    'ddirc: 1\nx0: &x0 [a, a, a, a, a, a, a, a, a, a]\n',
+  );
+  for (var i = 1; i <= levels; i++) {
+    out.writeln('x$i: &x$i [${List.filled(10, '*x${i - 1}').join(', ')}]');
+  }
+  out.write(
+    "networks:\n  - name: 'n'\n    host: 'h.example'\n    port: 6697\n"
+    "    nickname: 'me'\n    extra: *x$levels\n",
+  );
+  return out.toString();
+}
+
 void main() {
+  group('a file built to be expensive', () {
+    test('nested aliases are refused, and quickly', () {
+      final file = _aliasBomb(12);
+      expect(file.length, lessThan(2048), reason: 'small enough for a QR code');
+
+      final watch = Stopwatch()..start();
+      expect(() => parseIrcConfig(file), throwsFormatException);
+      expect(watch.elapsed, lessThan(const Duration(seconds: 5)));
+    });
+
+    test('an alias used as a key is refused before it is hashed', () {
+      // The parser would walk this one itself, so it has to be turned away before
+      // the parser sees it. Before that check, this test never finished.
+      final file = _aliasBomb(12)
+          .replaceFirst('    extra: *x12\n', '    ? *x12\n    : value\n');
+      expect(() => parseIrcConfig(file), throwsFormatException);
+    });
+
+    test('a stray quote cannot hide an alias', () {
+      expect(
+        () => parseIrcConfig(
+          "a: b 'c\nx: &x [1]\nnetworks:\n  - host: 'h.example'\n    port: 6697\n"
+          "    nickname: 'me'\n    extra: *x\nz: d'\n",
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('* and & inside a word or a quoted value are not aliases', () {
+      final network = _parse(
+        "networks:\n  - name: 'R&D* one'\n    host: 'h.example'\n    port: 6697\n"
+        "    nickname: 'me'\n    channels: ['&local', '#a']\n",
+      ).single;
+      expect(network.name, 'R&D* one');
+      expect(network.channels, ['&local', '#a']);
+    });
+
+    test('so is nesting deeper than any config has', () {
+      final deep = '[' * 40 + ']' * 40;
+      expect(
+        () => parseIrcConfig(
+          "networks:\n  - host: 'h.example'\n    port: 6697\n"
+          "    nickname: 'me'\n    extra: $deep\n",
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('and a file larger than any config could be', () {
+      expect(
+        () => parseIrcConfig('#' * (maxIrcConfigBytes + 1)),
+        throwsFormatException,
+      );
+    });
+  });
+
   group('round trip', () {
     test('the fields every network has', () {
       final networks = _parse(writeIrcConfig([_profile()]));

@@ -982,7 +982,7 @@ impl Session {
                     self.index
                         .forget_conversation(&format!("{channel}/{raw_nick}"));
                     room.remove(&nick);
-                    room.renaming.insert(new, nick);
+                    room.note_rename(new, nick);
                 }
                 return;
             }
@@ -1025,6 +1025,12 @@ impl Session {
                     member: None,
                 });
             }
+            return;
+        }
+
+        // Before anything is reported, because the app keeps its own list of whoever
+        // is reported. Never ourselves: our own presence is what ends the join.
+        if !is_self && !room.admits(&nick) {
             return;
         }
 

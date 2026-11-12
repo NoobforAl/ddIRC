@@ -1,9 +1,10 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 
 import '../model/mcp.dart';
 import '../text/visible.dart';
 import '../theme.dart';
-import 'settings/settings_chrome.dart';
 import 'motion.dart';
 
 /// "An agent wants to send this." Shown for every message an agent asks to
@@ -12,8 +13,8 @@ import 'motion.dart';
 /// Everything that will happen is on the sheet: which network, which
 /// conversation, and the exact text — in full, not summarised, because the
 /// point is that the user reads what goes out under their name. The answers
-/// are Send once, Always allow here, and Don't send; dismissing the sheet any
-/// other way is Don't send.
+/// are Send once, allow this channel for a day, and Don't send; dismissing the
+/// sheet any other way is Don't send.
 ///
 /// An agent may be acting on what a stranger wrote, so the sheet has to hold up
 /// against text written to get past it. A long message could put an innocent line
@@ -43,6 +44,33 @@ class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
   /// Whether the end of the text has been on screen. Stays true once it has:
   /// someone scrolling back up to reread is not someone who has seen less.
   bool _seenEnd = false;
+
+  /// Whether this sheet has already closed itself or been answered.
+  bool _closing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // The request can end without the sheet: it timed out, the app locked, or the
+    // server was switched off. A sheet left up would have a Send that did nothing,
+    // while looking as if it had worked.
+    //
+    // This route by name rather than a pop, which takes whatever is on top, and
+    // that may already be the sheet for the next request in the queue.
+    unawaited(
+      widget.request.decision.then((_) {
+        if (!mounted || _closing) return;
+        _closing = true;
+        final route = ModalRoute.of(context);
+        if (route != null) Navigator.of(context).removeRoute(route);
+      }),
+    );
+  }
+
+  void _answer(McpDecision decision) {
+    _closing = true;
+    Navigator.of(context).pop(decision);
+  }
 
   void _checkEnd() {
     if (_seenEnd || !mounted || !_scroll.hasClients) return;
@@ -175,21 +203,18 @@ class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
       actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(McpDecision.deny),
+          onPressed: () => _answer(McpDecision.deny),
           style: TextButton.styleFrom(foregroundColor: t.muted),
           child: const Text("Don't send"),
         ),
-        TextButton(
-          onPressed: _seenEnd
-              ? () => Navigator.of(context).pop(McpDecision.always)
-              : null,
-          style: TextButton.styleFrom(foregroundColor: t.accent),
-          child: Text('Always allow in $conversation'),
-        ),
+        if (request.canAllow)
+          TextButton(
+            onPressed: _seenEnd ? () => _answer(McpDecision.forADay) : null,
+            style: TextButton.styleFrom(foregroundColor: t.accent),
+            child: Text('Allow in $conversation for a day'),
+          ),
         FilledButton(
-          onPressed: _seenEnd
-              ? () => Navigator.of(context).pop(McpDecision.once)
-              : null,
+          onPressed: _seenEnd ? () => _answer(McpDecision.once) : null,
           style: FilledButton.styleFrom(
             backgroundColor: t.accent,
             foregroundColor: t.onAccent,
