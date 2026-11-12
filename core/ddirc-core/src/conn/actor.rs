@@ -3291,9 +3291,19 @@ mod tests {
     }
 
     fn inbox_with_partial(name: &str, bytes: usize) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // One directory per call. Tests run on parallel threads of one process, and
+        // several of them offer the same file name: with a path made of the process
+        // and the name alone, each one's `remove_dir_all` above deleted the folder
+        // another was about to write its partial file into, and whichever lost the
+        // race failed with a missing directory or a partial file that "was not worth
+        // resuming". It showed up now and then, locally and in CI.
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "ddirc-resume-{}-{}",
+            "ddirc-resume-{}-{}-{}",
             std::process::id(),
+            CALLS.fetch_add(1, Ordering::Relaxed),
             name.replace(['.', ' '], "_")
         ));
         let _ = std::fs::remove_dir_all(&dir);
