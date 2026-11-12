@@ -1,0 +1,166 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit: an automated reviewer that reads a pull request and comments on it.
+#
+# It is a second pair of eyes on what CI cannot judge. CI says the code compiles,
+# is formatted and passes its tests; this asks whether a change quietly breaks one
+# of the promises in SECURITY.md, which is the one kind of change that gets
+# reverted (see CLAUDE.md). It advises and never blocks: `ci` is the only required
+# check, and a comment here is a review comment, not a failed gate.
+#
+# Findings that are really a linter's are not wanted twice. `make lint` already runs
+# clippy with `-D warnings`, rustfmt, `dart analyze` and `dart format`, and
+# lint.yml already runs cargo-deny and actionlint, so the instructions below point
+# the reviewer at what those cannot see.
+language: en-US
+
+reviews:
+  # More willing to raise a doubt than the default. This is a client that parses
+  # bytes chosen by strangers, and a missed finding costs more than a wrong one.
+  profile: assertive
+
+  # A comment, not a blocking review: branch protection is `ci` alone.
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  collapse_walkthrough: false
+  poem: false
+
+  auto_review:
+    enabled: true
+    # Each push is read again, so a fix is checked rather than assumed.
+    auto_incremental_review: true
+    # Dependabot opens a grouped bump every second month; `make deny`, the tests
+    # and CodeQL are what judge those, and a summary of a lockfile is noise.
+    ignore_usernames:
+      - dependabot[bot]
+    drafts: false
+
+  # Not read at all. Generated code is rewritten by `make codegen` and never
+  # edited by hand, and a review of it is a review of the generator; lockfiles are
+  # what `make deny` and Dependabot own.
+  path_filters:
+    - "!lib/src/rust/**"
+    - "!core/ddirc-bridge/src/frb_generated.rs"
+    - "!**/*.lock"
+    - "!core/Cargo.lock"
+    - "!pubspec.lock"
+    - "!build/**"
+    - "!coverage/**"
+    - "!assets/**"
+
+  path_instructions:
+    - path: "core/**/*.rs"
+      instructions: |
+        This is the protocol engine. It parses bytes that strangers choose.
+        Look first for:
+        - anything unbounded that a remote party can grow: a collection, a buffer,
+          a line, a queue, a map keyed by something the peer sends. This codebase
+          bounds each of them and says so in SECURITY.md; a new one needs a bound
+          and a test that it holds.
+        - `unsafe` (the core declares `#![forbid(unsafe_code)]`), `unwrap`/`expect`
+          or indexing on data that came off the wire, and arithmetic that can
+          overflow on a length or a count a peer controls.
+        - any weakening of TLS: accepting invalid certificates, skipping hostname
+          verification, a plaintext fallback, or `extra_root_cert` doing more than
+          adding a root.
+        - the `irc` crate's `ctcp` feature being switched on. It must stay off:
+          it answers strangers with the user's real name and local time.
+        - a path built from a name a peer supplied (DCC and XMPP file transfer),
+          and an address a peer supplied that is dialled without being checked.
+        - a secret, token or credential reaching a log line, an error string or a
+          `Debug` impl.
+        Do not report formatting or clippy-style lints; `make lint` does that.
+
+    - path: "lib/**/*.dart"
+      instructions: |
+        The Flutter app. It draws the screen and never speaks a protocol itself.
+        Look first for:
+        - credentials or tokens handled anywhere but `lib/src/model/secrets.dart`
+          (a password in `SharedPreferences`, a file, a log, or an exception
+          message).
+        - text from a server or a stranger shown without losing control and
+          direction-override characters, or passed to something that interprets it
+          (a URL launch, a shell, a path).
+        - anything the MCP/agent server does that is not shown to the user first:
+          the agent can write one message and nothing else, every send needs an
+          approval sheet, and a direct message can never be allowed standing.
+        - work that can block the UI thread on input a peer or a file controls
+          (parsing, decoding, large copies) without a size or complexity bound.
+        - an `await` followed by a use of `BuildContext` without a `mounted` check.
+        Do not suggest changing `analysis_options.yaml` rules or adding `// ignore:`.
+
+    - path: "lib/src/model/mcp.dart"
+      instructions: |
+        The agent-facing server. Treat everything an agent sends as untrusted and
+        everything it reads as something that must be marked as data. Check that
+        the lock, the approval sheet and the per-conversation allowance cannot be
+        bypassed by ordering, timing or a second request, and that nothing is sent
+        while the app is locked.
+
+    - path: ".github/**"
+      instructions: |
+        Workflows run with the repository's secrets. Look for: an expression from
+        the event (`github.event.*`, a branch or PR title) expanded into a `run:`
+        step, a `uses:` that is not pinned to a commit SHA with the version in a
+        trailing comment, a permission wider than the job needs, `secrets: inherit`
+        where one named secret would do, and `pull_request_target` or any trigger
+        that hands secrets to code from a fork.
+
+    - path: "android/**"
+      instructions: |
+        Look for anything that widens what Android backs up or exports, a new
+        permission, an exported component without a reason, cleartext traffic being
+        allowed, and release-build settings that shrink or rename classes a plugin
+        is looked up by (see android/check-release-apk.sh).
+
+    - path: "{SECURITY.md,docs/**}"
+      instructions: |
+        These are promises, and the code is checked against them. Flag a statement
+        that the diff makes untrue, and a code change in the same pull request that
+        is not reflected here. Do not comment on prose style.
+
+    - path: "{core,test,lib}/**/*test*"
+      instructions: |
+        A test that cannot fail is worse than none. Flag an assertion that would
+        pass with the fix removed, and a bound that is tested at only one size.
+
+  tools:
+    # Secrets committed by mistake, by pattern and by entropy.
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    # Dependencies with known vulnerabilities, against the lockfiles. `make deny`
+    # checks the Rust tree; this also reads pubspec.lock.
+    osvScanner:
+      enabled: true
+    # Rules for the classes of bug that are written once and repeated.
+    semgrep:
+      enabled: true
+    opengrep:
+      enabled: true
+    # Workflow files: injection through expressions, unpinned actions, excess
+    # permissions. The ones CodeQL's Actions queries and actionlint do not cover.
+    zizmor:
+      enabled: true
+    actionlint:
+      enabled: true
+    # Every `run:` block and every script under `tool/`, `.github/` and `dev/`.
+    shellcheck:
+      enabled: true
+    yamllint:
+      enabled: true
+    # Off, on purpose: clippy runs in CI with `-D warnings` and a result here would
+    # be a second, slower copy; and the Markdown under docs/ is prose that a
+    # linter would only argue with.
+    clippy:
+      enabled: false
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+chat:
+  # Answers a question asked of it in a pull request, which is how a finding gets
+  # argued with rather than only dismissed.
+  auto_reply: true
