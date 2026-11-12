@@ -42,7 +42,7 @@ void main() {
     await pump(tester, request('hello there'));
 
     expect(enabled(tester, 'Send'), isTrue);
-    expect(enabled(tester, 'Always allow in #chat'), isTrue);
+    expect(enabled(tester, 'Allow in #chat for a day'), isTrue);
     expect(find.text('1 line · 11 characters'), findsOneWidget);
   });
 
@@ -56,7 +56,7 @@ void main() {
     await pump(tester, request(long.join('\n')));
 
     expect(enabled(tester, 'Send'), isFalse);
-    expect(enabled(tester, 'Always allow in #chat'), isFalse);
+    expect(enabled(tester, 'Allow in #chat for a day'), isFalse);
     expect(enabled(tester, "Don't send"), isTrue, reason: 'never held back');
     expect(
       find.text('61 lines · ${long.join('\n').length} characters'),
@@ -86,6 +86,110 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(enabled(tester, 'Send'), isTrue);
+  });
+
+  testWidgets('a direct message has no way to be allowed', (tester) async {
+    await pump(
+      tester,
+      McpSendRequest(
+        profileId: 'p',
+        networkName: 'Libera',
+        conversation: 'bob',
+        text: 'hello',
+        canAllow: false,
+      ),
+    );
+
+    expect(find.textContaining('for a day'), findsNothing);
+    expect(enabled(tester, 'Send'), isTrue);
+  });
+
+  group('when the request ends without an answer', () {
+    Future<void> openSheets(
+      WidgetTester tester,
+      List<McpSendRequest> requests,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Tokens.themeFor(Tokens.dark),
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () {
+                for (final request in requests) {
+                  AgentApprovalSheet.show(context, request);
+                }
+              },
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'the sheet closes, rather than offer a Send that does nothing',
+      (tester) async {
+        final timedOut = request('hello');
+        await openSheets(tester, [timedOut]);
+        expect(find.text('hello'), findsOneWidget);
+
+        timedOut.decide(McpDecision.deny);
+        await tester.pumpAndSettle();
+
+        expect(find.text('hello'), findsNothing);
+        expect(find.text('open'), findsOneWidget);
+      },
+    );
+
+    testWidgets('and it takes itself away, not the sheet on top of it', (
+      tester,
+    ) async {
+      final under = request('underneath');
+      final over = request('on top');
+      await openSheets(tester, [under, over]);
+
+      under.decide(McpDecision.deny);
+      await tester.pumpAndSettle();
+
+      expect(find.text('underneath'), findsNothing);
+      expect(find.text('on top'), findsOneWidget);
+    });
+
+    testWidgets('an answer given is the answer, and closes it once', (
+      tester,
+    ) async {
+      final answered = request('hello');
+      McpDecision? got;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: Tokens.themeFor(Tokens.dark),
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  AgentApprovalSheet.show(context, answered).then((decision) {
+                    got = decision;
+                    answered.decide(decision ?? McpDecision.deny);
+                  }),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+
+      expect(got, McpDecision.once);
+      expect(
+        find.text('open'),
+        findsOneWidget,
+        reason: 'nothing else was closed',
+      );
+    });
   });
 
   testWidgets('anything invisible is shown, and in the names too', (

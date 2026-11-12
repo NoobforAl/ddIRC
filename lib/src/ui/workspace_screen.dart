@@ -172,6 +172,12 @@ class WorkspaceScreen extends StatelessWidget {
 
     final List<ImportedNetwork> networks;
     try {
+      // Asked first, so that picking the wrong file does not read all of it.
+      if (await file.length() > maxIrcConfigBytes) {
+        throw const FormatException(
+          'This file is too large to be a network config.',
+        );
+      }
       networks = parseIrcConfig(await file.readAsString());
     } catch (e) {
       if (context.mounted) await _importFailed(context, e);

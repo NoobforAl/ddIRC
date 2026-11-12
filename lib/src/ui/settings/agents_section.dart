@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../model/mcp.dart';
+import '../../text/visible.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
 
@@ -38,6 +39,16 @@ class _AgentsSectionState extends State<AgentsSection> {
     );
   }
 
+  /// How long a grant has left, in whole hours.
+  static String _remaining(McpAllowance allowance, McpService mcp) {
+    final hours = mcp.timeLeft(allowance).inHours;
+    return switch (hours) {
+      0 => 'less than an hour left',
+      1 => '1 hour left',
+      _ => '$hours hours left',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final mcp = McpScope.of(context);
@@ -45,6 +56,7 @@ class _AgentsSectionState extends State<AgentsSection> {
     final endpoint = mcp.endpoint;
     final token = mcp.token;
     final command = mcp.claudeCodeCommand;
+    final allowances = mcp.allowances;
 
     return SettingsSection(
       label: 'Agents (MCP)',
@@ -106,11 +118,9 @@ class _AgentsSectionState extends State<AgentsSection> {
           ),
           SettingsActions(
             children: [
-              if (mcp.allowedCount > 0)
+              if (allowances.length > 1)
                 SettingsTertiaryButton(
-                  label:
-                      'Ask again everywhere (${mcp.allowedCount} always '
-                      'allowed)',
+                  label: 'Ask again everywhere',
                   onPressed: mcp.forgetAllowed,
                 ),
               SettingsTertiaryButton(
@@ -119,6 +129,43 @@ class _AgentsSectionState extends State<AgentsSection> {
               ),
             ],
           ),
+          // Named one by one, because this is an agent posting as the user with
+          // nobody looking, and each of these is a place it can do that.
+          if (allowances.isNotEmpty) ...[
+            const SettingsRule(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+              child: Text(
+                'Can post without asking',
+                style: TextStyle(
+                  color: t.muted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            for (final allowance in allowances)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 2, 10, 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${showHidden(allowance.conversation)} on '
+                        '${showHidden(mcp.networkNameOf(allowance.profileId))}'
+                        ' · ${_remaining(allowance, mcp)}',
+                        style: TextStyle(color: t.muted, fontSize: 12),
+                      ),
+                    ),
+                    SettingsTertiaryButton(
+                      label: 'Ask again',
+                      onPressed: () => mcp.forgetAllowance(allowance),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 6),
+          ],
           if (mcp.activity.isNotEmpty) ...[
             const SettingsRule(),
             Padding(

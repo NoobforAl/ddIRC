@@ -166,6 +166,15 @@ pub struct Room {
 /// message cannot be live and in the archive page and slip between the two.
 const RECENT_IDS: usize = 512;
 
+/// The most people a room remembers: the same bound as an IRC channel's members.
+/// A room service, or a crowd of made-up occupants, decides how many presences
+/// arrive, and each would otherwise be kept for as long as the connection lasts.
+pub const MAX_OCCUPANTS: usize = 20_000;
+
+/// How many announced renames wait for their second half. It normally arrives at
+/// once, so this only fills if somebody announces renames and never finishes them.
+const MAX_RENAMES: usize = 64;
+
 impl Room {
     pub fn new(jid: BareJid, nick: String) -> Self {
         Self {
@@ -219,6 +228,21 @@ impl Room {
         self.occupants.insert(occupant.nick.clone(), occupant)
     }
 
+    /// Whether a presence from this nick can be kept. Someone already here always
+    /// can, since it adds no one; a full room stops growing rather than leaving.
+    pub fn admits(&self, nick: &str) -> bool {
+        self.occupants.len() < MAX_OCCUPANTS || self.occupants.contains_key(nick)
+    }
+
+    /// Remember that `old` said it is becoming `new`. The oldest goes when full,
+    /// and the only cost is that its rename shows as a leave and a join.
+    pub fn note_rename(&mut self, new: String, old: String) {
+        if self.renaming.len() >= MAX_RENAMES && !self.renaming.contains_key(&new) {
+            self.renaming.pop_first();
+        }
+        self.renaming.insert(new, old);
+    }
+
     pub fn remove(&mut self, nick: &str) -> Option<Occupant> {
         self.occupants.remove(nick)
     }
@@ -238,6 +262,41 @@ impl Room {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn a_room() -> Room {
+        Room::new(
+            "room@conference.example.org".parse().unwrap(),
+            "me".to_owned(),
+        )
+    }
+
+    #[test]
+    fn a_full_room_stops_growing_but_keeps_who_is_there() {
+        let mut room = a_room();
+        for i in 0..MAX_OCCUPANTS {
+            room.upsert(occupant(
+                &format!("n{i}"),
+                Affiliation::None,
+                Role::Participant,
+            ));
+        }
+
+        assert!(!room.admits("someone new"));
+        assert!(room.admits("n7"), "someone here can still change");
+
+        room.remove("n7");
+        assert!(room.admits("someone new"), "and a place that opens is free");
+    }
+
+    #[test]
+    fn renames_nobody_finishes_do_not_pile_up() {
+        let mut room = a_room();
+        for i in 0..(MAX_RENAMES * 3) {
+            room.note_rename(format!("new{i:04}"), format!("old{i:04}"));
+        }
+
+        assert_eq!(room.renaming.len(), MAX_RENAMES);
+    }
 
     fn occupant(nick: &str, affiliation: Affiliation, role: Role) -> Occupant {
         Occupant {

@@ -621,14 +621,15 @@ What an agent can do:
 
 **Nothing is sent without you.** Every `send_message` raises a sheet in the
 app with the network, the conversation and the exact text, and waits — up to
-two minutes — for *Send*, *Always allow in #channel*, or *Don't send*. There is
+two minutes — for *Send*, *Allow in #channel for a day*, or *Don't send*. Direct
+messages cannot be allowed, and settings lists every channel that is. There is
 no tool to join, leave, change nick or run a command, because a message is the
 only action whose whole effect can be read off a sheet before it happens. Text
 from an agent is always sent as text: a line that starts with `/` is a line
 that starts with `/`. Before the sheet appears it loses control and formatting
 codes, direction overrides, invisible tag characters and blank lines, so what you
 read is what goes out. The sheet says how long the message is, marks anything
-invisible that remains, and keeps *Send* and *Always allow* disabled until the end
+invisible that remains, and keeps *Send* and *Allow for a day* disabled until the end
 of the message has been on screen.
 
 How it is reached: the Streamable HTTP transport, answered with plain JSON, at

@@ -115,6 +115,28 @@ class ImportedNetwork {
 /// over would risk two unrelated networks, saved on two different phones,
 /// ending up addressed by the same key on a third.
 List<ImportedNetwork> parseIrcConfig(String source) {
+  if (source.length > maxIrcConfigBytes) {
+    throw const FormatException(
+      'This file is too large to be a network config.',
+    );
+  }
+  // Before the parser, because the parser is what it would hurt: a YAML alias is a
+  // reference, and a map hashes its keys as it is built, so an alias used as a key
+  // is walked in full. Nested aliases in a file small enough for a QR code make
+  // that walk longer than anyone will wait, on the thread drawing the screen.
+  //
+  // This format never writes one, so none is refused rather than limited. The test
+  // cannot tell a quoted string from a real alias, and does not try: telling them
+  // apart means trusting a reading of the file before it is parsed, and a stray
+  // quote could then hide an alias from it. The price is that a quoted value with
+  // ` *word` or ` &word` in it is refused too, and the message says why.
+  if (_aliasOrAnchor.hasMatch(source)) {
+    throw const FormatException(
+      'This file uses a YAML alias or anchor (a word starting with * or & after '
+      'a space), which network configs do not support.',
+    );
+  }
+  final budget = _CopyBudget();
   final Object? doc;
   try {
     doc = loadYaml(source);
@@ -133,7 +155,7 @@ List<ImportedNetwork> parseIrcConfig(String source) {
   final imported = <ImportedNetwork>[];
   for (final entry in networks) {
     if (entry is! YamlMap) continue;
-    final map = _plain(entry) as Map<String, Object?>;
+    final map = _plain(entry, budget, 0) as Map<String, Object?>;
     final profile = Profile.fromJson({...map, 'id': ProfileStore.newId()});
     if (profile == null) continue;
     imported.add(
@@ -258,14 +280,52 @@ String _list(List<String> values) => '[${values.map(_scalar).join(', ')}]';
 /// Deep-copies a `package:yaml` node tree into the plain `Map`/`List`/scalar
 /// shape [Profile.fromJson] already knows how to read — the same shape
 /// `jsonDecode` would have produced, so there is one reader for both.
-Object? _plain(Object? node) {
+///
+/// Counted as it goes, as a second line behind [_aliasOrAnchor]: this is the step
+/// whose cost grows with what a file refers to rather than with its size. A key
+/// has to be plain text for the same reason: turning a list into a string walks it.
+Object? _plain(Object? node, _CopyBudget budget, int depth) {
+  budget.spend(depth);
   if (node is YamlMap) {
     return {
-      for (final entry in node.entries) '${entry.key}': _plain(entry.value),
+      for (final entry in node.entries)
+        _key(entry.key): _plain(entry.value, budget, depth + 1),
     };
   }
   if (node is YamlList) {
-    return node.map(_plain).toList(growable: false);
+    return [for (final item in node) _plain(item, budget, depth + 1)];
   }
   return node;
+}
+
+/// `*name` or `&name` where YAML could read it as one: at the start of a line, or
+/// after a space or the punctuation that opens a value.
+final _aliasOrAnchor = RegExp(r'(^|[\s\[{,])[*&]\S', multiLine: true);
+
+String _key(Object? key) {
+  if (key is Map || key is List) throw const _TooComplex();
+  return '$key';
+}
+
+/// The largest `.irc` file read, far beyond any real one: a network takes a few
+/// hundred bytes.
+const maxIrcConfigBytes = 256 * 1024;
+
+/// How much of a file may be copied, and how deep.
+class _CopyBudget {
+  static const _maxNodes = 20000;
+  static const _maxDepth = 16;
+
+  int _spent = 0;
+
+  void spend(int depth) {
+    if (++_spent > _maxNodes || depth > _maxDepth) throw const _TooComplex();
+  }
+}
+
+/// A [FormatException], so that it reaches the same "could not read this file"
+/// message as any other file that is not a network config.
+class _TooComplex extends FormatException {
+  const _TooComplex()
+    : super('This file is too complicated to be a network config.');
 }

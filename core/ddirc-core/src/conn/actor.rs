@@ -449,6 +449,7 @@ impl Listing {
 #[derive(Default)]
 struct Transfers {
     next_id: u64,
+    // See `MAX_PENDING_OFFERS` for how long an unanswered offer is kept.
     /// Announced, not yet answered. Holds the offer so accepting never has to
     /// take one back from the UI.
     offers: HashMap<u64, PendingOffer>,
@@ -464,6 +465,10 @@ struct Transfers {
     /// names a port can be matched to the one transfer it could mean.
     serving: HashMap<u16, Serving>,
 }
+
+/// The most offers held waiting for an answer. Far more than anyone answers at a
+/// time; pressing download on one older than this does nothing.
+const MAX_PENDING_OFFERS: usize = 256;
 
 /// A `DCC RESUME` we sent and are waiting to see answered.
 struct AwaitedResume {
@@ -1593,6 +1598,14 @@ impl Actor {
         // describe it. The UI never gets to hand an address back to the core —
         // it answers an offer the core parsed, or it answers nothing.
         let id = self.transfers.next();
+        // Ids only go up, so the smallest is the oldest. Offers are written by
+        // strangers and kept until answered, and with transfers switched off the
+        // app never shows them, so nothing else would ever answer them.
+        if self.transfers.offers.len() >= MAX_PENDING_OFFERS {
+            if let Some(oldest) = self.transfers.offers.keys().min().copied() {
+                self.transfers.offers.remove(&oldest);
+            }
+        }
         self.transfers.offers.insert(
             id,
             PendingOffer {
@@ -3294,6 +3307,24 @@ mod tests {
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn unanswered_offers_do_not_pile_up_without_limit() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        for i in 0..(MAX_PENDING_OFFERS + 50) {
+            feed(
+                &mut actor,
+                &mut outgoing,
+                &format!(":a!a@h PRIVMSG ddirc :\u{01}DCC SEND f{i} 1 5000 10\u{01}"),
+            );
+        }
+
+        assert_eq!(actor.transfers.offers.len(), MAX_PENDING_OFFERS);
+        // The newest are the ones kept.
+        let newest = actor.transfers.next_id;
+        assert!(actor.transfers.offers.keys().any(|id| *id + 1 >= newest));
+        assert!(actor.transfers.offers.keys().min() > Some(&1));
     }
 
     #[test]
