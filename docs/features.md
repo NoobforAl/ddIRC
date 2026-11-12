@@ -604,7 +604,7 @@ own network* before you press anything.
 
 ## Agents (MCP)
 
-**Beta, and off.** App settings → Connection → *Agents (MCP)* runs a
+**Off by default.** App settings → Connection → *Agents (MCP)* runs a
 [Model Context Protocol](https://modelcontextprotocol.io) server inside the
 app, so an AI agent — Claude Code, Claude Desktop, any MCP client — can catch
 up on your conversations and draft replies.

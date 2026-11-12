@@ -1,6 +1,6 @@
-# Beta features and file transfer
+# File transfer
 
-What is labelled beta in ddIRC, how a file gets from one person to another, and
+How a file gets from one person to another in ddIRC, and
 whether that works between any two people in the world.
 
 Written from the code at version 0.12.4. The reachability results below are
@@ -8,9 +8,6 @@ worked out from what the code does; they have not been measured across real
 networks.
 
 ## The short answers
-
-**Beta:** the whole app is labelled beta, and two features carry their own beta
-badge: the **local server** and **Agents (MCP)**. Both are off by default.
 
 **Can anyone in the world send a file to anyone else?**
 
@@ -21,26 +18,6 @@ badge: the **local server** and **Agents (MCP)**. Both are off by default.
   which only works from anywhere if the sender's machine has a public IPv4
   address. Most home and mobile connections do not. A fresh install, which uses
   Tor, cannot send over IRC at all.
-
-## What is beta
-
-| What | Status | Default | Where | What it does |
-|---|---|---|---|---|
-| **The app as a whole** | Beta | n/a | Label on the first screen and in settings | No security review yet. iOS, macOS and Linux have not been run. |
-| **Local server** | Beta badge | Off | App settings → Connection | An IRC server inside the app, reachable from this machine only. [Details](local-server.md). |
-| **Agents (MCP)** | Beta badge | Off | App settings → Connection | Lets an AI agent on this machine read conversations and draft replies. You approve each send unless you chose *Always allow* for that conversation. [Details](features.md#agents-mcp). |
-
-The *Connection* row in App settings also shows the badge, so it can be seen
-before the features are reached. It does not mean everything on that page is
-beta.
-
-These sit near the beta features but are **not** labelled beta:
-
-| What | Status |
-|---|---|
-| **Bundled Tor** | Left beta in 0.7, and is what a fresh install connects through (`lib/src/model/tor.dart`). |
-| **File transfers** | No beta label. IRC transfers are off until you accept a warning. |
-| **XMPP** | No beta label. OMEMO encryption, room browsing and `/whois` are not built yet. |
 
 ## How file transfer works
 
@@ -289,7 +266,6 @@ A refused offer sends nothing to the sender, not even a resume request.
 
 | Topic | File |
 |---|---|
-| Beta label and badge | `lib/src/version.dart`, `lib/src/ui/settings/settings_chrome.dart` |
 | Reading an offer, and classifying its address | `core/ddirc-core/src/dcc/offer.rs` |
 | Moving the bytes, timeouts, limits and `check_destination` | `core/ddirc-core/src/dcc/transfer.rs` |
 | Making an offer | `send_file` path in `core/ddirc-core/src/conn/actor.rs` |

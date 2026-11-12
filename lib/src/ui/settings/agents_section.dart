@@ -6,7 +6,7 @@ import '../../text/visible.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
 
-/// The agent server, as shown in App settings — beta.
+/// The agent server, as shown in App settings.
 ///
 /// One switch, then everything needed to point an agent at it: the address,
 /// the token, and a ready-made command for Claude Code. Below that, what has
@@ -60,7 +60,6 @@ class _AgentsSectionState extends State<AgentsSection> {
 
     return SettingsSection(
       label: 'Agents (MCP)',
-      beta: true,
       help:
           'A Model Context Protocol server, so an AI agent — Claude Code, '
           'Claude Desktop, or any MCP client — can read your conversations '

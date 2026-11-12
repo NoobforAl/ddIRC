@@ -548,7 +548,7 @@ Everything above applies to XMPP accounts too, through a core of its own
 
 ### Agent server (MCP)
 
-Off by default, and beta. When on, an MCP client can read what the app holds
+Off by default. When on, an MCP client can read what the app holds
 in memory about open conversations and ask to send messages.
 
 - **Loopback only.** Bound to `127.0.0.1`; nothing off this machine can reach

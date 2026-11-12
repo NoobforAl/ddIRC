@@ -71,7 +71,7 @@ class McpActivity {
 }
 
 /// A way for an AI agent to take part: a Model Context Protocol server inside
-/// the app — beta, and off until switched on.
+/// the app, off until switched on.
 ///
 /// # What an agent can do
 ///

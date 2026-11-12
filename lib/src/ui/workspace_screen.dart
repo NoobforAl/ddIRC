@@ -302,10 +302,6 @@ class _Empty extends StatelessWidget {
             children: [
               const Center(child: AppMark(size: 44)),
               const SizedBox(height: 14),
-              // The wordmark carries the badge, because this is the screen a
-              // fresh install opens on and "it is a beta" is the first thing
-              // about this client worth knowing. The badge's tooltip says
-              // what that means; the version below says which beta.
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -319,8 +315,6 @@ class _Empty extends StatelessWidget {
                       letterSpacing: -0.5,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const BetaBadge(),
                 ],
               ),
               const SizedBox(height: 4),
