@@ -212,10 +212,10 @@ send one.
   internally.
 - **Every collection is bounded.** Channels (512), members per channel (20 000),
   topic (1 000 chars), nick (64), channel name (200), people in an XMPP room
-  (20 000), unanswered DCC offers (256). Exceeding a bound stops growth rather than
-  dropping the connection. An XMPP room's own word that a presence is ours does not
-  buy a place in a full room, except once, to let us in: a room can mark any nick as
-  ours. The local server is the exception: it has no limit on
+  (20 000 besides us), unanswered DCC offers (256). Exceeding a bound stops growth
+  rather than dropping the connection. An XMPP room's own word that a presence is
+  ours does not buy a place in a full room, except once, to let us in: a room can
+  mark any nick as ours. The local server is the exception: it has no limit on
   connections, channels or what it queues for a client, because only this machine
   can reach it.
 - **Capability lists are bounded** (8 KiB). A server can otherwise stream
