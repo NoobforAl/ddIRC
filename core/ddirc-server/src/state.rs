@@ -135,7 +135,7 @@ pub struct Network {
 fn default_motd() -> Vec<String> {
     [
         "This network runs inside ddIRC, on this machine only.",
-        "It is a beta feature: expect gaps, and do not rely on it.",
+        "It is a small server for trying things out: do not rely on it.",
         "Nothing here is reachable from any other machine.",
     ]
     .map(str::to_owned)
@@ -615,8 +615,8 @@ impl Network {
             Response::RPL_MOTDSTART,
             &[&format!("- {server} Message of the Day -")],
         );
-        // The beta label belongs here as well as in the settings switch that
-        // turned this on. A MOTD is the one thing every client shows on
+        // What this server is belongs here as well as in the settings switch
+        // that turned it on. A MOTD is the one thing every client shows on
         // arrival, and it is read by whoever connected — who may not be the
         // person who started the server. An operator can replace it, but never
         // with nothing: see [`Self::motd`].

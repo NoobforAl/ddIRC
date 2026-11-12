@@ -124,7 +124,6 @@ class _AgentApprovalSheetState extends State<AgentApprovalSheet> {
               ),
             ),
           ),
-          const BetaBadge(),
         ],
       ),
       content: ConstrainedBox(

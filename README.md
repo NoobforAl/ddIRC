@@ -8,7 +8,7 @@ A minimal, modern chat client for IRC and XMPP. Android-first, built on a
 reusable native core.
 
 > [!WARNING]
-> **This is beta software.** It connects and it works, but it has not been
+> **Read this first.** ddIRC connects and it works, but it has not been
 > through a security review, it has not been run by many people, and the iOS,
 > macOS and Linux builds have never been run. Read
 > [the local server](docs/local-server.md) before turning it on, and treat this the way you would treat any client
@@ -37,7 +37,7 @@ anything that matters.
 - **Stays connected in the background**: a tray icon on desktop, a foreground
   service on Android, with notifications for DMs and mentions only.
 - **DCC file transfers**, with image metadata stripped before sending.
-- **An MCP server** (beta, off) so an AI agent can read conversations and draft
+- **An MCP server** (off by default) so an AI agent can read conversations and draft
   replies. Nothing is sent without your approval.
 
 **Not yet:** the Windows installer is unsigned, so SmartScreen warns on first

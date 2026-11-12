@@ -233,19 +233,11 @@ class SettingsSection extends StatefulWidget {
     super.key,
     required this.label,
     required this.children,
-    this.beta = false,
     this.help,
   });
 
   final String label;
   final List<Widget> children;
-
-  /// Puts a [BetaBadge] beside the heading.
-  ///
-  /// On the section rather than on the switch inside it, because what is beta
-  /// is the whole feature — the readouts below the switch are as provisional
-  /// as the switch is.
-  final bool beta;
 
   /// What the whole section is, behind a [HelpDot] on the heading.
   ///
@@ -284,7 +276,6 @@ class _SettingsSectionState extends State<SettingsSection> {
                   letterSpacing: 0.9,
                 ),
               ),
-              if (widget.beta) ...[const SizedBox(width: 7), const BetaBadge()],
               if (help != null) ...[
                 const SizedBox(width: 3),
                 HelpDot(
@@ -333,50 +324,6 @@ class SettingsCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: children,
-      ),
-    );
-  }
-}
-
-/// Says a feature is not finished, wherever that feature is offered.
-///
-/// One widget rather than the word written into each label, because there is
-/// more than one beta feature and two of them drifting apart — different
-/// wording, different colour, one of them quietly dropped in a refactor —
-/// would leave the user unable to tell which warnings still stand.
-///
-/// The colour is the warning one, not the accent. A badge in the accent
-/// colour reads as a feature being advertised, and this is the opposite of
-/// that: it is the app declining to promise something.
-class BetaBadge extends StatelessWidget {
-  const BetaBadge({super.key, this.tooltip = _default});
-
-  static const _default =
-      'Beta: this works, but it is new, it will have gaps, and it may '
-      'change. Do not depend on it for anything that matters.';
-
-  final String tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = context.tokens;
-    return Tooltip(
-      message: tooltip,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
-        decoration: BoxDecoration(
-          color: t.warn.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(Tokens.pill),
-        ),
-        child: Text(
-          'BETA',
-          style: TextStyle(
-            color: t.warn,
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
-          ),
-        ),
       ),
     );
   }
@@ -515,7 +462,6 @@ class SettingsNavRow extends StatelessWidget {
     required this.label,
     required this.summary,
     required this.onTap,
-    this.beta = false,
   });
 
   final String label;
@@ -525,10 +471,6 @@ class SettingsNavRow extends StatelessWidget {
   final String summary;
 
   final VoidCallback onTap;
-
-  /// Marks a page that contains a beta feature. On the row as well as inside,
-  /// because the point of the badge is to be seen before the thing is reached.
-  final bool beta;
 
   @override
   Widget build(BuildContext context) {
@@ -556,10 +498,6 @@ class SettingsNavRow extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (beta) ...[
-                        const SizedBox(width: 8),
-                        const BetaBadge(),
-                      ],
                     ],
                   ),
                   const SizedBox(height: 3),
@@ -1372,8 +1310,7 @@ class SettingsSecondaryButton extends StatelessWidget {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         foregroundColor: tone ?? t.text,
-        // Tinted rather than the full colour, the way [BetaBadge] carries the
-        // warning one: a hairline at full strength beside a filled button
+        // Tinted rather than the full colour: a hairline at full strength beside a filled button
         // reads as the louder of the two, which is backwards.
         side: BorderSide(
           color: tone?.withValues(alpha: 0.45) ?? t.rule,

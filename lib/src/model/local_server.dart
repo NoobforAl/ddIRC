@@ -6,7 +6,7 @@ import '../rust/api/server.dart' as core;
 import 'profile.dart';
 import 'proxy.dart';
 
-/// The IRC server that runs inside the app — beta.
+/// The IRC server that runs inside the app.
 ///
 /// Owns one question: is the server running, and on which port. What it does
 /// beyond that is keep one profile pointed at it, because a server nobody can

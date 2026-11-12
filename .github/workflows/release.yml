@@ -2,12 +2,12 @@
 # them to a GitHub Release when a tag is pushed.
 #
 # The trigger pattern is `v0.*` rather than `v*`, and that is deliberate, not
-# an oversight: this project is beta (see the warning at the top of the
+# an oversight: this project is unfinished (see the warning at the top of the
 # README), and a `v1.0.0` tag is a claim this pipeline should not be able to
 # make by accident. Staying on major version 0 is what tells that story in the
 # version number itself - semver already treats 0.x as "still finding its
-# shape" - so nothing needs a `-beta` suffix as well. When the project is
-# ready to leave beta, widening this pattern is itself the decision to make,
+# shape" - so nothing needs a suffix as well. When the project is ready for
+# a 1.0, widening this pattern is itself the decision to make,
 # not something that should fall out of an unrelated tag.
 #
 # The order, and what stops what:
@@ -250,10 +250,10 @@ jobs:
       # anything else, per the trigger pattern above.
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          name: "ddIRC ${{ github.ref_name }} (beta)"
+          name: "ddIRC ${{ github.ref_name }}"
           prerelease: true
           body: |
-            Beta build. See the warning at the top of the README before
+            See the warning at the top of the README before
             trusting this with anything that matters.
 
             | | |

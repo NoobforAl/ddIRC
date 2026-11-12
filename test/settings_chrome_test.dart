@@ -59,25 +59,6 @@ void main() {
       await tester.tap(find.text('Privacy'));
       expect(opened, 1);
     });
-
-    testWidgets('carries the beta badge when what is inside is beta', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        _host(
-          SettingsNavRow(
-            label: 'Connection',
-            summary: 'Direct',
-            beta: true,
-            onTap: () {},
-          ),
-        ),
-      );
-
-      // On the row rather than only inside the page, because the point of the
-      // badge is to be seen before the feature is reached.
-      expect(find.byType(BetaBadge), findsOneWidget);
-    });
   });
 
   group('SettingsDisclosure', () {

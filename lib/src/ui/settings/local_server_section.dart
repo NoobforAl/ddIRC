@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../model/local_server.dart';
 import 'settings_chrome.dart';
 
-/// The IRC server inside the app, as shown in App settings — beta.
+/// The IRC server inside the app, as shown in App settings.
 ///
 /// One switch, and a network appears. That is the whole feature: somewhere to
 /// talk that needs nothing installed, no account made and no network's
@@ -31,7 +31,6 @@ class _LocalServerSectionState extends State<LocalServerSection> {
 
     return SettingsSection(
       label: 'Local server',
-      beta: true,
       // The two paragraphs that used to sit under the readouts. Both are worth
       // saying and neither changes, which is exactly the kind of text that
       // becomes wallpaper if it is always on screen.

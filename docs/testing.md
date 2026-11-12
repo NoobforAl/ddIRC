@@ -306,7 +306,7 @@ while an older one is building cancels it, and that can no longer leave a
 half-made release behind.
 
 It only ever fires on `v0.*` - not `v*` - because that is what marks a release
-as beta in the tag itself: a `v1.0.0` push is a claim this pipeline should not
+as unfinished in the tag itself: a `v1.0.0` push is a claim this pipeline should not
 be able to make on its own, so widening the pattern is left as a deliberate
 change for when that claim is actually true.
 
@@ -317,14 +317,14 @@ the manifest and `lib/src/version.dart` in step, and nothing kept the tag in
 step with either - so a tag nobody bumped the manifest for would ship an APK
 whose Android `versionName` came from the tag and whose own settings screen came
 from the constant. Only `MAJOR.MINOR.PATCH` has to match, because the tags here
-carry a suffix the manifest does not (`v0.2.0+beta`), and that is a label on the
+carry a suffix the manifest does not (`v0.2.0+build`), and that is a label on the
 release rather than a disagreement about which version it is.
 
 **The release APK is signed with the debug key** - that is what
 `android/app/build.gradle.kts` names as the release signing config. Survivable
-for a beta people sideload; not survivable for a store, or for any upgrade path
-across a later key change. A real signing config is the thing to arrange before
-this leaves beta.
+for something people sideload; not survivable for a store, or for any upgrade
+path across a later key change. A real signing config is the thing to arrange
+before a 1.0.
 
 ### Issue forms
 

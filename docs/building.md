@@ -69,7 +69,7 @@ so CI does not need the codegen toolchain.
 The APK *is* Android's installer, so there is no packaging step here the way
 Windows has one — but `make build-android-release` currently signs with the
 **debug key**, which is what `android/app/build.gradle.kts` still names as its
-release signing config. Fine for a beta somebody sideloads; not fine for a
+release signing config. Fine for something people sideload; not fine for a
 store, and not fine for upgrading across a later key change.
 
 ## Building the Windows app
