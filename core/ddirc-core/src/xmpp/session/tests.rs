@@ -448,6 +448,26 @@ fn our_own_rename_in_a_full_room_still_goes_through() {
 }
 
 #[test]
+fn a_room_cannot_keep_our_old_nick_by_bringing_it_back_between_the_halves() {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    let mut s = in_a_full_room();
+    let mut current = "alice".to_owned();
+    for round in 0..4 {
+        let next = format!("ally{round}");
+        feed(&mut s, &rename_away(&current, &next, &[110]));
+        // The old nick is back, as a room can send it, before the second half.
+        feed(&mut s, &arrives(&current, &[110]));
+        feed(&mut s, &arrives(&next, &[110]));
+
+        // Finishing the rename takes the old nick out whether or not it came back.
+        // Left in, each round would keep one more person than a full room may hold.
+        assert_eq!(members_in(&s), MAX_OCCUPANTS + 1, "round {round}");
+        current = next;
+    }
+}
+
+#[test]
 fn a_nick_announcing_two_names_is_not_dropped_when_one_is_replaced() {
     let mut s = in_room();
     feed(&mut s, &arrives("x", &[]));

@@ -1057,6 +1057,14 @@ impl Session {
         };
         let view = occupant.view();
         let old_nick = room.renaming.remove(&nick);
+        // A finished rename means the old nick is gone, whatever happened between the
+        // halves. It was removed when the rename was announced, but a room can send
+        // presence for it again before the second half, and nothing else would take
+        // it out: repeated from each new nick of ours, that keeps one more person
+        // for every round, past a bound a full room is meant to hold.
+        if let Some(old) = &old_nick {
+            room.remove(old);
+        }
         let before = room.upsert(occupant.clone());
 
         if let Some(old) = old_nick {
