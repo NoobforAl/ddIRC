@@ -447,6 +447,68 @@ fn a_rename_the_room_forgets_is_reported_as_the_person_gone() {
 }
 
 #[test]
+fn a_rename_another_one_replaces_is_reported_as_the_person_gone() {
+    let renames_to = |from: &str, to: &str| {
+        muc_presence(
+            from,
+            Some("unavailable"),
+            &format!("<item affiliation='none' role='participant' nick='{to}'/>"),
+            &[303],
+        )
+    };
+
+    let mut s = in_room();
+    feed(&mut s, &arrives("carol", &[]));
+    assert!(feed(&mut s, &renames_to("bob", "x")).events.is_empty());
+
+    // The same destination again, from someone else. Whoever was going to be `x`
+    // was taken out of the list when it was announced and now never will be, so
+    // the app is told, or a room doing this with fresh nicks fills its list.
+    let fx = feed(&mut s, &renames_to("carol", "x"));
+    assert_eq!(
+        fx.events,
+        [IrcEvent::MemberChanged {
+            channel: MUC.to_owned(),
+            previous: "bob".to_owned(),
+            member: None,
+        }]
+    );
+}
+
+#[test]
+fn renames_that_never_finish_do_not_let_a_full_room_grow_before_we_are_in() {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    let mut s = session();
+    s.on_online(&bound());
+    for i in 0..MAX_OCCUPANTS {
+        feed(&mut s, &arrives(&format!("p{i}"), &[]));
+    }
+
+    // Announce a rename of someone who is not there, then the new nick marked as
+    // ours. Completing a rename does not mark us joined, so if this counted as the
+    // way in it would never close, and every pair would add one more.
+    for i in 0..5 {
+        let away = muc_presence(
+            &format!("missing{i}"),
+            Some("unavailable"),
+            &format!("<item affiliation='none' role='participant' nick='fresh{i}'/>"),
+            &[303],
+        );
+        feed(&mut s, &away);
+        feed(&mut s, &arrives(&format!("fresh{i}"), &[110]));
+    }
+    assert_eq!(members_in(&s), MAX_OCCUPANTS);
+
+    // And the real way in is still open: nothing above marked us joined.
+    let fx = feed(&mut s, &arrives("alice", &[110]));
+    assert!(fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::Joined { .. })));
+}
+
+#[test]
 fn changing_our_own_nick_moves_the_nick_we_speak_as() {
     let mut s = in_room();
     let fx = s.on_command(ClientCommand::SetNick("ally".to_owned()));
