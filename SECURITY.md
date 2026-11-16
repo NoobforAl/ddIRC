@@ -622,6 +622,16 @@ dependency automatically.
 | Advisory | Crate | Assessment |
 |---|---|---|
 | RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which is set only by `ServerConfig::extra_root_cert`. A shipped build reaches it only when connecting to its own local server, reading a certificate the app wrote itself. |
+| RUSTSEC-2026-0459 (CVE-2026-119375) | `libsqlite3-sys` 0.38.2 (bundled SQLite before 3.54.0) | **Real, medium (6.8), local only, and waiting on a fix we cannot make ourselves.** Opening a database file that has a crafted `-wal` file beside it can return uninitialised memory. The app opens only its own message history and Tor's directory cache, both written by the app in its own data folder; it never opens a database that arrived from a server, a file transfer or an import, so there is no way for a stranger to supply one. The fix is `rusqlite` 0.41 or later, and arti (`tor-dirmgr` 0.47 and 0.48) still asks for 0.40 or earlier. It moves when arti does; the ignore in `core/deny.toml` says the same and is to be removed then. |
+
+### Older releases
+
+Releases before 0.13.0 were withdrawn. They predate the hardening in
+0.13.0: the limits on what strangers can make the app keep (XMPP rooms and
+renames, DCC offers, IRC line length), the approval sheet for configuration
+imports and agent (MCP) requests, the lock re-check before an agent message is
+sent, and narrower Android backup. If you installed one, update to 0.13.0 or
+later.
 
 ## Reporting
 

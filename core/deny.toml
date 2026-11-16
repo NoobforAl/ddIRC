@@ -28,6 +28,19 @@ ignore = [
     # shipped build, only the local server's own, a file the app wrote itself.
     # Marked unmaintained, not vulnerable; moves when `irc` does.
     { id = "RUSTSEC-2025-0134", reason = "unmaintained only; pulled in by the irc crate" },
+    # `libsqlite3-sys` 0.38.2, which bundles a SQLite older than 3.54.0 that can
+    # hand back uninitialised page-cache memory when it opens a database file
+    # that has a crafted `-wal` file beside it. CVSS says local access and a
+    # planted file. The only databases this app opens are its own message
+    # history and Tor's directory cache, both created and written by the app in
+    # its own data folder (`store::open`); it never opens a database that came
+    # from a server, a transfer or an import. The fix is `libsqlite3-sys`
+    # >= 0.39, which is `rusqlite` >= 0.41, and no arti release allows that yet:
+    # `tor-dirmgr` 0.47 and 0.48 both ask for `rusqlite` < 0.41, and only one
+    # crate in the graph may link SQLite, so we cannot move ahead of it.
+    # REMOVE THIS when an arti release accepts `rusqlite` 0.41 or later, and
+    # bump `rusqlite` in `core/Cargo.toml` with it. SECURITY.md lists it too.
+    { id = "RUSTSEC-2026-0459", reason = "bundled SQLite bug needing a crafted file beside a database; we open only our own; fix blocked by arti's rusqlite cap" },
 ]
 
 [licenses]
