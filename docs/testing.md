@@ -207,13 +207,15 @@ the longer of the two, not the sum.
 There are two exceptions, both about not paying for a build that cannot tell
 anything:
 
-- **A pull request that changes only Dart under `lib/` and `test/` is not
-  built.** No platform toolchain reads those files, and the analyzer and the
-  tests have already judged them. The `changes` job sets a `native` output: a
-  pull request builds when it touches `android/`, `windows/`, `linux/`,
-  `macos/`, `ios/`, `core/`, `rust_builder/`, `assets/`, `lib/src/rust/`,
-  `pubspec.yaml`, `pubspec.lock`, the `Makefile`, `flutter_rust_bridge.yaml` or
-  `.github/`. When the file list cannot be read, it builds.
+- **A pull request that changes only Dart under `lib/`, `test/` and `tool/` is
+  not built.** No platform toolchain reads those files, and the analyzer and the
+  tests have already judged them. The `changes` job sets a `native` output from a
+  list of what is *safe* to skip for - those Dart paths, `docs/`, Markdown, the
+  licence, the issue forms and Dependabot's configuration - and not from a list of
+  what must build. Anything else builds: a file nobody has thought of, such as a
+  root `.cargo/config.toml` with a target-specific linker setting, can change what
+  a platform build does, so it must not be able to skip it. `lib/src/rust/` is the
+  generated bridge and builds. When the file list cannot be read, it builds.
 - **`main` is always built,** whatever lint and the tests said, so that a change
   which slipped past the filter above is found one merge later and not at a
   release tag. `ci` still fails if lint or a test did, so a red `main` is as
@@ -357,7 +359,9 @@ not for a form to be filled in.
 
 ### A release build is not a debug build
 
-Every change builds a debug APK; only a tag builds the release one - and they are
+The build workflow builds a debug APK, and it runs on `main` and on a pull request
+that could affect a platform build (see [Continuous integration](#continuous-integration));
+a Dart-only pull request does not run it. Only a tag builds the release one - and they are
 different programs, because release runs R8, which shrinks and renames the code.
 That is invisible until something reaches code by name. The preferences plugin is
 called from Dart through JNI, by method name and descriptor, and in v0.12.0 to
