@@ -67,14 +67,11 @@ class _TorSectionState extends State<TorSection> {
         if (on) ...[
           SettingsReadout(
             label: 'Status',
-            value: tor.offline
-                ? 'Waiting for the network'
-                : tor.running
-                ? (progress.ready
-                      ? 'Ready — ${progress.summary}'
-                      : '${(progress.progress * 100).round()}% — '
-                            '${progress.summary}')
-                : 'Not running',
+            value: torStatusLine(
+              offline: tor.offline,
+              running: tor.running,
+              progress: progress,
+            ),
           ),
           // A bar as well as the words, because this is the one wait in the
           // app long enough that "is it doing anything" is a real question.
@@ -113,6 +110,30 @@ class _TorSectionState extends State<TorSection> {
       ],
     );
   }
+}
+
+/// What the Status row says.
+///
+/// Once Tor is ready this is just "Ready". The core's summary at that point is
+/// the directory's own wording — "directory is usable, fresh until 2026-11-17
+/// 08:00:00 UTC, and valid until ..." — which says nothing a person can act
+/// on, wraps to four lines on a phone, and carries timestamps in a zone they
+/// did not pick. While Tor is still starting the summary is what says which
+/// step it is on, so it stays there, beside the percentage.
+///
+/// A function rather than inline so a test can ask it the question directly:
+/// the page it sits on cannot be built in a widget test, because the proxy
+/// section beside it asks the core for the Tor port.
+@visibleForTesting
+String torStatusLine({
+  required bool offline,
+  required bool running,
+  required TorProgress progress,
+}) {
+  if (offline) return 'Waiting for the network';
+  if (!running) return 'Not running';
+  if (progress.ready) return 'Ready';
+  return '${(progress.progress * 100).round()}% — ${progress.summary}';
 }
 
 /// The bootstrap, as a hairline.

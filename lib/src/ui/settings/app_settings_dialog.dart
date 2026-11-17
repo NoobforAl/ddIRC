@@ -62,10 +62,11 @@ String get _backgroundSwitchLabel =>
 enum _Page {
   appearance('Appearance', 'How the app looks and how much it says'),
   connection('Connection', 'How and where ddIRC connects'),
-  notifications(
-    'Notifications',
-    'Staying connected while you are elsewhere, and hearing about it',
-  ),
+  // Short enough for the header on a phone. The header gives its subtitle one
+  // line and ellipsises the rest, and the longer wording ("...while you are
+  // elsewhere, and hearing about it") was cut at "hearin…" on a 720 px wide
+  // screen, which reads as a bug in a place that is supposed to be a label.
+  notifications('Notifications', 'Staying connected, and hearing about it'),
   privacy('Privacy', 'What is written down, and what is always on');
 
   const _Page(this.label, this.subtitle);

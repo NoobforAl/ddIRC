@@ -391,26 +391,35 @@ class _Empty extends StatelessWidget {
               // point to open the menu at from its own position at the
               // moment of the tap, the same trick the rail's Add button
               // uses — see `NetworkRail`.
-              Builder(
-                builder: (context) => TextButton.icon(
-                  onPressed: () async {
-                    final box = context.findRenderObject()! as RenderBox;
-                    // Under the button, lined up with its left edge, not on its
-                    // centre: from the centre the menu opened wherever it
-                    // happened to fit, which read as unrelated to what had
-                    // been pressed.
-                    final at = box.localToGlobal(Offset(0, box.size.height));
-                    final choice = await showAddNetworkMenu(context, at);
-                    if (choice != null) onAddChoice(choice);
-                  },
-                  icon: const Icon(Icons.add, size: 16),
-                  label: Text(
-                    profiles.isEmpty ? 'Add a network' : 'Add another network',
-                  ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: t.muted,
-                    padding: const EdgeInsets.symmetric(vertical: 11),
-                    textStyle: const TextStyle(fontSize: 12.5),
+              // The `Center` is what makes "its left edge" mean the button's.
+              // This column stretches its children, so without it the
+              // button's box is the full width of the column while its label
+              // sits in the middle, and a menu lined up with that box opened
+              // well to the left of the button and over the one below it.
+              Center(
+                child: Builder(
+                  builder: (context) => TextButton.icon(
+                    onPressed: () async {
+                      final box = context.findRenderObject()! as RenderBox;
+                      // Under the button, lined up with its left edge, not on
+                      // its centre: from the centre the menu opened wherever
+                      // it happened to fit, which read as unrelated to what
+                      // had been pressed.
+                      final at = box.localToGlobal(Offset(0, box.size.height));
+                      final choice = await showAddNetworkMenu(context, at);
+                      if (choice != null) onAddChoice(choice);
+                    },
+                    icon: const Icon(Icons.add, size: 16),
+                    label: Text(
+                      profiles.isEmpty
+                          ? 'Add a network'
+                          : 'Add another network',
+                    ),
+                    style: TextButton.styleFrom(
+                      foregroundColor: t.muted,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      textStyle: const TextStyle(fontSize: 12.5),
+                    ),
                   ),
                 ),
               ),
