@@ -53,13 +53,17 @@ ignore = [
     # REMOVE THIS when `xmpp-parsers` and `irc` stop depending on `chrono`, or
     # when a maintained release of it exists.
     { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no known flaw; reached via xmpp-parsers and irc; replace when they move" },
-    # `humantime` is on the list only because it wraps `chrono`, and carries the
-    # same notice. Pulled in only by arti's crates (`humantime-serde` in the
+    # `humantime` carries the same notice, filed alongside `chrono`'s. The
+    # advisory's stated reason is that it wraps `chrono`; the locked 2.4.0 does
+    # not (`chrono` is only a dev-dependency of its tests), so that is the
+    # advisory's account and not something that puts `chrono` in our tree. What
+    # can be checked is that its repository is in the same `chronotope`
+    # organisation. Pulled in only by arti's crates (`humantime-serde` in the
     # configuration of `tor-circmgr`, `tor-dirmgr` and others, and `retry-error`),
     # which is what it is for: reading and printing durations. What each of them
     # feeds it has not been audited here. Moves with arti, like the other entries.
     # REMOVE THIS when RUSTSEC-2026-0543 goes, or when arti drops `humantime`.
-    { id = "RUSTSEC-2026-0542", reason = "unmaintained only because it wraps chrono; durations in arti's own config; moves with arti" },
+    { id = "RUSTSEC-2026-0542", reason = "unmaintained notice filed with chrono's, no known flaw; durations in arti's crates; moves with arti" },
 ]
 
 [licenses]
