@@ -8,7 +8,7 @@ import '../../model/workspace.dart';
 import '../../rust/api/types.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
-import '../motion.dart';
+import '../design/motion.dart';
 
 /// Settings for the connection this session is running on.
 ///

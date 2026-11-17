@@ -44,7 +44,7 @@ root. CI calls the same targets, so a green `make` is a green pipeline.
 | check dependencies: advisories, licences, sources (needs network) | `make deny` |
 | measure coverage (what CI sends to Codecov) | `make coverage` |
 | regenerate the Dart bindings after changing `core/ddirc-bridge/src/api/` | `make codegen` |
-| redraw app icons after changing `lib/src/ui/mark_spec.dart` | `make icons` |
+| redraw app icons after changing `lib/src/ui/design/mark_spec.dart` | `make icons` |
 | see which dependencies are outdated (changes nothing) | `make outdated` |
 | run the app on Windows with hot reload | `make dev` |
 | debug build / release build (Windows) | `make build` / `make build-release` |

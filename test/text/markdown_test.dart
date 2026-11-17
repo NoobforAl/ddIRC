@@ -1,6 +1,6 @@
 import 'package:ddirc/src/rust/api/types.dart';
 import 'package:ddirc/src/text/markdown.dart';
-import 'package:ddirc/src/ui/link.dart' show linkWarnings;
+import 'package:ddirc/src/ui/chat/link.dart' show linkWarnings;
 import 'package:flutter_test/flutter_test.dart';
 
 const _plain = SpanStyle(

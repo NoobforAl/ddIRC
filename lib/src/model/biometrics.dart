@@ -68,7 +68,7 @@ class BiometricActivity {
 /// Wrapped rather than used directly so a widget test can stand in for it
 /// without a platform channel — the app has no dependency-injection framework,
 /// so a constructor-supplied fake is the whole mechanism, matching the
-/// `@visibleForTesting` seam [lib/src/ui/presence.dart]'s `AppPresence` already
+/// `@visibleForTesting` seam [lib/src/ui/platform/presence.dart]'s `AppPresence` already
 /// uses for its own platform dependency.
 class Biometrics {
   Biometrics() : _authenticate = null;

@@ -15,7 +15,7 @@ import 'package:ddirc/src/model/session.dart';
 import 'package:ddirc/src/model/settings.dart';
 import 'package:ddirc/src/rust/api/types.dart' as rust;
 import 'package:ddirc/src/theme.dart';
-import 'package:ddirc/src/ui/session_screen.dart';
+import 'package:ddirc/src/ui/shell/session_screen.dart';
 
 const _plain = rust.SpanStyle(
   bold: false,

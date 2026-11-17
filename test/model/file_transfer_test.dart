@@ -25,10 +25,10 @@ import 'package:ddirc/src/model/settings.dart';
 import 'package:ddirc/src/model/transfer.dart';
 import 'package:ddirc/src/rust/api/types.dart' as rust;
 import 'package:ddirc/src/theme.dart';
-import 'package:ddirc/src/ui/send_file_sheet.dart';
+import 'package:ddirc/src/ui/chat/send_file_sheet.dart';
 import 'package:ddirc/src/ui/settings/file_transfer_section.dart';
-import 'package:ddirc/src/ui/file_message.dart';
-import 'package:ddirc/src/ui/message_view.dart';
+import 'package:ddirc/src/ui/chat/file_message.dart';
+import 'package:ddirc/src/ui/chat/message_view.dart';
 
 Future<SessionModel> _session({
   bool transfers = true,

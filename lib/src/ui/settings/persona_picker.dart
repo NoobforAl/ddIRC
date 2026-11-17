@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../model/history.dart';
 import '../../model/personas.dart';
 import '../../theme.dart';
-import '../touchable.dart';
+import '../design/touchable.dart';
 import 'personas_dialog.dart';
 import 'settings_chrome.dart';
 

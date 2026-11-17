@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../model/xmpp_providers.dart';
 import '../../theme.dart';
-import '../link.dart';
-import '../motion.dart';
+import '../chat/link.dart';
+import '../design/motion.dart';
 import 'settings_chrome.dart';
 
 /// Pick a server to make an XMPP account on.

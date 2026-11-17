@@ -5,7 +5,7 @@ import '../../model/settings.dart';
 import '../../model/transfer.dart';
 import '../../theme.dart';
 import 'settings_chrome.dart';
-import '../motion.dart';
+import '../design/motion.dart';
 
 /// Receiving files over DCC, as shown in App settings.
 ///

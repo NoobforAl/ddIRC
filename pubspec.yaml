@@ -47,7 +47,7 @@ dependencies:
   # Pinned like every other dependency.
   #
   # Held at 0.5.2 on purpose. 0.6.0 removes the global `windowManager` that
-  # lib/src/ui/window_chrome.dart is written against (40 analyzer errors) and
+  # lib/src/ui/shell/window_chrome.dart is written against (40 analyzer errors) and
   # drops screen_retriever, so taking it means rewriting the Windows title bar
   # and checking it on a real window, not bumping a number. Do that as its own
   # change; Dependabot is told to skip 0.6 until then.
@@ -110,7 +110,7 @@ dependencies:
   mobile_scanner: 7.5.0
 
   # Opens a link from a message in the browser, after the app has shown the
-  # whole address and been told to — see `lib/src/ui/link.dart`. http and
+  # whole address and been told to — see `lib/src/ui/chat/link.dart`. http and
   # https only. Pinned like every other dependency.
   url_launcher: 6.3.3
 

@@ -17,11 +17,11 @@ import 'package:ddirc/src/model/settings.dart';
 import 'package:ddirc/src/rust/api/store.dart' as store;
 import 'package:ddirc/src/rust/api/types.dart' as rust;
 import 'package:ddirc/src/theme.dart';
-import 'package:ddirc/src/ui/avatar.dart';
-import 'package:ddirc/src/ui/member_list.dart';
-import 'package:ddirc/src/ui/message_view.dart';
-import 'package:ddirc/src/ui/nick_color.dart';
-import 'package:ddirc/src/ui/person_dialog.dart';
+import 'package:ddirc/src/ui/people/avatar.dart';
+import 'package:ddirc/src/ui/chat/member_list.dart';
+import 'package:ddirc/src/ui/chat/message_view.dart';
+import 'package:ddirc/src/ui/people/nick_color.dart';
+import 'package:ddirc/src/ui/people/person_dialog.dart';
 
 const _plain = rust.SpanStyle(
   bold: false,

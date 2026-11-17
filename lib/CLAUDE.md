@@ -15,16 +15,23 @@ lib/
 ├─ main.dart            startup, then the workspace
 └─ src/
    ├─ model/            state and logic, no widgets — start here to understand behaviour
-   ├─ ui/               widgets, one concern per file; ui/settings/ for the settings dialogs
+   ├─ ui/               widgets, grouped by what they are for:
+   │  ├─ shell/         the app's screens and chrome: workspace, session, boot, lock, window, system bars
+   │  ├─ chat/          a conversation: messages, composer, channel list, tabs, members, files, links
+   │  ├─ people/        a person: avatar, nick colour, contacts, person dialog and sheet
+   │  ├─ network/       a network: rail, its menus, the connection log
+   │  ├─ platform/      what differs per OS: notifier*, background*, the presence rule
+   │  ├─ design/        tokens and primitives: layout, motion, touchable, menu, the app mark
+   │  └─ settings/      the settings dialogs and their sections
    ├─ text/markdown.dart
    ├─ theme.dart        colour tokens (`Tokens`)
    ├─ version.dart
    └─ rust/             GENERATED bindings to core/ddirc-bridge — never edit
 test/                   Flutter tests, laid out like lib/src (root of the repo, not here)
-├─ model/ ui/ ui/settings/ text/   mirror lib/src/<same>/
+├─ model/ text/ ui/<group>/        mirror lib/src/<same>/ (ui/ has the same groups)
 ├─ tool/                           mirrors tool/
 └─ *_test.dart                     what lib/src/ itself holds: theme, version, structural checks
-tool/make_icons.dart    `make icons` — redraws launcher icons from ui/mark_spec.dart
+tool/make_icons.dart    `make icons` — redraws launcher icons from ui/design/mark_spec.dart
 ```
 
 - **`model/`** holds what the app *knows*: `session.dart` (a live connection and its
@@ -34,9 +41,14 @@ tool/make_icons.dart    `make icons` — redraws launcher icons from ui/mark_spe
   `mcp.dart` (the local MCP server agents can drive the app through). Widgets read
   these; they do not duplicate their logic.
 - **`ui/`** holds what the app *shows*. Sizes, motion and colour come from three
-  token sets: `Tokens` (colour, `theme.dart`), `Motion` (time, `ui/motion.dart`) and
-  the layout tokens (`ui/layout.dart`, read as `context.layout`). Ask a token a
+  token sets: `Tokens` (colour, `theme.dart`), `Motion` (time, `ui/design/motion.dart`) and
+  the layout tokens (`ui/design/layout.dart`, read as `context.layout`). Ask a token a
   question (`layout.channelsPinned`) instead of comparing a pixel width in a widget.
+- **Where a new widget goes** is the group it is *for*, not the one it is shaped
+  like: a dialog about a person is in `ui/people/`, however much it looks like the
+  settings dialogs. Reach for `ui/design/` only for something with no subject of its
+  own — a token or a primitive several groups share. A group that is a grab-bag is
+  the sign to split it, not to add to it.
 - **Platform splits** are paired files: `notifier.dart` with `notifier_android.dart`
   and `notifier_desktop.dart`, the same for `background*`. Put platform code in the
   specific file and keep the shared one platform-free.
@@ -63,7 +75,7 @@ tool/make_icons.dart    `make icons` — redraws launcher icons from ui/mark_spe
   nick); the tests named `xmpp_*_test.dart` show where that assumption bit before.
 - **Respect reduced motion and large text.** Animations go through `Motion` so they
   stop under reduced motion; layouts are tested at 2.0× text and right-to-left
-  (`ui/xmpp_layout_test.dart`, `ui/layout_test.dart`). A new screen should survive both.
+  (`ui/people/xmpp_layout_test.dart`, `ui/design/layout_test.dart`). A new screen should survive both.
 
 ## Testing
 
@@ -75,7 +87,7 @@ the shape of `lib/` as a whole stays at the root of `test/`.
 
 - **The Rust core is faked, not run.** Tests install a fake with
   `RustLib.initMock(api: _FakeCore())` (a class that `implements RustLibApi`) and
-  `RustLib.dispose` in teardown. Copy the pattern from `test/ui/xmpp_contacts_test.dart`
+  `RustLib.dispose` in teardown. Copy the pattern from `test/ui/people/xmpp_contacts_test.dart`
   rather than inventing another. Real end-to-end behaviour belongs in the Rust
   integration suites.
 - Widget tests use `tester.pump` with explicit durations; a test that needs real time

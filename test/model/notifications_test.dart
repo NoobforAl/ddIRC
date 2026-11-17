@@ -16,14 +16,14 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ddirc/src/model/notifications.dart';
 import 'package:ddirc/src/model/settings.dart';
-import 'package:ddirc/src/ui/background_android.dart'
+import 'package:ddirc/src/ui/platform/background_android.dart'
     show
         batteryOptimizationExempt,
         hostCallsFor,
         requestBatteryOptimizationExemption;
-import 'package:ddirc/src/ui/notifier.dart';
-import 'package:ddirc/src/ui/notifier_android.dart';
-import 'package:ddirc/src/ui/presence.dart';
+import 'package:ddirc/src/ui/platform/notifier.dart';
+import 'package:ddirc/src/ui/platform/notifier_android.dart';
+import 'package:ddirc/src/ui/platform/presence.dart';
 
 /// The ordinary case: a direct message, app in the background, nothing muted.
 ///

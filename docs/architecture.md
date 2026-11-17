@@ -209,7 +209,7 @@ them against the server's advertised `CHANMODES`.
 would treat `Foo[bar]` and `foo{bar}` as two different users on a network that
 considers them one.
 
-**Motion is a token, not a per-widget decision.** `lib/src/ui/motion.dart` holds
+**Motion is a token, not a per-widget decision.** `lib/src/ui/design/motion.dart` holds
 three durations and two curves, read as `context.motion` — the same shape as the
 colour tokens, for the same reason. The getter returns zero durations when the
 platform's *reduce motion* setting is on, so honouring that is automatic instead
@@ -218,7 +218,7 @@ each transition answers *what just changed, and where did it go*. The one
 looping animation is the status dot while a connection is pending, because amber
 alone cannot tell "still trying" from "settled".
 
-**Size is a token too.** `lib/src/ui/layout.dart` names three widths —
+**Size is a token too.** `lib/src/ui/design/layout.dart` names three widths —
 `compact`, `medium`, `expanded` — measured once at the top of the tree and read
 as `context.layout`. Widgets ask it questions (`layout.channelsPinned`,
 `layout.gutter`) rather than comparing pixel widths, because a breakpoint
@@ -394,7 +394,7 @@ Drawn by hand rather than set in type: four gentle curves, each with its own
 weight and lean, small inside a round periwinkle field — soft at launcher
 sizes, and comfortably inside Android's adaptive-icon safe zone.
 
-It is described once, as numbers, in `lib/src/ui/mark_spec.dart`: four curves
+It is described once, as numbers, in `lib/src/ui/design/mark_spec.dart`: four curves
 (start, control point, end, width) and a corner radius, every value a fraction
 of the side. Two things read it.
 `AppMark` paints it on the splash and the empty screen, and

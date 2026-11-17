@@ -3,7 +3,7 @@
 // Deliberately free of Flutter, of plugins and of platforms. Everything here
 // is a decision, and a decision that can only be observed by watching a toast
 // appear on Windows is a decision nobody can test. Raising the notification is
-// somebody else's job — `ui/notifier.dart` — and it does none of this thinking.
+// somebody else's job — `ui/platform/notifier.dart` — and it does none of this thinking.
 
 import 'settings.dart';
 

@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../model/directory.dart';
 import '../../model/proxy.dart';
 import '../../theme.dart';
-import '../motion.dart';
-import '../touchable.dart';
+import '../design/motion.dart';
+import '../design/touchable.dart';
 import 'settings_chrome.dart';
 
 /// A network the user picked, and the channels they want to land in.

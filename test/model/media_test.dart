@@ -16,7 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ddirc/src/model/media.dart';
 import 'package:ddirc/src/model/settings.dart';
 import 'package:ddirc/src/rust/api/types.dart';
-import 'package:ddirc/src/ui/send_file_sheet.dart';
+import 'package:ddirc/src/ui/chat/send_file_sheet.dart';
 
 final _file = Uint8List.fromList([1, 2, 3, 4]);
 final _cleaned = Uint8List.fromList([1, 4]);

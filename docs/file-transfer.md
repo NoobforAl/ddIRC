@@ -270,5 +270,5 @@ A refused offer sends nothing to the sender, not even a resume request.
 | Moving the bytes, timeouts, limits and `check_destination` | `core/ddirc-core/src/dcc/transfer.rs` |
 | Making an offer | `send_file` path in `core/ddirc-core/src/conn/actor.rs` |
 | XMPP upload and slot checks | `core/ddirc-core/src/xmpp/upload.rs` |
-| The sheet shown before sending | `lib/src/ui/send_file_sheet.dart` |
+| The sheet shown before sending | `lib/src/ui/chat/send_file_sheet.dart` |
 | The warning before turning transfers on | `lib/src/ui/settings/file_transfer_section.dart` |

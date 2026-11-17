@@ -27,7 +27,7 @@ static void my_application_activate(GApplication* application) {
 
   // No header bar, and no GTK title either beyond the one the window
   // manager needs for its task list. The Dart layer draws the title strip
-  // itself on every desktop platform (see lib/src/ui/window_chrome.dart) and
+  // itself on every desktop platform (see lib/src/ui/shell/window_chrome.dart) and
   // asks window_manager to undecorate the window before the first frame. The
   // template installs a GtkHeaderBar here, which is a client-side titlebar
   // and survives undecorating on some window managers - leaving the app with

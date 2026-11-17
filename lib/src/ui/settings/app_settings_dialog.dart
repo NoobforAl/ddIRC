@@ -7,10 +7,10 @@ import '../../model/log.dart';
 import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../../version.dart';
-import '../background.dart';
-import '../background_android.dart';
-import '../motion.dart';
-import '../notifier.dart'
+import '../platform/background.dart';
+import '../platform/background_android.dart';
+import '../design/motion.dart';
+import '../platform/notifier.dart'
     show
         NotificationBlock,
         notificationBlock,

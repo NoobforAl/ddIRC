@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ddirc/src/theme.dart';
-import 'package:ddirc/src/ui/nick_color.dart';
+import 'package:ddirc/src/ui/people/nick_color.dart';
 
 double _contrast(Color a, Color b) {
   final la = a.computeLuminance();

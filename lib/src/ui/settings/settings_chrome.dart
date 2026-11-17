@@ -3,10 +3,10 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 
 import '../../theme.dart';
-import '../layout.dart';
-import '../motion.dart';
-import '../shake.dart';
-import '../touchable.dart';
+import '../design/layout.dart';
+import '../design/motion.dart';
+import '../design/shake.dart';
+import '../design/touchable.dart';
 
 /// Shared chrome for the settings dialogs.
 ///

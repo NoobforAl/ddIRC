@@ -3,7 +3,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../theme.dart';
 import 'settings_chrome.dart';
-import '../motion.dart';
+import '../design/motion.dart';
 
 /// Point the camera at a QR code and read back whatever it says.
 ///

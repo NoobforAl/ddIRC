@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../../model/history.dart';
 import '../../model/personas.dart';
 import '../../theme.dart';
-import '../touchable.dart';
+import '../design/touchable.dart';
 import 'settings_chrome.dart';
-import '../motion.dart';
+import '../design/motion.dart';
 
 /// Where the user makes and keeps their identities.
 ///
