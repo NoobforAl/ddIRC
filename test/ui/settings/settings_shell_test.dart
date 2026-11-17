@@ -408,35 +408,9 @@ void main() {
       expect(find.text('Notify me about messages'), findsOneWidget);
     });
 
-    // The header gives its subtitle one line and ellipsises the rest. This page
-    // used to read "Staying connected while you are elsewhere, and hearing
-    // about it" — 62 characters, which a 360 dp phone cut at "hearin…": a
-    // label, and cut.
-    //
-    // A length, and not a measurement of the painted text, because the test
-    // font draws every glyph as a full square: any real sentence "overflows" a
-    // phone here, so a fit check would fail for the new wording and the old
-    // alike. The number is what was measured on a Galaxy A30s (360 dp): 52
-    // characters were visible beside the back arrow, and the longest subtitle
-    // that fitted, Privacy's, is 43. 46 leaves a little room for a wider glyph
-    // mix without letting the cut come back.
-    testWidgets('a page header says what it is for in a line that fits', (
-      tester,
-    ) async {
-      sized(tester, const Size(360, 780));
-      await pump(tester);
-
-      await tester.tap(find.text('Notifications'));
-      await tester.pumpAndSettle();
-
-      final subtitle = find.text('Staying connected, and hearing about it');
-      expect(subtitle, findsOneWidget);
-      expect(
-        tester.widget<Text>(subtitle).data!.length,
-        lessThanOrEqualTo(46),
-        reason: 'longer than a phone header shows before it cuts the line',
-      );
-    });
+    // Whether a page's subtitle fits its header is measured with a real font in
+    // `settings_header_test.dart`, which loads one: that cannot be done here
+    // without changing the width of every other test's text.
 
     // A notification needs the app running when the message arrives, and on
     // Android that is not for long without the service. Said beside the
