@@ -8,10 +8,10 @@
 //
 // This measures the painted text. `flutter test` draws every glyph as a full
 // square unless a real font is loaded, so a fit check with the stand-in font
-// fails for any real sentence and proves nothing. The Roboto the SDK ships is
-// what an Android phone draws these in (the theme leaves the family unset), so
-// that is loaded here, under its own name, and the answer is the one a phone
-// would give.
+// fails for any real sentence and proves nothing. Roboto is what an Android
+// phone draws these in (the theme leaves the family unset), so a copy of it,
+// kept in `test/fixtures/fonts/`, is loaded here under its own name, and the
+// answer is the one a phone would give.
 //
 // It lives in a file of its own because a loaded font is global to the test
 // isolate: loaded in `settings_shell_test.dart` it would change how wide every
@@ -56,38 +56,29 @@ const _subtitles = {
 const _oldWording =
     'Staying connected while you are elsewhere, and hearing about it';
 
-/// Roboto Regular from the Flutter SDK the tests are running under.
+/// Roboto Regular, from `test/fixtures/fonts/`.
 ///
-/// Found from `FLUTTER_ROOT` when the tool sets it, and otherwise by walking up
-/// from the test runner's own executable, which lives inside the SDK. If it is
-/// not there the test fails and says so, rather than skipping: a skipped fit
-/// check looks exactly like a passing one.
-File _roboto() {
-  const rel = 'bin/cache/artifacts/material_fonts/roboto-regular.ttf';
-  final candidates = <Directory>[];
-  final env = Platform.environment['FLUTTER_ROOT'];
-  if (env != null && env.isNotEmpty) candidates.add(Directory(env));
-  for (
-    var d = File(Platform.resolvedExecutable).parent;
-    d.parent.path != d.path;
-    d = d.parent
-  ) {
-    candidates.add(d);
-  }
-  for (final root in candidates) {
-    final f = File('${root.path}/$rel');
-    if (f.existsSync()) return f;
-  }
-  throw StateError(
-    'Roboto was not found in the Flutter SDK ($rel). The header fit check '
-    'cannot run without a real font, and must not pass without one.',
-  );
-}
+/// A file in the repository and not one read out of the Flutter SDK. The SDK has
+/// it only once a Flutter build has fetched it: a machine that has built the app
+/// does, a clean CI runner does not, and the first version of this test found
+/// the font on a developer's machine and failed on every runner. The path is
+/// relative to the repository root, which is where `flutter test` runs, as the
+/// icon test's reads of `assets/` already assume.
+///
+/// If it is missing the test fails and says so, rather than skipping: a skipped
+/// fit check looks exactly like a passing one.
+const _robotoPath = 'test/fixtures/fonts/Roboto-Regular.ttf';
 
 Future<void> _loadRoboto() async {
-  final bytes = _roboto().readAsBytesSync();
+  final file = File(_robotoPath);
+  if (!file.existsSync()) {
+    throw StateError(
+      '$_robotoPath is missing. The header fit check cannot run without a '
+      'real font, and must not pass without one.',
+    );
+  }
   final loader = FontLoader('Roboto')
-    ..addFont(Future.value(ByteData.sublistView(bytes)));
+    ..addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));
   await loader.load();
 }
 
