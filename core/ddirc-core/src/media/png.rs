@@ -47,10 +47,15 @@ pub(super) fn strip(bytes: &[u8]) -> Result<Stripped, StripError> {
         else {
             return Err(StripError::malformed(KIND, "truncated chunk length"));
         };
-        let Some(kind) = bytes.get(i + 4..i + 8) else {
+        // Length-checked and converted in one step, so there is no `expect`
+        // standing in for a claim ("this is four bytes") that the line above
+        // it happens to make. The input is a file somebody else produced.
+        let Some(kind) = bytes
+            .get(i + 4..i + 8)
+            .and_then(|k| <[u8; 4]>::try_from(k).ok())
+        else {
             return Err(StripError::malformed(KIND, "truncated chunk type"));
         };
-        let kind: [u8; 4] = kind.try_into().expect("checked to be four bytes");
 
         // Length, type, data and CRC. Computed with checked arithmetic because
         // the length is four attacker-chosen bytes and 4 GiB of it would wrap

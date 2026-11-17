@@ -2229,7 +2229,20 @@ fn parse_server_time(value: &str) -> Option<i64> {
     {
         return None;
     }
-    let millis: i64 = format!("{fraction:0<3}")[..3].parse().ok()?;
+    // The first three digits, padded on the right with zeros: "5" is 500 ms and
+    // "12345" is 123. Folded digit by digit rather than by slicing a padded
+    // string. The check above already says these are ASCII digits, which is
+    // what makes a byte-index slice safe here, but that is a fact about code
+    // some distance away: loosen it, and a timestamp a server chose becomes a
+    // panic in the task that owns the connection. This has no index to get
+    // wrong.
+    let millis = fraction
+        .bytes()
+        .chain(std::iter::repeat(b'0'))
+        .take(3)
+        .fold(0_i64, |acc, digit| {
+            acc * 10 + i64::from(digit.saturating_sub(b'0'))
+        });
 
     // Days since the epoch, from Howard Hinnant's `days_from_civil`.
     let y = if month <= 2 { year - 1 } else { year };
@@ -4382,6 +4395,42 @@ mod tests {
             "2026-09-30T12:34:56.x1Z",
         ] {
             assert_eq!(parse_server_time(bad), None, "{bad:?}");
+        }
+    }
+
+    // The fraction is a server's text and is read digit by digit, so what is
+    // held here is the arithmetic - a short one is padded on the right, a long
+    // one is cut, not rounded - and that nothing a server can put there panics.
+    #[test]
+    fn the_fraction_of_a_second_is_padded_or_cut_to_milliseconds() {
+        let at = |fraction: &str| parse_server_time(&format!("1970-01-01T00:00:00.{fraction}Z"));
+        assert_eq!(at("5"), Some(500));
+        assert_eq!(at("05"), Some(50));
+        assert_eq!(at("007"), Some(7));
+        assert_eq!(at("123"), Some(123));
+        assert_eq!(at("123456"), Some(123), "cut, not rounded");
+        assert_eq!(at("9999999999"), Some(999));
+        assert_eq!(at("000"), Some(0));
+    }
+
+    #[test]
+    fn a_fraction_that_is_not_ascii_digits_is_refused_and_never_panics() {
+        for bad in [
+            // Arabic-Indic digits: digits to a person, and `is_numeric`, but not
+            // to a parser that has to produce a number from bytes.
+            "\u{661}\u{662}\u{663}",
+            // A multi-byte character where the third digit would be.
+            "12\u{e9}",
+            "\u{e9}",
+            // Emoji, and a combining mark after a digit.
+            "1\u{1f600}",
+            "1\u{301}",
+        ] {
+            assert_eq!(
+                parse_server_time(&format!("2026-09-30T12:34:56.{bad}Z")),
+                None,
+                "{bad:?}"
+            );
         }
     }
 }

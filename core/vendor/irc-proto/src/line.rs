@@ -40,6 +40,13 @@ pub struct LineCodec {
 impl LineCodec {
     /// Creates a new instance of LineCodec from the specified encoding.
     pub fn new(label: &str) -> error::Result<LineCodec> {
+        // Only read when the `encoding` feature is on, and ddIRC builds this
+        // crate without it, so every build printed an unused-variable warning
+        // for a parameter whose signature has to stay as it is: the `irc` crate
+        // calls it. Taken here, behind the same cfg, rather than allowed.
+        #[cfg(not(feature = "encoding"))]
+        let _ = label;
+
         Ok(LineCodec {
             #[cfg(feature = "encoding")]
             encoding: match encoding_from_whatwg_label(label) {

@@ -444,8 +444,8 @@ fn closing_link_reason(text: &str) -> Option<&str> {
     };
     let inner = rest.strip_suffix(close)?;
     // The last group, not the first: InspIRCd's `(user@host)` comes earlier.
-    let start = inner.rfind(open)?;
-    Some(&inner[start + 1..])
+    let (_, reason) = inner.rsplit_once(open)?;
+    Some(reason)
 }
 
 #[cfg(test)]
@@ -851,6 +851,32 @@ mod tests {
         );
         assert!(!message.contains("203.0.113.7"), "{message}");
         assert!(!message.contains("Closing Link"), "{message}");
+    }
+
+    // The farewell is text from the server, and the reason is cut out of it at
+    // the last opening bracket: in text with characters wider than a byte, and
+    // with more than one group in it, that has to land in the right place.
+    #[test]
+    fn a_closing_link_reason_is_cut_out_exactly() {
+        assert_eq!(
+            closing_link_reason("Closing Link: host (Raison: caf\u{e9})"),
+            Some("Raison: caf\u{e9}")
+        );
+        assert_eq!(
+            closing_link_reason("Closing Link: h\u{f4}te [\u{65e5}\u{672c}]"),
+            Some("\u{65e5}\u{672c}")
+        );
+        // The last group, not the first: InspIRCd's `(user@host)` comes earlier.
+        assert_eq!(
+            closing_link_reason("Closing Link: x (user@host) (K-Lined)"),
+            Some("K-Lined")
+        );
+        assert_eq!(closing_link_reason("Closing Link: x ()"), Some(""));
+        // Not that shape, so nothing.
+        assert_eq!(closing_link_reason("Closing Link: host"), None);
+        assert_eq!(closing_link_reason("Closing Link: host )"), None);
+        assert_eq!(closing_link_reason("Closing Link:"), None);
+        assert_eq!(closing_link_reason("something else (entirely)"), None);
     }
 
     #[test]

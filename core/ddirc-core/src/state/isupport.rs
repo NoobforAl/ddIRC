@@ -132,11 +132,16 @@ impl Prefixes {
     ///
     /// With the `multi-prefix` capability a name may carry several, e.g. `@+bob`.
     pub fn split_prefixes<'a>(&self, name: &'a str) -> (Vec<char>, &'a str) {
-        let split = name
-            .char_indices()
-            .find(|(_, c)| !self.is_prefix_char(*c))
-            .map_or(name.len(), |(i, _)| i);
-        (name[..split].chars().collect(), &name[split..])
+        // The prefixes and the rest are each read off the name by what they
+        // are, not cut at a byte index found by one pass and used by another:
+        // a name comes from the server, and a slice at the wrong offset inside
+        // a multi-byte character would panic the connection's task.
+        let prefixes = name
+            .chars()
+            .take_while(|c| self.is_prefix_char(*c))
+            .collect();
+        let rest = name.trim_start_matches(|c| self.is_prefix_char(c));
+        (prefixes, rest)
     }
 }
 
@@ -329,6 +334,27 @@ mod tests {
         // Degenerate but must not panic or slice out of bounds.
         assert_eq!(p.split_prefixes("@@@"), (vec!['@', '@', '@'], ""));
         assert_eq!(p.split_prefixes(""), (vec![], ""));
+    }
+
+    // A name comes from the server. The split is where the prefixes end and
+    // the nick begins, and a nick is free to start with a character wider than
+    // one byte - the old byte-index slice was only right because of how the
+    // index was found, which is not something a test could see.
+    #[test]
+    fn split_prefixes_leaves_a_name_that_is_not_ascii_whole() {
+        let p = Prefixes::default();
+        assert_eq!(
+            p.split_prefixes("@\u{e9}tienne"),
+            (vec!['@'], "\u{e9}tienne")
+        );
+        assert_eq!(
+            p.split_prefixes("@+\u{65e5}\u{672c}\u{8a9e}"),
+            (vec!['@', '+'], "\u{65e5}\u{672c}\u{8a9e}")
+        );
+        // Nothing to strip, and the first character is multi-byte.
+        assert_eq!(p.split_prefixes("\u{e9}@x"), (vec![], "\u{e9}@x"));
+        // A prefix character that appears later is part of the nick.
+        assert_eq!(p.split_prefixes("@a@b"), (vec!['@'], "a@b"));
     }
 
     #[test]

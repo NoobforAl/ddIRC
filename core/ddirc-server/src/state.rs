@@ -168,7 +168,11 @@ fn truncate(text: &str, max: usize) -> String {
     while end > 0 && !text.is_char_boundary(end) {
         end -= 1;
     }
-    text[..end].to_owned()
+    // `get` and not a slice: the loop above leaves `end` on a boundary, but the
+    // whole point of this function is that a slice at the wrong place panics
+    // the task that owns the server's state. If that were ever not so, this
+    // yields nothing, which is inside the limit, rather than a crash.
+    text.get(..end).unwrap_or_default().to_owned()
 }
 
 fn now() -> u64 {

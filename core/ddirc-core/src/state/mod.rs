@@ -492,8 +492,14 @@ impl Session {
         }
 
         haystack.match_indices(&needle).any(|(index, matched)| {
-            let before = haystack[..index].chars().next_back();
-            let after = haystack[index + matched.len()..].chars().next();
+            // `get`, not a slice: the text is whatever somebody sent, and an
+            // index that landed inside a character would panic the task that
+            // is deciding whether to notify. `match_indices` gives boundaries,
+            // so these are `Some`; the point is that nothing here relies on it.
+            let before = haystack.get(..index).and_then(|h| h.chars().next_back());
+            let after = haystack
+                .get(index + matched.len()..)
+                .and_then(|t| t.chars().next());
             !before.is_some_and(is_nick_char) && !after.is_some_and(is_nick_char)
         })
     }
@@ -735,6 +741,29 @@ mod tests {
         assert!(!s.is_mention("same thing"), "substring is not a mention");
         assert!(!s.is_mention("sample text"));
         assert!(!s.is_mention("flotsam"));
+    }
+
+    // The text is whatever somebody sent. The match is found by byte offset and
+    // the characters either side are read from it, so this is the shape of
+    // input where an offset that landed inside a character would panic.
+    #[test]
+    fn mentions_next_to_text_that_is_not_ascii() {
+        let mut s = Session::new("sam");
+        s.on_isupport(&[]);
+
+        // Not alphanumeric, so not part of a word: still a mention.
+        assert!(s.is_mention("h\u{e9}llo sam, w\u{f6}rld"));
+        assert!(s.is_mention("\u{1f600}sam\u{1f600}"));
+        assert!(s.is_mention("sam\u{2014}look"));
+        // Alphanumeric, so it makes a longer word, which is not.
+        assert!(!s.is_mention("\u{e9}sam"));
+        assert!(!s.is_mention("sam\u{e9}"));
+        assert!(!s.is_mention("\u{65e5}\u{672c}sam"));
+        // A nick that is itself multi-byte.
+        let mut t = Session::new("\u{e9}tienne");
+        t.on_isupport(&[]);
+        assert!(t.is_mention("hi \u{e9}tienne!"));
+        assert!(!t.is_mention("hi m\u{e9}tienne"));
     }
 
     #[test]
