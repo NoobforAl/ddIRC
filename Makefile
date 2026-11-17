@@ -254,7 +254,7 @@ build:
 # The release build is signed with android/ddirc-release.jks when `make
 # keystore` has made one, and with the debug key otherwise — see the comment
 # above android/app/build.gradle.kts's signingConfigs block. Debug-signed is
-# fine for a beta people sideload and not fine for a store; `make keystore`
+# fine for something people sideload and not fine for a store; `make keystore`
 # is the way off that.
 # ANDROID_TARGET narrows it to one ABI (android-arm64, android-arm,
 # android-x64). CI sets it: a compile check does not need Rust built three

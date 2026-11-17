@@ -2,9 +2,9 @@
 //!
 //! Everything a server sends is untrusted. Rather than handing raw bytes to the
 //! UI and hoping it renders them safely, we parse the formatting codes here and
-//! emit structured [`TextSpan`]s whose `text` is guaranteed free of C0 control
-//! characters. A malicious message therefore cannot inject line breaks, reorder
-//! the layout, or forge the styling we reserve for system messages.
+//! emit structured [`TextSpan`]s whose `text` is guaranteed free of the characters
+//! in [`is_forbidden`]. A malicious message therefore cannot inject line breaks,
+//! reorder the layout, or forge the styling we reserve for system messages.
 
 use std::iter::Peekable;
 use std::str::Chars;
@@ -46,8 +46,19 @@ const UNDERLINE: char = '\u{1F}';
 ///
 /// Covers the whole C0 range plus DEL. Note that tab is included: it can be
 /// used to fake the indentation that distinguishes our system messages.
-fn is_forbidden(c: char) -> bool {
-    (c as u32) < 0x20 || c == '\u{7F}'
+///
+/// Also the C1 range, because a terminal can act on it as it does on ESC: U+009B
+/// starts a control sequence and U+009D an operating system command, which can
+/// rewrite the screen or set the clipboard. U+2028 and U+2029, because text layout
+/// breaks a line on them and a message could fake a second line under itself. And
+/// the bidirectional overrides and isolates, which make text read in a different
+/// order from the one it is in. U+200E, U+200F and U+061C stay: they only mark a
+/// direction, and right-to-left writers use them in ordinary text.
+pub fn is_forbidden(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x00..=0x1F | 0x7F..=0x9F | 0x2028 | 0x2029 | 0x202A..=0x202E | 0x2066..=0x2069
+    )
 }
 
 /// Parse `input` into styled spans, discarding formatting codes and stripping
@@ -254,6 +265,29 @@ fn opens_like_a_background(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_could_act_on_a_terminal_or_the_layout_does_not_survive() {
+        for (input, expected) in [
+            // C1: control sequence and operating system command introducers.
+            ("a\u{9B}2Jb", "a2Jb"),
+            ("a\u{9D}52;c;aGk=\u{9C}b", "a52;c;aGk=b"),
+            ("a\u{85}b", "ab"),
+            // Line and paragraph separators, which would fake a second line.
+            ("a\u{2028}* x has joined\u{2029}b", "a* x has joinedb"),
+            // A right-to-left override, and an isolate.
+            ("cod\u{202E}fdp.exe", "codfdp.exe"),
+            ("a\u{2067}b\u{2069}c", "abc"),
+        ] {
+            assert_eq!(strip(input), expected);
+        }
+    }
+
+    #[test]
+    fn right_to_left_text_and_its_direction_marks_are_left_alone() {
+        let text = "\u{5E9}\u{5DC}\u{5D5}\u{5DD}\u{200F} \u{200E}ok \u{61C}\u{627}";
+        assert_eq!(strip(text), text);
+    }
 
     #[test]
     fn plain_text_is_untouched() {

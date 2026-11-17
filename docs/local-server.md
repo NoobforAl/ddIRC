@@ -1,6 +1,6 @@
 # The local server
 
-**Beta.** App settings → Connection → *Local server* has one switch: turn it on
+App settings → Connection → *Local server* has one switch: turn it on
 and the server starts and a network appears in the rail, pointed at it. The port
 changes each start and the network is kept pointed at it. What follows is what it
 does and why it is shaped this way.
@@ -109,5 +109,5 @@ work — a join touches everyone in the channel, a rename everyone who shares on
 get in. It also means the protocol is testable without a socket, which is most
 of why the tests are quick.
 
-**The MOTD says it is beta.** A MOTD is the one thing every client shows on
+**The MOTD says what this is.** A MOTD is the one thing every client shows on
 arrival, and whoever connected may not be whoever switched it on.

@@ -982,7 +982,18 @@ impl Session {
                     self.index
                         .forget_conversation(&format!("{channel}/{raw_nick}"));
                     room.remove(&nick);
-                    room.renaming.insert(new, nick);
+                    // Too many left unfinished makes the room forget one. The
+                    // app was last told that nick was here, so it is told now
+                    // that it is not, or it would show it for as long as the
+                    // room stays open. Quietly: nothing says it ever left.
+                    if let Some(gone) = room.note_rename(new, nick) {
+                        self.index.forget_author(&channel, &gone);
+                        fx.event(IrcEvent::MemberChanged {
+                            channel,
+                            previous: gone,
+                            member: None,
+                        });
+                    }
                 }
                 return;
             }
@@ -1028,6 +1039,14 @@ impl Session {
             return;
         }
 
+        // Before anything is reported, because the app keeps its own list of whoever
+        // is reported. `is_self` is not trusted for this: it is true for any presence
+        // the room marks as ours, and a room can mark as many nicks as it likes. What
+        // may pass a full room is decided by `Room::admits`.
+        if !room.admits(&nick, is_self) {
+            return;
+        }
+
         let occupant = Occupant {
             nick: nick.clone(),
             affiliation: item
@@ -1038,6 +1057,14 @@ impl Session {
         };
         let view = occupant.view();
         let old_nick = room.renaming.remove(&nick);
+        // A finished rename means the old nick is gone, whatever happened between the
+        // halves. It was removed when the rename was announced, but a room can send
+        // presence for it again before the second half, and nothing else would take
+        // it out: repeated from each new nick of ours, that keeps one more person
+        // for every round, past a bound a full room is meant to hold.
+        if let Some(old) = &old_nick {
+            room.remove(old);
+        }
         let before = room.upsert(occupant.clone());
 
         if let Some(old) = old_nick {

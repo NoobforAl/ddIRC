@@ -73,6 +73,20 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
     final isEcho = BiometricActivity.noteLifecycleChange(wasResumed, state);
     if (BiometricActivity.checking || isEcho) return;
     if (state == AppLifecycleState.resumed && !wasResumed) _lockIfEnabled();
+    // Locked from the moment it is out of sight, and not only from the return.
+    // Until the return, the agent server would go on answering questions about a
+    // phone left in a pocket. Asking for a fingerprint waits for the return, since
+    // no one is there to give one.
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _coverIfEnabled();
+    }
+  }
+
+  void _coverIfEnabled() {
+    if (_lock?.enabled != true || _locked) return;
+    setState(() => _locked = true);
+    _lock?.locked.value = true;
   }
 
   void _lockIfEnabled() {

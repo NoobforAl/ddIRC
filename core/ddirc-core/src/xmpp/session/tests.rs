@@ -358,6 +358,250 @@ fn a_rename_is_one_event_not_a_departure_and_an_arrival() {
     assert_eq!(member.as_ref().unwrap().nick, "robert");
 }
 
+/// How many people the session is keeping for its one room.
+fn members_in(s: &Session) -> usize {
+    s.rooms.values().next().expect("a room").members().len()
+}
+
+fn arrives(nick: &str, status: &[u16]) -> String {
+    muc_presence(nick, None, &item("none", "participant"), status)
+}
+
+/// The first half of a rename: `from` going away, naming `to`. Status 110 as well
+/// when it is us, which is how a room says so.
+fn rename_away(from: &str, to: &str, status: &[u16]) -> String {
+    let mut codes = vec![303];
+    codes.extend_from_slice(status);
+    muc_presence(
+        from,
+        Some("unavailable"),
+        &format!("<item affiliation='none' role='participant' nick='{to}'/>"),
+        &codes,
+    )
+}
+
+/// `in_room`, with the room as full of other people as it will be: bob, and
+/// enough more that the bound is reached, and us on top of that.
+fn in_a_full_room() -> Session {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    let mut s = in_room();
+    for i in 0..(MAX_OCCUPANTS - 1) {
+        feed(&mut s, &arrives(&format!("p{i}"), &[]));
+    }
+    assert_eq!(members_in(&s), MAX_OCCUPANTS + 1, "the others, and us");
+    s
+}
+
+#[test]
+fn a_full_room_cannot_be_grown_by_marking_every_nick_as_ours() {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    let mut s = in_a_full_room();
+
+    // Status 110 is only the room's word that a presence is ours, and a room we
+    // do not trust can put it on every nick it sends. It must not buy a place.
+    for i in 0..5 {
+        let fx = feed(&mut s, &arrives(&format!("fake{i}"), &[110]));
+        assert!(fx.events.is_empty(), "fake{i} was reported");
+    }
+    assert_eq!(members_in(&s), MAX_OCCUPANTS + 1);
+}
+
+#[test]
+fn someone_renaming_in_a_full_room_is_still_one_event() {
+    // The room let us in as its last person, so it holds one more than the bound.
+    // Removing the old nick must free the place the new one takes, or the app keeps
+    // the old name for good and the pending rename never ends.
+    let mut s = in_a_full_room();
+    assert!(feed(&mut s, &rename_away("bob", "robert", &[]))
+        .events
+        .is_empty());
+
+    let fx = feed(&mut s, &arrives("robert", &[]));
+    assert!(
+        fx.events.iter().any(|e| matches!(
+            e,
+            IrcEvent::NickChanged { old, new, is_self: false, .. }
+                if old == "bob" && new == "robert"
+        )),
+        "{:?}",
+        fx.events
+    );
+}
+
+#[test]
+fn our_own_rename_in_a_full_room_still_goes_through() {
+    let mut s = in_a_full_room();
+    feed(&mut s, &rename_away("alice", "ally", &[110]));
+    let fx = feed(&mut s, &arrives("ally", &[110]));
+
+    assert!(
+        fx.events.iter().any(|e| matches!(
+            e,
+            IrcEvent::NickChanged { old, new, is_self: true, .. }
+                if old == "alice" && new == "ally"
+        )),
+        "{:?}",
+        fx.events
+    );
+}
+
+#[test]
+fn a_room_cannot_keep_our_old_nick_by_bringing_it_back_between_the_halves() {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    let mut s = in_a_full_room();
+    let mut current = "alice".to_owned();
+    for round in 0..4 {
+        let next = format!("ally{round}");
+        feed(&mut s, &rename_away(&current, &next, &[110]));
+        // The old nick is back, as a room can send it, before the second half.
+        feed(&mut s, &arrives(&current, &[110]));
+        feed(&mut s, &arrives(&next, &[110]));
+
+        // Finishing the rename takes the old nick out whether or not it came back.
+        // Left in, each round would keep one more person than a full room may hold.
+        assert_eq!(members_in(&s), MAX_OCCUPANTS + 1, "round {round}");
+        current = next;
+    }
+}
+
+#[test]
+fn a_nick_announcing_two_names_is_not_dropped_when_one_is_replaced() {
+    let mut s = in_room();
+    feed(&mut s, &arrives("x", &[]));
+    feed(&mut s, &arrives("dave", &[]));
+
+    // `x` announces two names, so it is pending under both.
+    assert!(feed(&mut s, &rename_away("x", "bob2", &[]))
+        .events
+        .is_empty());
+    assert!(feed(&mut s, &rename_away("x", "carol2", &[]))
+        .events
+        .is_empty());
+
+    // `dave` takes the first of them, replacing that entry. `x` is still going to be
+    // `carol2`, so it is not reported gone: that would have the messages it said
+    // dropped before they could follow it to the name it takes.
+    let fx = feed(&mut s, &rename_away("dave", "bob2", &[]));
+    assert!(fx.events.is_empty(), "{:?}", fx.events);
+}
+
+#[test]
+fn a_room_with_as_many_people_as_we_keep_still_lets_us_in() {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    // Our own presence ends the list the room sends first, so the room is full by
+    // the time it arrives. Refusing it would leave us waiting to be let in for good.
+    let mut s = session();
+    s.on_online(&bound());
+    for i in 0..MAX_OCCUPANTS {
+        feed(&mut s, &arrives(&format!("p{i}"), &[]));
+    }
+    let fx = feed(&mut s, &arrives("alice", &[110]));
+    assert!(
+        fx.events
+            .iter()
+            .any(|e| matches!(e, IrcEvent::Joined { .. })),
+        "we were not let in"
+    );
+
+    // That one was the way in. A second claim, from anyone, finds it shut.
+    let fx = feed(&mut s, &arrives("fake", &[110]));
+    assert!(fx.events.is_empty());
+    assert_eq!(members_in(&s), MAX_OCCUPANTS + 1);
+}
+
+#[test]
+fn a_rename_the_room_forgets_is_reported_as_the_person_gone() {
+    use crate::xmpp::state::MAX_RENAMES;
+
+    let rename = |n: usize| {
+        muc_presence(
+            &format!("old{n:03}"),
+            Some("unavailable"),
+            &format!("<item affiliation='none' role='participant' nick='new{n:03}'/>"),
+            &[303],
+        )
+    };
+
+    let mut s = in_room();
+    feed(&mut s, &arrives("old000", &[]));
+    // As many announced and never finished as the room keeps. Each says nothing:
+    // the second half is expected at once.
+    for n in 0..MAX_RENAMES {
+        assert!(feed(&mut s, &rename(n)).events.is_empty());
+    }
+
+    // One more, and the room forgets the first. The app was last told old000 was
+    // here, and nothing else will ever say it is not.
+    let fx = feed(&mut s, &rename(MAX_RENAMES));
+    assert_eq!(
+        fx.events,
+        [IrcEvent::MemberChanged {
+            channel: MUC.to_owned(),
+            previous: "old000".to_owned(),
+            member: None,
+        }]
+    );
+}
+
+#[test]
+fn a_rename_another_one_replaces_is_reported_as_the_person_gone() {
+    let mut s = in_room();
+    feed(&mut s, &arrives("carol", &[]));
+    assert!(feed(&mut s, &rename_away("bob", "x", &[]))
+        .events
+        .is_empty());
+
+    // The same destination again, from someone else. Whoever was going to be `x`
+    // was taken out of the list when it was announced and now never will be, so
+    // the app is told, or a room doing this with fresh nicks fills its list.
+    let fx = feed(&mut s, &rename_away("carol", "x", &[]));
+    assert_eq!(
+        fx.events,
+        [IrcEvent::MemberChanged {
+            channel: MUC.to_owned(),
+            previous: "bob".to_owned(),
+            member: None,
+        }]
+    );
+}
+
+#[test]
+fn renames_that_never_finish_do_not_let_a_full_room_grow_before_we_are_in() {
+    use crate::xmpp::state::MAX_OCCUPANTS;
+
+    let mut s = session();
+    s.on_online(&bound());
+    for i in 0..MAX_OCCUPANTS {
+        feed(&mut s, &arrives(&format!("p{i}"), &[]));
+    }
+
+    // Announce a rename of someone who is not there, then the new nick marked as
+    // ours. Completing a rename does not mark us joined, so if this counted as the
+    // way in it would never close, and every pair would add one more.
+    for i in 0..5 {
+        let away = muc_presence(
+            &format!("missing{i}"),
+            Some("unavailable"),
+            &format!("<item affiliation='none' role='participant' nick='fresh{i}'/>"),
+            &[303],
+        );
+        feed(&mut s, &away);
+        feed(&mut s, &arrives(&format!("fresh{i}"), &[110]));
+    }
+    assert_eq!(members_in(&s), MAX_OCCUPANTS);
+
+    // And the real way in is still open: nothing above marked us joined.
+    let fx = feed(&mut s, &arrives("alice", &[110]));
+    assert!(fx
+        .events
+        .iter()
+        .any(|e| matches!(e, IrcEvent::Joined { .. })));
+}
+
 #[test]
 fn changing_our_own_nick_moves_the_nick_we_speak_as() {
     let mut s = in_room();

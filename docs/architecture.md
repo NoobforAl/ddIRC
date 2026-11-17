@@ -281,7 +281,9 @@ Both serious downstream users, [Halloy](https://github.com/squidowl/halloy) and
 We depend on the published crate and treat vendoring as a **planned escape
 hatch**, not a surprise. IRC is a frozen protocol, so a fork carries no ongoing
 maintenance tax. If we hit the gaps they hit — flood protection, rustls
-behaviour — the fork goes in `core/vendor/irc` and nothing else changes.
+behaviour — the fork goes in `core/vendor/irc` and nothing else changes. One such
+gap has been hit so far, in the protocol half: `core/vendor/irc-proto` is the
+published crate with a limit on line length.
 
 `tray_manager` is the Dart side's only new dependency, and it is the companion
 to `window_manager`, which was already here. It exists because hiding a window

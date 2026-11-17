@@ -5,9 +5,6 @@
 // is what the app itself shows. Neither can read the other at runtime, so the
 // only thing standing between them and quiet disagreement is this file.
 //
-// The beta mark is here for a different reason. It is a claim the README makes
-// and the app repeats, and it should stop being made deliberately rather than
-// by someone editing a string and not noticing what it was for.
 
 import 'dart:io';
 
@@ -30,10 +27,7 @@ void main() {
     expect(appVersion, _manifestVersion());
   });
 
-  test('the label carries the version and says beta', () {
+  test('the label carries the version', () {
     expect(appVersionLabel, contains(appVersion));
-    // Lower case, because it is read as prose in a sentence rather than as a
-    // badge. The badge is a separate widget with its own wording.
-    expect(appVersionLabel, contains('beta'));
   });
 }

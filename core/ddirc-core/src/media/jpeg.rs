@@ -4,7 +4,13 @@
 //! `FF <marker> <two-byte length> <payload>`. EXIF, XMP, IPTC and comments all
 //! live in those segments, so removing them is a matter of copying the chain
 //! and leaving some links out. After start-of-scan comes entropy-coded data,
-//! which is copied verbatim to the end.
+//! which is copied verbatim up to the next marker; a progressive image repeats
+//! this for each scan.
+//!
+//! The image ends at the end-of-image marker, and nothing after it is copied. A
+//! decoder ignores whatever follows, which is why so much gets put there: the
+//! second image of a multi-picture file, with its own EXIF and GPS, the video of
+//! a motion photo, or anything appended on purpose.
 
 use super::{MediaKind, Removed, StripError, Stripped};
 
@@ -50,6 +56,29 @@ fn describe(marker: u8, payload: &[u8]) -> &'static str {
     }
 }
 
+/// How many bytes of JFIF's APP0 are its fixed fields: the identifier, version,
+/// density, and the width and height of a thumbnail.
+const JFIF_HEADER: usize = 14;
+
+/// Where the scan starting at `from` ends: the offset of the next real marker, or
+/// the end of the file if there is none.
+///
+/// Inside a scan an `FF` byte is always followed by `00`, a restart marker, or
+/// more `FF` fill, so anything else is a marker and a stray `FF D9` cannot appear.
+fn end_of_scan(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while let Some(offset) = bytes[i..].iter().position(|b| *b == 0xFF) {
+        let at = i + offset;
+        match bytes.get(at + 1) {
+            None => return bytes.len(),
+            Some(0x00 | 0xD0..=0xD7) => i = at + 2,
+            Some(0xFF) => i = at + 1,
+            Some(_) => return at,
+        }
+    }
+    bytes.len()
+}
+
 pub(super) fn strip(bytes: &[u8]) -> Result<Stripped, StripError> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut removed = Vec::new();
@@ -79,6 +108,19 @@ pub(super) fn strip(bytes: &[u8]) -> Result<Stripped, StripError> {
             continue;
         }
 
+        // End of image. What follows is not part of the picture.
+        if marker == 0xD9 {
+            out.push(0xFF);
+            out.push(marker);
+            if i < bytes.len() {
+                removed.push(Removed {
+                    what: "data after the end of the image",
+                    bytes: bytes.len() - i,
+                });
+            }
+            break;
+        }
+
         let Some(length) = bytes
             .get(i..i + 2)
             .map(|b| u16::from_be_bytes([b[0], b[1]]) as usize)
@@ -94,14 +136,39 @@ pub(super) fn strip(bytes: &[u8]) -> Result<Stripped, StripError> {
             return Err(StripError::malformed(KIND, "segment runs past the end"));
         };
 
-        // Start of scan: the compressed image follows and runs to the end of
-        // the file. Nothing in it is metadata, and nothing in it is framed, so
-        // it is copied exactly as found.
+        // Start of scan: the compressed image follows. Nothing in it is
+        // metadata, and nothing in it is framed, so it is copied exactly as
+        // found. A file that stops without an end-of-image marker is kept as far
+        // as it goes, since truncated images are common and still display.
         if marker == 0xDA {
+            let end = end_of_scan(bytes, i + length);
             out.push(0xFF);
             out.push(marker);
-            out.extend_from_slice(&bytes[i..]);
-            break;
+            out.extend_from_slice(&bytes[i..end]);
+            if end == bytes.len() {
+                break;
+            }
+            i = end;
+            continue;
+        }
+
+        // The JFIF header is kept for its density, but it can carry a thumbnail
+        // of its own. The two size fields are zeroed so that what remains still
+        // describes itself correctly.
+        if marker == 0xE0 && payload.starts_with(b"JFIF\0") && payload.len() >= JFIF_HEADER {
+            let thumbnail = payload.len() - JFIF_HEADER;
+            let sized = payload[JFIF_HEADER - 2] != 0 || payload[JFIF_HEADER - 1] != 0;
+            if thumbnail > 0 || sized {
+                out.extend_from_slice(&[0xFF, marker, 0, (JFIF_HEADER + 2) as u8]);
+                out.extend_from_slice(&payload[..JFIF_HEADER - 2]);
+                out.extend_from_slice(&[0, 0]);
+                removed.push(Removed {
+                    what: "thumbnail",
+                    bytes: thumbnail,
+                });
+                i += length;
+                continue;
+            }
         }
 
         let is_metadata = (marker == 0xFE || (0xE0..=0xEF).contains(&marker))
@@ -195,6 +262,64 @@ mod tests {
         assert_eq!(result.removed.len(), 1);
         assert_eq!(result.removed[0].what, "thumbnail");
         assert!(!result.bytes.windows(4).any(|w| w == b"JFXX"));
+    }
+
+    #[test]
+    fn a_thumbnail_inside_the_jfif_header_goes_and_the_header_stays() {
+        // JFIF's own thumbnail: two size bytes, then the pixels.
+        let mut app0 = JFIF[..12].to_vec();
+        app0.extend_from_slice(&[2, 1]);
+        app0.extend_from_slice(b"thumb1");
+        let result = strip_any(&jpeg(&[(0xE0, &app0)])).expect("should strip");
+
+        assert!(!result.bytes.windows(6).any(|w| w == b"thumb1"));
+        assert_eq!(result.bytes, jpeg(&[(0xE0, JFIF)]));
+        assert_eq!(result.removed[0].what, "thumbnail");
+        assert_eq!(result.removed[0].bytes, 6);
+    }
+
+    #[test]
+    fn whatever_follows_the_end_of_the_image_goes() {
+        // The second picture of a multi-picture file, with GPS of its own, is
+        // not inside any segment: it simply comes after the first image ends.
+        let clean = jpeg(&[(0xE0, JFIF)]);
+        let mut original = clean.clone();
+        original.extend_from_slice(&[0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x05, b'G', b'P', b'S']);
+        original.extend_from_slice(b"second image");
+
+        let result = strip_any(&original).expect("should strip");
+
+        assert_eq!(result.bytes, clean);
+        assert!(!result.was_already_clean());
+        assert_eq!(result.removed[0].what, "data after the end of the image");
+        assert_eq!(result.removed[0].bytes, original.len() - clean.len());
+    }
+
+    #[test]
+    fn every_scan_of_a_progressive_image_is_kept() {
+        // Two scans with a Huffman table between, and escaped FF bytes and a
+        // restart marker inside them that must not be mistaken for the end.
+        let mut original = vec![0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x02];
+        original.extend_from_slice(&[1, 0xFF, 0x00, 2, 0xFF, 0xD3, 3]);
+        original.extend_from_slice(&[0xFF, 0xC4, 0x00, 0x03, 9]);
+        original.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02, 4, 5, 6, 0xFF, 0xD9]);
+
+        let result = strip_any(&original).expect("should strip");
+
+        assert_eq!(result.bytes, original);
+        assert!(result.was_already_clean());
+    }
+
+    #[test]
+    fn metadata_between_scans_goes_too() {
+        let mut original = vec![0xFF, 0xD8, 0xFF, 0xDA, 0x00, 0x02, 1, 2];
+        original.extend_from_slice(&[0xFF, 0xFE, 0x00, 0x06, b'h', b'o', b'm', b'e']);
+        original.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02, 3, 4, 0xFF, 0xD9]);
+
+        let result = strip_any(&original).expect("should strip");
+
+        assert!(!result.bytes.windows(4).any(|w| w == b"home"));
+        assert_eq!(result.removed[0].what, "comment");
     }
 
     #[test]

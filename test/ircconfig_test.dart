@@ -39,7 +39,118 @@ Profile _profile({
 List<Profile> _parse(String source) =>
     parseIrcConfig(source).map((n) => n.profile).toList();
 
+/// A small file whose aliases multiply tenfold at each of [levels].
+String _aliasBomb(int levels) {
+  final out = StringBuffer(
+    'ddirc: 1\nx0: &x0 [a, a, a, a, a, a, a, a, a, a]\n',
+  );
+  for (var i = 1; i <= levels; i++) {
+    out.writeln('x$i: &x$i [${List.filled(10, '*x${i - 1}').join(', ')}]');
+  }
+  out.write(
+    "networks:\n  - name: 'n'\n    host: 'h.example'\n    port: 6697\n"
+    "    nickname: 'me'\n    extra: *x$levels\n",
+  );
+  return out.toString();
+}
+
 void main() {
+  group('a file built to be expensive', () {
+    test('nested aliases are refused, and quickly', () {
+      final file = _aliasBomb(12);
+      expect(file.length, lessThan(2048), reason: 'small enough for a QR code');
+
+      final watch = Stopwatch()..start();
+      expect(() => parseIrcConfig(file), throwsFormatException);
+      expect(watch.elapsed, lessThan(const Duration(seconds: 5)));
+    });
+
+    test('an alias used as a key is refused before it is hashed', () {
+      // The parser would walk this one itself, so it has to be turned away before
+      // the parser sees it. Before that check, this test never finished.
+      final file = _aliasBomb(12)
+          .replaceFirst('    extra: *x12\n', '    ? *x12\n    : value\n');
+      expect(() => parseIrcConfig(file), throwsFormatException);
+    });
+
+    test('a stray quote cannot hide an alias', () {
+      expect(
+        () => parseIrcConfig(
+          "a: b 'c\nx: &x [1]\nnetworks:\n  - host: 'h.example'\n    port: 6697\n"
+          "    nickname: 'me'\n    extra: *x\nz: d'\n",
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('nor can one that follows a quoted key with no space between', () {
+      // In a flow mapping the colon after a quoted key needs no space, so these
+      // are an anchor and an alias that a test for "a word after a space" misses.
+      // Each one parses cleanly if it is let through, so it is the refusal and not
+      // some other error that makes these throw.
+      for (final extra in ['{"a":&x 1}', '{"a":&x [1], "b":*x}']) {
+        expect(
+          () => parseIrcConfig(
+            "networks:\n  - host: 'h.example'\n    port: 6697\n"
+            "    nickname: 'me'\n    extra: $extra\n",
+          ),
+          throwsA(
+            isA<FormatException>().having(
+              (e) => e.message,
+              'message',
+              contains('alias or anchor'),
+            ),
+          ),
+          reason: extra,
+        );
+      }
+    });
+
+    test('* and & inside a word or a quoted value are not aliases', () {
+      final network = _parse(
+        "networks:\n  - name: 'R&D* one'\n    host: 'h.example'\n    port: 6697\n"
+        "    nickname: 'me'\n    channels: ['&local', '#a']\n",
+      ).single;
+      expect(network.name, 'R&D* one');
+      expect(network.channels, ['&local', '#a']);
+    });
+
+    test('so is nesting deeper than any config has', () {
+      final deep = '[' * 40 + ']' * 40;
+      expect(
+        () => parseIrcConfig(
+          "networks:\n  - host: 'h.example'\n    port: 6697\n"
+          "    nickname: 'me'\n    extra: $deep\n",
+        ),
+        throwsFormatException,
+      );
+    });
+
+    test('and a file larger than any config could be', () {
+      // A valid network followed by a comment, which the parser ignores. So the
+      // only thing that can refuse the longer one is the size check: the same
+      // test on a bare comment passed with that check taken out, because a
+      // document with no networks in it is refused anyway.
+      const network =
+          "networks:\n  - name: 'N'\n    host: 'h.example'\n    port: 6697\n"
+          "    nickname: 'me'\n";
+      String padded(int length) => '$network${'#' * (length - network.length)}';
+
+      expect(padded(maxIrcConfigBytes), hasLength(maxIrcConfigBytes));
+      expect(parseIrcConfig(padded(maxIrcConfigBytes)), hasLength(1));
+      expect(
+        () => parseIrcConfig(padded(maxIrcConfigBytes + 1)),
+        throwsA(
+          isA<FormatException>().having(
+            (e) => e.message,
+            'message',
+            contains('too large'),
+          ),
+        ),
+      );
+    });
+  });
+
   group('round trip', () {
     test('the fields every network has', () {
       final networks = _parse(writeIrcConfig([_profile()]));

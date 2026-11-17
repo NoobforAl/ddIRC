@@ -76,9 +76,9 @@ class MessageView extends StatefulWidget {
   /// none, which leaves the finished card without a tap.
   final ValueChanged<FileTransfer>? onRevealFile;
 
-  /// Whether this connection is proxied, which makes a reverse offer — one that
-  /// asks us to listen — impossible to accept without telling the sender where
-  /// we are. Such a card says so instead of offering a button.
+  /// Whether this connection is proxied. A reverse offer — one that asks us to
+  /// listen — is refused either way, but behind a proxy the reason is that it
+  /// would tell the sender where we are, and that is the reason worth giving.
   final bool proxyBlocksReverseOffers;
 
   /// Reply to a line quoting only part of it — the part selected.
@@ -815,10 +815,13 @@ class _MessageViewState extends State<MessageView> {
     if (widget.conversation.pending) {
       return 'Accept their message request to download this';
     }
-    // A reverse offer asks us to listen, and listening tells the sender where
-    // we are — which a proxy exists to prevent.
-    if (transfer.isReverse && widget.proxyBlocksReverseOffers) {
-      return 'Cannot accept through a proxy — it would reveal your address';
+    // A reverse offer asks us to listen, and the core never does. Behind a proxy
+    // that is the point, since listening tells the sender where we are. Without
+    // one it is just not built, and blaming a proxy nobody has would be untrue.
+    if (transfer.isReverse) {
+      return widget.proxyBlocksReverseOffers
+          ? 'Cannot accept through a proxy — it would reveal your address'
+          : 'ddIRC cannot take this kind of offer — ask them to send it normally';
     }
     return null;
   }

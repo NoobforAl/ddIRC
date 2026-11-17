@@ -2567,12 +2567,14 @@ impl SseDecode for crate::api::types::DccOffer {
         let mut var_port = <Option<u16>>::sse_decode(deserializer);
         let mut var_size = <Option<u64>>::sse_decode(deserializer);
         let mut var_token = <Option<u64>>::sse_decode(deserializer);
+        let mut var_localNetwork = <bool>::sse_decode(deserializer);
         return crate::api::types::DccOffer {
             filename: var_filename,
             host: var_host,
             port: var_port,
             size: var_size,
             token: var_token,
+            local_network: var_localNetwork,
         };
     }
 }
@@ -3885,6 +3887,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::types::DccOffer {
             self.port.into_into_dart().into_dart(),
             self.size.into_into_dart().into_dart(),
             self.token.into_into_dart().into_dart(),
+            self.local_network.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4787,6 +4790,7 @@ impl SseEncode for crate::api::types::DccOffer {
         <Option<u16>>::sse_encode(self.port, serializer);
         <Option<u64>>::sse_encode(self.size, serializer);
         <Option<u64>>::sse_encode(self.token, serializer);
+        <bool>::sse_encode(self.local_network, serializer);
     }
 }
 

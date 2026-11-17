@@ -242,12 +242,18 @@ class DccOffer {
   /// this is one.
   final BigInt? token;
 
+  /// Whether [`Self::host`] is on a private network. Decided here so Dart does
+  /// not hold a second copy of the address ranges: the card warns on this, and
+  /// the core is what enforces the rule.
+  final bool localNetwork;
+
   const DccOffer({
     required this.filename,
     this.host,
     this.port,
     this.size,
     this.token,
+    required this.localNetwork,
   });
 
   @override
@@ -256,7 +262,8 @@ class DccOffer {
       host.hashCode ^
       port.hashCode ^
       size.hashCode ^
-      token.hashCode;
+      token.hashCode ^
+      localNetwork.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -267,7 +274,8 @@ class DccOffer {
           host == other.host &&
           port == other.port &&
           size == other.size &&
-          token == other.token;
+          token == other.token &&
+          localNetwork == other.localNetwork;
 }
 
 @freezed
@@ -349,7 +357,7 @@ sealed class IrcEvent with _$IrcEvent {
   ///
   /// Reported, never answered — nothing has been sent back and no
   /// connection has been made. Accepting means dialling an address a
-  /// stranger chose, or listening for them, and that is the user's call.
+  /// stranger chose, and that is the user's call.
   const factory IrcEvent.fileOffered({
     /// Names the offer for as long as it is worth answering. Passed back
     /// to accept or decline it, so the UI refers to an offer the core

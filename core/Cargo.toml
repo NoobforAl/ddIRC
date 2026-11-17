@@ -76,7 +76,13 @@ uninlined_format_args = "warn"
 # CTCP-gated senders are never called. With the feature off, the crate's
 # `handle_ctcp` compiles to a stub that returns `Ok(())`, which is the
 # behaviour that was always intended.
-irc = { version = "1.1.0", default-features = false, features = ["tls-rust", "channel-lists", "proxy"] }
+#
+# `channel-lists` is NOT enabled either, for a different reason. It makes the
+# crate keep its own copy of every channel's members, from inside `poll_next` and
+# so ahead of every bound and rate limit of ours: a `Vec` per channel, never
+# deduplicated, for any channel a server cares to name in a `353`. Nothing reads
+# it, because `conn/` and `state/` keep their own, bounded, record.
+irc = { version = "1.1.0", default-features = false, features = ["tls-rust", "proxy"] }
 tokio = { version = "1", default-features = false }
 futures-util = "0.3"
 thiserror = "2"
@@ -195,8 +201,14 @@ httparse = "1"
 #
 # Vendored rather than forked: 546 lines, no dependencies, MIT OR Apache-2.0.
 # Delete the directory and this block together when a fixed release exists.
+#
+# `irc-proto` has one change too: a limit on line length, because the published
+# codec buffers without limit while it waits for a newline, and the `irc` crate
+# builds that codec internally where nothing here can wrap it. See
+# `vendor/irc-proto/README.md`. The same rule for deleting it applies.
 [patch.crates-io]
 saturating-time = { path = "vendor/saturating-time" }
+irc-proto = { path = "vendor/irc-proto" }
 
 # ---------------------------------------------------------------------------
 # How the native core is built.

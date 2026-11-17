@@ -72,16 +72,19 @@ rust.IrcEvent _offer({
   String filename = 'report.pdf',
   int? port = 5000,
   int? size = 2048,
+  String host = '203.0.113.5',
+  bool localNetwork = false,
 }) => rust.IrcEvent.fileOffered(
   id: BigInt.from(id),
   channel: channel,
   from: from,
   offer: rust.DccOffer(
     filename: filename,
-    host: port == null ? null : '203.0.113.5',
+    host: port == null ? null : host,
     port: port,
     size: size == null ? null : BigInt.from(size),
     token: port == null ? BigInt.from(7) : null,
+    localNetwork: localNetwork,
   ),
 );
 
@@ -317,6 +320,19 @@ void main() {
       _joined(s, '#chat');
       s.receiveForTesting(_offer(port: null));
       expect(_files(_named(s, '#chat')).single.isReverse, isTrue);
+    });
+
+    test('an offer keeps its address only when it is a private one', () async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+      s.receiveForTesting(
+        _offer(id: 2, host: '192.168.1.20', localNetwork: true),
+      );
+
+      final files = _files(_named(s, '#chat'));
+      expect(files.first.localAddress, isNull);
+      expect(files.last.localAddress, '192.168.1.20');
     });
 
     test('is never answered by the session on its own', () async {
@@ -908,6 +924,56 @@ void main() {
         ),
         findsOneWidget,
       );
+    });
+
+    testWidgets('a reverse offer with no proxy cannot be taken, or blame one', (
+      tester,
+    ) async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer(port: null));
+      var accepted = 0;
+
+      await pump(tester, _named(s, '#chat'), onAccept: (_) => accepted++);
+
+      expect(
+        find.text(
+          'ddIRC cannot take this kind of offer — ask them to send it normally',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('proxy'), findsNothing);
+      await tester.tap(find.byIcon(Icons.arrow_downward_rounded));
+      expect(accepted, 0);
+    });
+
+    testWidgets('an offer to a private address names it before the press', (
+      tester,
+    ) async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer(host: '192.168.1.20', localNetwork: true));
+      FileTransfer? accepted;
+
+      await pump(tester, _named(s, '#chat'), onAccept: (t) => accepted = t);
+
+      expect(find.textContaining('Connects to 192.168.1.20'), findsOneWidget);
+      // A warning and not a refusal: this is also what a real sender on the same
+      // network looks like.
+      await tester.tap(find.bySemanticsLabel('Download report.pdf'));
+      expect(accepted?.filename, 'report.pdf');
+    });
+
+    testWidgets('an offer to a public address carries no such warning', (
+      tester,
+    ) async {
+      final s = await _session();
+      _joined(s, '#chat');
+      s.receiveForTesting(_offer());
+
+      await pump(tester, _named(s, '#chat'));
+
+      expect(find.textContaining('Connects to'), findsNothing);
     });
 
     testWidgets('a direct offer through a proxy can still be accepted', (

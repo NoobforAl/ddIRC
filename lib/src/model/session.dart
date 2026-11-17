@@ -1523,6 +1523,7 @@ class SessionModel extends ChangeNotifier {
           from: from,
           total: offer.size,
           isReverse: offer.port == null,
+          localAddress: offer.localNetwork ? offer.host : null,
         );
         _transfers[id] = offered;
         // Whether accepting would carry on from something already here. Asked

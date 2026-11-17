@@ -220,7 +220,10 @@ by hand over its own channel — see *Being told that something was said*,
 below. Either source lands on the same review screen, one row per network
 found and a checkbox on each, before anything is saved — the same way
 picking a network from Browse fills in the editor rather than connecting on
-the spot.
+the spot. Each row says what saving it will do: its proxy, if it skips yours,
+whether it connects at launch, and the channels it joins. A network that sets
+its own route starts unticked, because choosing to add a server is not choosing
+to send your connection through somebody else's proxy.
 
 **Add a network**, beside Browse, opens a menu rather than a form directly:
 *by hand*, *by QR code*, or *by `.irc` file*. These three used to be three
@@ -575,7 +578,7 @@ the connection that negotiated it:
 | | No proxy | Proxy configured |
 |---|---|---|
 | **Accepting** a normal offer | dial them directly | dial them **through the proxy** |
-| **Accepting** a reverse offer | listen, and tell them where | **refused** — listening means disclosing where you are |
+| **Accepting** a reverse offer | **refused** — not built | **refused** — listening means disclosing where you are |
 | **Sending** | listen, and offer your address | **refused** — see below |
 
 Sending from behind a proxy wants a reverse offer of our own, where they listen
@@ -583,9 +586,25 @@ and we dial out, and that half is not built. It is refused rather than falling
 back to a direct offer, because a fallback is exactly the thing the rule exists
 to prevent.
 
+**Where an offer may point.** The address in an offer is the sender's choice, so
+it is checked before anything is dialled or said to them:
+
+| The offer names | No proxy | Proxy configured |
+|---|---|---|
+| A public address | dialled | dialled through the proxy |
+| A private address | dialled, and the card names the address first | **refused** — it would land on the proxy's network |
+| This machine | **refused**, unless your IRC server is on this machine too | **refused** |
+| Anything else (multicast, unspecified, reserved) | **refused** | **refused** |
+
+A private address has to stay possible, because that is what an offer from
+somebody on the same network looks like, and for most people behind a router it
+is the only transfer that works. The same number could be your router, and only
+you know which you expected, so the card says *Connects to 192.168.1.20 on your
+own network* before you press anything.
+
 ## Agents (MCP)
 
-**Beta, and off.** App settings → Connection → *Agents (MCP)* runs a
+**Off by default.** App settings → Connection → *Agents (MCP)* runs a
 [Model Context Protocol](https://modelcontextprotocol.io) server inside the
 app, so an AI agent — Claude Code, Claude Desktop, any MCP client — can catch
 up on your conversations and draft replies.
@@ -600,13 +619,23 @@ What an agent can do:
 | `search_messages` | Text search over what the app holds in memory, newest first. |
 | `send_message` | Send to a conversation that is already open, optionally as a reply. |
 
-**Nothing is sent without you.** Every `send_message` raises a sheet in the
-app with the network, the conversation and the exact text, and waits — up to
-two minutes — for *Send*, *Always allow in #channel*, or *Don't send*. There is
+**Nothing is sent without you, unless you have allowed that channel.** Every
+`send_message` raises a sheet in the app with the network, the conversation and
+the exact text, and waits — up to two minutes — for *Send*, *Allow in #channel
+for a day* or *Don't send*. Choosing *Allow in #channel for a day* is a choice to
+stop being asked: for the next 24 hours an agent's messages to that channel are
+sent with no sheet, and so with nobody reading them first. Settings lists every channel that is allowed, how long each has left, and takes
+any of them back at once. Direct messages cannot be allowed. The lock is the
+other thing that stops them: while the app is locked nothing is sent, allowed
+channel or not. There is
 no tool to join, leave, change nick or run a command, because a message is the
 only action whose whole effect can be read off a sheet before it happens. Text
 from an agent is always sent as text: a line that starts with `/` is a line
-that starts with `/`.
+that starts with `/`. Before the sheet appears it loses control and formatting
+codes, direction overrides, invisible tag characters and blank lines, so what you
+read is what goes out. The sheet says how long the message is, marks anything
+invisible that remains, and keeps *Send* and *Allow for a day* disabled until the end
+of the message has been on screen.
 
 How it is reached: the Streamable HTTP transport, answered with plain JSON, at
 `http://127.0.0.1:<port>/mcp` behind a random bearer token. The settings

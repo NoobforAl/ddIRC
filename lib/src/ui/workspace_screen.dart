@@ -172,6 +172,12 @@ class WorkspaceScreen extends StatelessWidget {
 
     final List<ImportedNetwork> networks;
     try {
+      // Asked first, so that picking the wrong file does not read all of it.
+      if (await file.length() > maxIrcConfigBytes) {
+        throw const FormatException(
+          'This file is too large to be a network config.',
+        );
+      }
       networks = parseIrcConfig(await file.readAsString());
     } catch (e) {
       if (context.mounted) await _importFailed(context, e);
@@ -296,10 +302,6 @@ class _Empty extends StatelessWidget {
             children: [
               const Center(child: AppMark(size: 44)),
               const SizedBox(height: 14),
-              // The wordmark carries the badge, because this is the screen a
-              // fresh install opens on and "it is a beta" is the first thing
-              // about this client worth knowing. The badge's tooltip says
-              // what that means; the version below says which beta.
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -313,8 +315,6 @@ class _Empty extends StatelessWidget {
                       letterSpacing: -0.5,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  const BetaBadge(),
                 ],
               ),
               const SizedBox(height: 4),

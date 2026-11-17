@@ -1,27 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Android 12+ (API 31+) replacement for backup_rules.xml, read through
-  `android:dataExtractionRules`. See that file for why the two preference
-  files below are excluded; the reasoning is identical and is written out
-  there rather than twice.
+  `android:dataExtractionRules`. See that file for why the preference files and
+  the `file` domain below are excluded; the reasoning is identical and is written
+  out there rather than twice.
 
   This format splits the question in two, and both answers are the same here:
 
   * cloud-backup   — what Google Drive gets.
   * device-transfer — what a cabled phone-to-phone transfer gets.
 
-  device-transfer is worth excluding even though it never leaves the user's
-  hands, because the reason is not confidentiality. It is that the Keystore
-  key stays behind on the old device either way, so the ciphertext arrives
-  unreadable on the new one whichever route it took.
+  device-transfer is worth excluding for the preference files even though it never
+  leaves the user's hands, because the reason is not confidentiality. It is that
+  the Keystore key stays behind on the old device either way, so the ciphertext
+  arrives unreadable on the new one whichever route it took.
+
+  The `file` domain is excluded from it too, so that the two Android versions keep
+  saying the same thing: the older format cannot tell the two routes apart.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
         <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+        <exclude domain="file" path="."/>
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="FlutterSecureStorage.xml"/>
         <exclude domain="sharedpref" path="FlutterSecureKeyStorage.xml"/>
+        <exclude domain="file" path="."/>
     </device-transfer>
 </data-extraction-rules>

@@ -20,6 +20,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ddirc/src/model/ircconfig.dart';
 import 'package:ddirc/src/model/profile.dart';
+import 'package:ddirc/src/model/proxy.dart';
 import 'package:ddirc/src/theme.dart';
 import 'package:ddirc/src/ui/settings/import_config_dialog.dart';
 import 'package:ddirc/src/ui/settings/settings_chrome.dart';
@@ -162,6 +163,104 @@ void main() {
       await open(tester, _withoutPasswords);
       expect(find.textContaining('still plain text'), findsNothing);
       expect(find.textContaining('No passwords came with'), findsOneWidget);
+    });
+  });
+
+  group('what a file could do without saying so', () {
+    const withAProxy = '''
+ddirc: 1
+networks:
+  - name: 'Shared'
+    host: 'irc.example.org'
+    port: 6697
+    nickname: 'ddirc'
+    proxyMode: 'custom'
+    proxy:
+      host: 'proxy.attacker.example'
+      port: 1080
+''';
+    const goingDirect = '''
+ddirc: 1
+networks:
+  - name: 'Shared'
+    host: 'irc.example.org'
+    port: 6697
+    nickname: 'ddirc'
+    proxyMode: 'direct'
+''';
+
+    testWidgets('its own proxy is named, and has to be ticked on purpose', (
+      tester,
+    ) async {
+      final store = await open(tester, withAProxy);
+
+      expect(
+        find.textContaining('proxy at proxy.attacker.example:1080'),
+        findsOneWidget,
+      );
+      expect(find.text('Import 0 of 1'), findsOneWidget);
+
+      // The button is there and does nothing, rather than saving it anyway.
+      await tester.tap(find.text('Import 0 of 1'));
+      await tester.pumpAndSettle();
+      expect(store.profiles, isEmpty);
+
+      // The row, and not the dialog's subtitle, which names it as well.
+      await tester.tap(find.text('Shared').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Import 1'));
+      await tester.pumpAndSettle();
+      expect(store.profiles.single.proxyMode, ProxyMode.custom);
+    });
+
+    testWidgets('skipping your proxy is said, and has to be ticked too', (
+      tester,
+    ) async {
+      await open(tester, goingDirect);
+
+      expect(find.textContaining('skipping any proxy'), findsOneWidget);
+      expect(find.text('Import 0 of 1'), findsOneWidget);
+    });
+
+    testWidgets('connecting at launch and the channels are said', (
+      tester,
+    ) async {
+      await open(tester, '''
+ddirc: 1
+networks:
+  - name: 'Shared'
+    host: 'irc.example.org'
+    port: 6697
+    nickname: 'ddirc'
+    autoConnect: true
+    channels: ['#a', '#b', '#c', '#d', '#e']
+''');
+
+      expect(find.text('Connects when the app starts'), findsOneWidget);
+      expect(find.text('Joins #a, #b, #c and 2 more'), findsOneWidget);
+      expect(find.text('Import 1'), findsOneWidget, reason: 'route unchanged');
+    });
+
+    testWidgets('a network that sets none of it says none of it', (
+      tester,
+    ) async {
+      await open(tester, _withoutPasswords);
+
+      expect(find.textContaining('Connects'), findsNothing);
+      expect(find.textContaining('Joins'), findsNothing);
+    });
+
+    testWidgets('a hidden character in a name is shown', (tester) async {
+      await open(tester, '''
+ddirc: 1
+networks:
+  - name: "Lib\\u202Eera"
+    host: 'irc.example.org'
+    port: 6697
+    nickname: 'ddirc'
+''');
+
+      expect(find.text('Lib⟦U+202E⟧era'), findsNWidgets(2));
     });
   });
 

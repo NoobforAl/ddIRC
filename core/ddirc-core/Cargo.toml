@@ -38,6 +38,8 @@ rcgen.workspace = true
 # tree underneath it.
 log = "0.4"
 tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+# To drive the `irc` crate's line codec directly. Already in the tree underneath it.
+tokio-util = { workspace = true, features = ["codec"] }
 
 [lints]
 workspace = true

@@ -449,6 +449,7 @@ impl Listing {
 #[derive(Default)]
 struct Transfers {
     next_id: u64,
+    // See `MAX_PENDING_OFFERS` for how long an unanswered offer is kept.
     /// Announced, not yet answered. Holds the offer so accepting never has to
     /// take one back from the UI.
     offers: HashMap<u64, PendingOffer>,
@@ -464,6 +465,10 @@ struct Transfers {
     /// names a port can be matched to the one transfer it could mean.
     serving: HashMap<u16, Serving>,
 }
+
+/// The most offers held waiting for an answer. Far more than anyone answers at a
+/// time; pressing download on one older than this does nothing.
+const MAX_PENDING_OFFERS: usize = 256;
 
 /// A `DCC RESUME` we sent and are waiting to see answered.
 struct AwaitedResume {
@@ -1593,6 +1598,14 @@ impl Actor {
         // describe it. The UI never gets to hand an address back to the core —
         // it answers an offer the core parsed, or it answers nothing.
         let id = self.transfers.next();
+        // Ids only go up, so the smallest is the oldest. Offers are written by
+        // strangers and kept until answered, and with transfers switched off the
+        // app never shows them, so nothing else would ever answer them.
+        if self.transfers.offers.len() >= MAX_PENDING_OFFERS {
+            if let Some(oldest) = self.transfers.offers.keys().min().copied() {
+                self.transfers.offers.remove(&oldest);
+            }
+        }
         self.transfers.offers.insert(
             id,
             PendingOffer {
@@ -1627,6 +1640,20 @@ impl Actor {
             // Silence is right: nothing was promised and nothing is owed.
             return;
         };
+
+        // Before the resume request below as well as before the dial: an offer
+        // that may not be taken up gets nothing said to its sender either.
+        if let Some(addr) = pending.offer.addr {
+            let allowed = transfer::check_destination(
+                addr,
+                self.config.proxy.is_some(),
+                transfer::is_this_machine(&self.config.host),
+            );
+            if let Err(e) = allowed {
+                self.emit(ended(id, pending.channel, pending.offer.filename, Err(e)));
+                return;
+            }
+        }
 
         let (cancel_tx, mut cancel_rx) = mpsc::channel(1);
         self.transfers.running.insert(id, cancel_tx);
@@ -3264,9 +3291,19 @@ mod tests {
     }
 
     fn inbox_with_partial(name: &str, bytes: usize) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // One directory per call. Tests run on parallel threads of one process, and
+        // several of them offer the same file name: with a path made of the process
+        // and the name alone, each one's `remove_dir_all` above deleted the folder
+        // another was about to write its partial file into, and whichever lost the
+        // race failed with a missing directory or a partial file that "was not worth
+        // resuming". It showed up now and then, locally and in CI.
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
-            "ddirc-resume-{}-{}",
+            "ddirc-resume-{}-{}-{}",
             std::process::id(),
+            CALLS.fetch_add(1, Ordering::Relaxed),
             name.replace(['.', ' '], "_")
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -3280,6 +3317,114 @@ mod tests {
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn unanswered_offers_do_not_pile_up_without_limit() {
+        let (mut actor, _rx, mut outgoing) = actor(&[]);
+        let total = MAX_PENDING_OFFERS + 50;
+        for i in 0..total {
+            feed(
+                &mut actor,
+                &mut outgoing,
+                &format!(":a!a@h PRIVMSG ddirc :\u{01}DCC SEND f{i} 1 5000 10\u{01}"),
+            );
+            // After every one, not only at the end: below the limit nothing is
+            // dropped, at it the count stops, and past it each new offer takes
+            // exactly one place. A cap that is off by one, or that only starts
+            // working after a while, shows here and not in a single final check.
+            assert_eq!(
+                actor.transfers.offers.len(),
+                (i + 1).min(MAX_PENDING_OFFERS),
+                "after offer {i}"
+            );
+        }
+
+        // Ids count up from 1, so what is kept is exactly the newest run of them:
+        // not merely some recent ones, and nothing older.
+        let mut kept: Vec<u64> = actor.transfers.offers.keys().copied().collect();
+        kept.sort_unstable();
+        let newest = u64::try_from(total).unwrap();
+        let oldest_kept = newest - u64::try_from(MAX_PENDING_OFFERS).unwrap() + 1;
+        assert_eq!(kept, (oldest_kept..=newest).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_line_with_no_end_is_refused_rather_than_held() {
+        use irc::proto::IrcCodec;
+        use tokio_util::bytes::BytesMut;
+        use tokio_util::codec::Decoder;
+
+        // The whole of the memory attack: bytes and never a newline. Fed the way
+        // a socket would, so the codec has to stop on its own partway.
+        let mut codec = IrcCodec::new("utf-8").unwrap();
+        let mut buffer = BytesMut::new();
+        let mut refused = false;
+        for _ in 0..128 {
+            buffer.extend_from_slice(&[b'x'; 8 * 1024]);
+            if codec.decode(&mut buffer).is_err() {
+                refused = true;
+                break;
+            }
+        }
+        assert!(refused, "held a megabyte waiting for a newline");
+        assert!(buffer.len() < 64 * 1024, "held {} bytes", buffer.len());
+
+        // The same length with an ending on it is no better.
+        let mut codec = IrcCodec::new("utf-8").unwrap();
+        let mut buffer = BytesMut::from(format!("{}\r\n", "x".repeat(32 * 1024)).as_str());
+        assert!(codec.decode(&mut buffer).is_err());
+    }
+
+    #[test]
+    fn the_longest_legal_line_still_arrives() {
+        use irc::proto::IrcCodec;
+        use tokio_util::bytes::BytesMut;
+        use tokio_util::codec::Decoder;
+
+        // 8191 bytes of tags and 512 of message, which is what IRCv3 allows.
+        let line = format!(
+            "@tag={} :alice!a@host PRIVMSG #chat :{}\r\n",
+            "t".repeat(8180),
+            "m".repeat(460)
+        );
+        let mut codec = IrcCodec::new("utf-8").unwrap();
+        let mut buffer = BytesMut::from(line.as_str());
+        let message = codec.decode(&mut buffer).unwrap();
+        assert!(message.is_some());
+    }
+
+    #[tokio::test]
+    async fn accepting_an_offer_aimed_at_this_machine_is_refused_and_says_nothing() {
+        // The actor's server is `example.test`, so loopback cannot be the sender.
+        let (mut actor, mut rx, mut outgoing) = actor(&[]);
+        let dir = inbox_with_partial("cat.jpg", 400);
+        let mut offer = offer_for("cat.jpg", Some(5001), Some(1000));
+        offer.addr = Some(std::net::IpAddr::from([127, 0, 0, 1]));
+        actor.transfers.offers.insert(
+            1,
+            PendingOffer {
+                channel: "#chat".to_owned(),
+                from: "alice".to_owned(),
+                offer,
+            },
+        );
+
+        actor
+            .accept_file(&mut outgoing, 1, dir.to_string_lossy().into_owned())
+            .await;
+
+        // The sender hears nothing, not even the resume request the partial file
+        // would otherwise have prompted.
+        assert!(outgoing.is_empty());
+        assert!(actor.transfers.running.is_empty());
+        match rx.try_recv() {
+            Ok(IrcEvent::FileTransferEnded { id, error, .. }) => {
+                assert_eq!(id, 1);
+                assert!(error.unwrap().contains("Nothing was dialled"));
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -5,12 +5,14 @@
 # Each ecosystem arrives as one grouped PR, and CI (build, lint, test) runs on
 # it like on any other.
 #
-# Two things are deliberately left out, because a bot would split what has to
-# move together:
+# Some things are deliberately left out, because a bot would split what has to
+# move together, or cannot do the work a bump needs:
 #
 # - flutter_rust_bridge: the Rust crate, the Dart package and the generated
 #   bindings (`make codegen`) must be on the same version, bumped by hand.
 # - rusqlite: capped by arti's tor-dirmgr, so it moves when arti does.
+# - window_manager 0.6+: a breaking API change that needs the Windows title bar
+#   rewritten and looked at, not just compiled.
 version: 2
 updates:
   - package-ecosystem: "pub"
@@ -24,6 +26,10 @@ updates:
         patterns: ["*"]
     ignore:
       - dependency-name: "flutter_rust_bridge"
+      # 0.6 removes the `windowManager` global the Windows title bar uses; see
+      # the note beside it in pubspec.yaml.
+      - dependency-name: "window_manager"
+        versions: [">=0.6.0"]
 
   - package-ecosystem: "cargo"
     directory: "/core"

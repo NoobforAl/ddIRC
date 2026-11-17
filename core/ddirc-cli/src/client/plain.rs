@@ -17,13 +17,33 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use super::commands::{command_for, command_for_with, Action, HELP};
 use crate::cli::Connection;
 
+/// Print a line to the terminal, with nothing in it that the terminal would obey.
+///
+/// Every line goes through here rather than each remote field being cleaned where
+/// it is used, because stdout is the one place this harness writes and a field
+/// missed is an escape sequence delivered. A channel name from `LIST`, a host from
+/// `WHOIS` and a nick reach this file without passing the core's text cleaning, and
+/// on a server that only forbids spaces in a channel name, ESC is allowed in one.
+macro_rules! say {
+    ($($line:tt)*) => {
+        println!("{}", clean(&format!($($line)*)))
+    };
+}
+
+/// Remove what a terminal would act on, or what would fake another line.
+fn clean(line: &str) -> String {
+    line.chars()
+        .filter(|c| !ddirc_core::text::format::is_forbidden(*c))
+        .collect()
+}
+
 pub async fn run(connection: Connection) -> ExitCode {
     if let Err(error) = connection.validate() {
         eprintln!("error: {error}");
         return ExitCode::FAILURE;
     }
 
-    println!("{}", connection.describe());
+    say!("{}", connection.describe());
 
     // Track a default target so plain lines can be sent without a command.
     let mut current = connection.first_channel();
@@ -38,7 +58,7 @@ pub async fn run(connection: Connection) -> ExitCode {
         tokio::select! {
             event = events.recv() => {
                 let Some(event) = event else {
-                    println!("-- core stopped --");
+                    say!("-- core stopped --");
                     return ExitCode::SUCCESS;
                 };
                 // Adopt the first channel we actually join as the default.
@@ -77,27 +97,27 @@ pub async fn run(connection: Connection) -> ExitCode {
                         }
                         let quitting = matches!(command, ClientCommand::Disconnect { .. });
                         if handle.send(command).await.is_err() {
-                            println!("-- not connected --");
+                            say!("-- not connected --");
                         }
                         if quitting {
                             say_goodbye(&mut events).await;
                             return ExitCode::SUCCESS;
                         }
                     }
-                    Some(Action::Notice(text)) => println!("-- {text} --"),
+                    Some(Action::Notice(text)) => say!("-- {text} --"),
                     // No tabs to open here, so the nick becomes the target of
                     // whatever is typed next.
                     Some(Action::Query(nick)) => {
-                        println!("-- talking to {nick} --");
+                        say!("-- talking to {nick} --");
                         current = Some(nick);
                     }
                     Some(Action::Help) => {
                         for (usage, what) in HELP {
-                            println!("-- {usage:<28} {what}");
+                            say!("-- {usage:<28} {what}");
                         }
                     }
                     Some(Action::Close | Action::Clear) => {
-                        println!("-- there is only one stream of text here; try without --no-tui --");
+                        say!("-- there is only one stream of text here; try without --no-tui --");
                     }
                     None => {}
                 }
@@ -143,7 +163,7 @@ fn render(event: &IrcEvent) {
                     format!("reconnecting in {retry_in_secs}s (attempt {attempt})")
                 }
             };
-            println!(
+            say!(
                 "-- {text}{}{detail} --",
                 if detail.is_empty() { "" } else { ": " }
             );
@@ -162,42 +182,42 @@ fn render(event: &IrcEvent) {
                 }
                 AuthOutcome::Anonymous => "anonymous".to_owned(),
             };
-            println!("-- registered on {network} as {nick} [auth: {auth}] --");
+            say!("-- registered on {network} as {nick} [auth: {auth}] --");
         }
 
-        IrcEvent::NetworkNamed { network } => println!("-- network: {network} --"),
+        IrcEvent::NetworkNamed { network } => say!("-- network: {network} --"),
 
-        IrcEvent::Joined { channel, nick, .. } => println!("-- {nick} joined {channel} --"),
+        IrcEvent::Joined { channel, nick, .. } => say!("-- {nick} joined {channel} --"),
         IrcEvent::Parted {
             channel,
             nick,
             reason,
             ..
         } => {
-            println!("-- {nick} left {channel}{} --", suffix(reason.as_deref()));
+            say!("-- {nick} left {channel}{} --", suffix(reason.as_deref()));
         }
         IrcEvent::Quit {
             channel,
             nick,
             reason,
         } => {
-            println!("-- {nick} quit [{channel}]{} --", suffix(reason.as_deref()));
+            say!("-- {nick} quit [{channel}]{} --", suffix(reason.as_deref()));
         }
         IrcEvent::NickChanged {
             channel, old, new, ..
         } => {
-            println!("-- {old} is now {new} [{channel}] --");
+            say!("-- {old} is now {new} [{channel}] --");
         }
         IrcEvent::TopicChanged {
             channel,
             topic,
             set_by,
         } => match set_by {
-            Some(who) => println!("-- {who} set the topic of {channel}: {topic} --"),
-            None => println!("-- topic for {channel}: {topic} --"),
+            Some(who) => say!("-- {who} set the topic of {channel}: {topic} --"),
+            None => say!("-- topic for {channel}: {topic} --"),
         },
         IrcEvent::MemberList { channel, members } => {
-            println!("-- {channel}: {} members --", members.len());
+            say!("-- {channel}: {} members --", members.len());
         }
         IrcEvent::MemberChanged {
             channel,
@@ -205,18 +225,18 @@ fn render(event: &IrcEvent) {
             member,
         } => match member {
             Some(member) if member.nick != *previous => {
-                println!("-- {channel}: {previous} is now {} --", member.nick);
+                say!("-- {channel}: {previous} is now {} --", member.nick);
             }
             Some(member) => {
                 let away = if member.away { " (away)" } else { "" };
-                println!(
+                say!(
                     "-- {channel}: {}{}{} --",
                     member.prefix.as_deref().unwrap_or_default(),
                     member.nick,
                     away
                 );
             }
-            None => println!("-- {channel}: {previous} is gone --"),
+            None => say!("-- {channel}: {previous} is gone --"),
         },
         IrcEvent::FileOffered {
             channel,
@@ -239,7 +259,7 @@ fn render(event: &IrcEvent) {
                     _ => "?".to_owned(),
                 }
             };
-            println!(
+            say!(
                 "-- {from} offered \"{}\" [{channel}] via {how}{size} --",
                 offer.filename
             );
@@ -250,13 +270,13 @@ fn render(event: &IrcEvent) {
             affected,
         } => {
             let by = by.as_deref().unwrap_or("server");
-            println!(
+            say!(
                 "-- {by} changed modes in {channel} for {} --",
                 affected.join(", ")
             );
         }
         IrcEvent::MessagesDropped { count, .. } => {
-            println!("-- {count} message(s) dropped by flood protection --");
+            say!("-- {count} message(s) dropped by flood protection --");
         }
         // The harness offers no files and accepts none, so these only ever
         // arrive if something else on this connection started a transfer.
@@ -273,16 +293,14 @@ fn render(event: &IrcEvent) {
                 Some(bytes) => format!(", {bytes} bytes"),
                 None => String::new(),
             };
-            println!("-- {direction} \"{filename}\"{size} --");
+            say!("-- {direction} \"{filename}\"{size} --");
         }
         IrcEvent::FileTransferProgress { .. } => {}
         IrcEvent::Contact(_)
         | IrcEvent::ContactRemoved { .. }
         | IrcEvent::UploadAvailable { .. } => {}
         IrcEvent::SubscriptionRequest { jid } => {
-            println!(
-                "-- {jid} asks to see when you are online: /accept {jid} or /decline {jid} --"
-            );
+            say!("-- {jid} asks to see when you are online: /accept {jid} or /decline {jid} --");
         }
         IrcEvent::MessageEdited {
             target,
@@ -290,14 +308,14 @@ fn render(event: &IrcEvent) {
             message,
             ..
         } => {
-            println!(
+            say!(
                 "({}) * {sender} corrected a message: {}",
                 target.name(),
                 plain(&message.spans)
             );
         }
         IrcEvent::MessageRetracted { target, sender, .. } => {
-            println!("({}) * {sender} deleted a message", target.name());
+            say!("({}) * {sender} deleted a message", target.name());
         }
         IrcEvent::FileTransferEnded {
             filename,
@@ -305,10 +323,10 @@ fn render(event: &IrcEvent) {
             error,
             ..
         } => match error {
-            Some(reason) => println!("-- \"{filename}\" failed: {reason} --"),
+            Some(reason) => say!("-- \"{filename}\" failed: {reason} --"),
             None => match path {
-                Some(path) => println!("-- \"{filename}\" saved to {path} --"),
-                None => println!("-- \"{filename}\" sent --"),
+                Some(path) => say!("-- \"{filename}\" saved to {path} --"),
+                None => say!("-- \"{filename}\" sent --"),
             },
         },
         // Only the finished answer. A LIST reports itself as it arrives so a
@@ -326,20 +344,20 @@ fn render(event: &IrcEvent) {
                 } else {
                     format!("  {}", channel.topic)
                 };
-                println!("{:>6}  {}{topic}", channel.users, channel.name);
+                say!("{:>6}  {}{topic}", channel.users, channel.name);
             }
             let count = channels.len();
             if *truncated {
-                println!("-- the {count} busiest; there are more --");
+                say!("-- the {count} busiest; there are more --");
             } else {
-                println!("-- {count} channels --");
+                say!("-- {count} channels --");
             }
         }
         IrcEvent::ChannelList { done: false, .. } => {}
 
-        IrcEvent::Whois(whois) if !whois.found => println!("-- no such nick: {} --", whois.nick),
+        IrcEvent::Whois(whois) if !whois.found => say!("-- no such nick: {} --", whois.nick),
         IrcEvent::Whois(whois) => {
-            println!(
+            say!(
                 "-- {} is {}@{} ({}) --",
                 whois.nick,
                 whois.user.as_deref().unwrap_or("?"),
@@ -347,13 +365,13 @@ fn render(event: &IrcEvent) {
                 whois.realname.as_deref().unwrap_or(""),
             );
             if !whois.channels.is_empty() {
-                println!("-- on {} --", whois.channels.join(" "));
+                say!("-- on {} --", whois.channels.join(" "));
             }
         }
 
         IrcEvent::Error { message, fatal } => {
             let label = if *fatal { "fatal" } else { "error" };
-            eprintln!("-- {label}: {message} --");
+            eprintln!("{}", clean(&format!("-- {label}: {message} --")));
         }
     }
 }
@@ -368,14 +386,36 @@ fn render_message(message: &ChatMessage) {
     let mention = if message.is_mention { " *" } else { "" };
 
     if message.is_action {
-        println!("{scope} * {prefix}{} {body}{mention}", message.sender);
+        say!("{scope} * {prefix}{} {body}{mention}", message.sender);
     } else if message.is_notice {
-        println!("{scope} -{prefix}{}- {body}{mention}", message.sender);
+        say!("{scope} -{prefix}{}- {body}{mention}", message.sender);
     } else {
-        println!("{scope} <{prefix}{}> {body}{mention}", message.sender);
+        say!("{scope} <{prefix}{}> {body}{mention}", message.sender);
     }
 }
 
 fn suffix(reason: Option<&str>) -> String {
     reason.map_or_else(String::new, |r| format!(" ({r})"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nothing_a_terminal_would_obey_reaches_it() {
+        for (line, expected) in [
+            // ESC, as a channel name could carry it: set the clipboard.
+            ("#a\u{1B}]52;c;aGk=\u{7}b", "#a]52;c;aGk=b"),
+            // The same, with the single-character C1 introducers.
+            ("a\u{9D}52;c;aGk=\u{9C}b", "a52;c;aGk=b"),
+            ("a\u{9B}2Jb", "a2Jb"),
+            // A forged line of our own, and text that reads backwards.
+            ("a\r\n-- connected --", "a-- connected --"),
+            ("a\u{202E}b", "ab"),
+            ("-- ada joined #chat --", "-- ada joined #chat --"),
+        ] {
+            assert_eq!(clean(line), expected);
+        }
+    }
 }

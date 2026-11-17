@@ -32,8 +32,10 @@ needs is confined to generated code.
 - **`ServerConfig::extra_root_cert` adds a root; it never replaces the store or
   skips verification.** It exists so integration tests can reach the self-signed
   dev server in `dev/`, which is the alternative to a verification-skipping
-  switch existing at all. It is not reachable from the app: the FFI layer's own
-  `ServerConfig` has no such field, so nothing Dart can set reaches it. An
+  switch existing at all, and so the app can verify its own local server. Nothing
+  outside the core chooses it: the FFI layer's `ServerConfig` has no such field,
+  and in a release build it is set only for a connection to the running local
+  server's loopback address and port, with the certificate the app issued. An
   unreadable path is rejected at config validation rather than being silently
   ignored, which is what the `irc` crate does on its own.
 - Conventional plaintext ports (6660–6669, 194) are **rejected at config
@@ -103,7 +105,9 @@ only, and every property below is a deliberate one.
   re-encoding.** `media/` drops EXIF, XMP, IPTC, text chunks, comments,
   embedded thumbnails and timestamps from JPEG, PNG, GIF and WebP. The image
   data is copied across byte-identically, so nothing is lost to a re-compress
-  and no image codec enters the dependency tree.
+  and no image codec enters the dependency tree. Whatever follows the end of the
+  image goes too, and is reported: on a phone that can be a second image with its
+  own GPS data, or the video of a motion photo.
 - **A file it cannot parse is refused, not passed through.** Reporting a file
   as cleaned when its format was not understood would be the one failure that
   matters here, so an unknown or malformed file returns an error and leaves the
@@ -134,6 +138,16 @@ send one.
   sending at all — is **refused with a reason**. There is no direct-connection
   fallback anywhere on this path, for the same reason there is none on the IRC
   path: a fallback is what would defeat the proxy at the moment it mattered.
+  A reverse offer is refused with no proxy too, because listening for one is not
+  built.
+- **An offer cannot aim the client just anywhere.** The address is the sender's
+  choice, so it is checked before anything is dialled or said to them. Loopback
+  is refused unless the IRC server is on this machine as well, and unspecified,
+  multicast and reserved addresses are always refused. Through a proxy, only a
+  public address is dialled. With no proxy a private address is allowed, because
+  that is what a sender on the same network looks like; the card names the address
+  before the download button is pressed, so this is a warning and not a
+  guarantee.
 - **Declining is silent.** Nothing is sent back, so a stranger fishing for a
   live client learns nothing from being refused.
 - **The UI never hands an address back to the core.** An offer is accepted by
@@ -182,14 +196,28 @@ send one.
 ### Untrusted server data
 
 - **Control codes are stripped in Rust, not Dart.** `text/format.rs` parses mIRC
-  formatting into styled spans whose text is guaranteed free of C0 characters
-  and DEL. A malicious message cannot inject line breaks, break the layout, or
+  formatting into styled spans whose text is guaranteed free of C0 and C1
+  characters, DEL, line and paragraph separators, and bidirectional overrides and
+  isolates. A malicious message cannot inject line breaks, break the layout, or
   forge the styling reserved for system messages. Doing this in the core means
   the defence cannot be forgotten by a future UI change.
   Tab is stripped too — it can fake the indentation of a system line.
+- **The terminal client cleans every line it prints**, because a terminal obeys
+  what it is sent, and some fields (a channel name, a `WHOIS` host) reach it
+  without passing through the text above.
+- **A line from an IRC server is limited to 16 KiB.** A longer one ends the
+  connection. Without this, a server could exhaust the app's memory by never
+  sending a newline, ahead of every other bound here. The limit is the one change
+  in `core/vendor/irc-proto`, because the `irc` crate builds its line decoder
+  internally.
 - **Every collection is bounded.** Channels (512), members per channel (20 000),
-  topic (1 000 chars), nick (64), channel name (200). Exceeding a bound stops
-  growth rather than dropping the connection.
+  topic (1 000 chars), nick (64), channel name (200), people in an XMPP room
+  (20 000 besides us), unanswered DCC offers (256). Exceeding a bound stops growth
+  rather than dropping the connection. An XMPP room's own word that a presence is
+  ours does not buy a place in a full room, except once, to let us in: a room can
+  mark any nick as ours. The local server is the exception: it has no limit on
+  connections, channels or what it queues for a client, because only this machine
+  can reach it.
 - **Capability lists are bounded** (8 KiB). A server can otherwise stream
   `CAP LS *` continuation lines forever during negotiation.
 - **Unknown channels are ignored.** A `JOIN` for a channel we never joined does
@@ -471,6 +499,11 @@ Everything above applies to XMPP accounts too, through a core of its own
   device starts with empty password fields: the same end state, arrived at
   visibly rather than silently. Apple's restore is not broken this way and
   excludes nothing.
+- **Android backs up settings and saved networks, and nothing else the app
+  writes.** The message history, logs, received files, Tor's state and the local
+  server's key are all excluded from backup and device transfer, by the same two
+  files, so they do not reach a cloud account. Moving to a new phone therefore
+  leaves message history behind.
 - **Importing a network may carry one; exporting one never does.** A `.irc`
   file written by hand may set `password`, `saslPassword`, `nickservPassword`
   and a proxy's `password`. They are read once, moved into the keychain by the
@@ -489,6 +522,12 @@ Everything above applies to XMPP accounts too, through a core of its own
   reads a decoded string locally; nothing about the payload is sent anywhere,
   and the camera permission it needs is requested and owned by
   `mobile_scanner` itself, not this app's code.
+- **A file cannot set a route without it being seen.** A shared `.irc` file or QR
+  code can name a proxy, or tell a network to skip yours. Each row on the import
+  screen says so, along with whether it connects at launch and the channels it
+  joins, and a network that sets its own route starts unticked. Anything invisible
+  in a name or address is drawn as its code. This is disclosure: someone who ticks
+  the row has still agreed to that proxy.
 
 ### App lock
 
@@ -511,7 +550,7 @@ Everything above applies to XMPP accounts too, through a core of its own
 
 ### Agent server (MCP)
 
-Off by default, and beta. When on, an MCP client can read what the app holds
+Off by default. When on, an MCP client can read what the app holds
 in memory about open conversations and ask to send messages.
 
 - **Loopback only.** Bound to `127.0.0.1`; nothing off this machine can reach
@@ -524,15 +563,39 @@ in memory about open conversations and ask to send messages.
   `127.0.0.1`. Requests whose `Host` is not a loopback name, or whose `Origin`
   is anything but loopback, are refused before the token is even checked.
 - **Every send is approved by the user**, with the exact text on screen, unless
-  they chose to always allow that one conversation (revocable in settings).
+  they allowed that one channel for a day. Settings lists each one, and any can
+  be taken back there. A direct message can never be allowed, because it is filed
+  under a nick and a nick can pass to someone else. At most 8 sends wait at once.
   Unanswered after two minutes is a refusal. A message request that has not
   been accepted cannot be answered at all.
 - **One write, no commands.** The only action is a message to a conversation
   that is already open. An agent's text is sent as text — it never reaches the
-  slash-command parser — and the core's own outgoing sanitiser still strips
-  line breaks and control characters, so it cannot inject IRC commands.
-- **Nothing while locked.** With the app lock on and the lock screen up,
-  every call is refused.
+  slash-command parser — and it is cleaned before the sheet appears: control and
+  formatting codes (so no hidden CTCP), direction overrides, invisible tag
+  characters and blank lines all go. Line breaks still separate messages, and the
+  core's outgoing sanitiser strips CR, LF and NUL from each, so it cannot inject
+  IRC commands.
+- **A long message cannot be approved unread.** The sheet gives its length, always
+  shows a scrollbar, marks anything invisible that remains, and keeps *Send* and
+  *Allow for a day* disabled until the end has been on screen. That proves the end
+  was shown, not that it was read. While a channel is allowed, an agent acting on
+  what a stranger wrote can post there unread.
+- **A sheet never outlives its question.** One that timed out, or was overtaken
+  by the lock or the server stopping, closes itself. Left up, its Send would do
+  nothing while looking as if it had worked.
+- **What an agent reads is marked as data.** The server's instructions and tool
+  descriptions say that messages are written by other people and are not
+  instructions, and text it reads loses the invisible characters that could
+  carry instructions no person can see. This lowers the risk of an agent being
+  talked into something by a message, and does not remove it: that depends on
+  the agent.
+- **Nothing while locked.** With the app lock on, every call is refused from the
+  moment the app is out of sight until it is unlocked, and sends waiting for an
+  answer are refused at that moment. The lock is checked once more just before a
+  message goes out, so one approved in the instant the app locks is not sent.
+- **The port is kept between runs**, so a configured client keeps working. While
+  ddIRC is not running, another local program could listen on it and collect the
+  token from a client that tries to connect. *New token* takes that token back.
 - **What it can read is what the screen can.** In-memory scrollback only; it
   opens no database and no files.
 
@@ -558,7 +621,17 @@ dependency automatically.
 
 | Advisory | Crate | Assessment |
 |---|---|---|
-| RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which is set only by `ServerConfig::extra_root_cert` — a field the integration tests use and the app cannot set. Not on any code path a shipped build reaches. |
+| RUSTSEC-2025-0134 | `rustls-pemfile` 2.2.0 | **Informational — unmaintained, not a vulnerability.** Reached only through the `irc` crate's `cert_path` PEM loading, which is set only by `ServerConfig::extra_root_cert`. A shipped build reaches it only when connecting to its own local server, reading a certificate the app wrote itself. |
+| RUSTSEC-2026-0459 (CVE-2026-119375) | `libsqlite3-sys` 0.38.2 (bundled SQLite before 3.54.0) | **Real, medium (6.8), local only, and waiting on a fix we cannot make ourselves.** Opening a database file that has a crafted `-wal` file beside it can return uninitialised memory. The app opens only its own message history and Tor's directory cache, both written by the app in its own data folder; it never opens a database that arrived from a server, a file transfer or an import, so there is no way for a stranger to supply one. The fix is `rusqlite` 0.41 or later, and arti (`tor-dirmgr` 0.47 and 0.48) still asks for 0.40 or earlier. It moves when arti does; the ignore in `core/deny.toml` says the same and is to be removed then. |
+
+### Older releases
+
+Releases before 0.13.0 were withdrawn. They predate the hardening in
+0.13.0: the limits on what strangers can make the app keep (XMPP rooms and
+renames, DCC offers, IRC line length), the approval sheet for configuration
+imports and agent (MCP) requests, the lock re-check before an agent message is
+sent, and narrower Android backup. If you installed one, update to 0.13.0 or
+later.
 
 ## Reporting
 

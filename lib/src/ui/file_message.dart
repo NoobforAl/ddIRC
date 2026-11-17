@@ -44,9 +44,9 @@ class FileMessage extends StatelessWidget {
   final VoidCallback onAccept;
   final VoidCallback onCancel;
 
-  /// Why this offer cannot be taken up at all, when it cannot: through a proxy,
-  /// or from somebody who has not yet been let in. Said on the card instead of
-  /// offering a button whose only outcome is a refusal.
+  /// Why this offer cannot be taken up at all, when it cannot: it asks us to
+  /// listen, or is from somebody who has not yet been let in. Said on the card
+  /// instead of offering a button whose only outcome is a refusal.
   final String? blockedReason;
 
   /// Show the received file to the person, where there is a file manager to
@@ -150,6 +150,22 @@ class FileMessage extends StatelessWidget {
                             height: 1.3,
                           ),
                         ),
+                        // Before the press, because the press is what connects.
+                        // Not on a blocked card, where nothing will connect.
+                        if (offered &&
+                            blocked == null &&
+                            transfer.localAddress != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            'Connects to ${transfer.localAddress} on your own '
+                            'network. Only download if you expected this.',
+                            style: TextStyle(
+                              color: t.warn,
+                              fontSize: 12,
+                              height: 1.3,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),

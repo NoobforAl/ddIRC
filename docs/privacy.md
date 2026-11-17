@@ -51,6 +51,10 @@ time, naming who will learn the address, and behind a proxy it is refused
 outright rather than quietly undoing the proxy. See
 [Sending and receiving files](features.md#sending-and-receiving-files).
 
+**Backups on Android.** Android's automatic backup gets your settings and saved
+networks, never a password. Message history, logs, received files and Tor's state
+are excluded, so they stay on the phone and do not move to a new one.
+
 **What is still worth doing.** The audit above covers what this client sends.
 It does not cover what a server can infer — connection timing, idle patterns,
 and the IP address itself, which is what the proxy and Tor support exist for.
