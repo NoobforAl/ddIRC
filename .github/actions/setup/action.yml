@@ -42,6 +42,11 @@ runs:
         # The Cargo workspace is one level down.
         workspaces: core
         save-if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+        # Saved even when the job after this step failed. What is cached is
+        # compiled dependencies, which compiled; the failure was a test or a
+        # lint, and before this it meant `main` kept no cache from the very runs
+        # where a flaky integration test went red, so the next one started cold.
+        cache-on-failure: true
 
     - if: inputs.flutter == 'true'
       uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0

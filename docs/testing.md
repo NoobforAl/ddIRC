@@ -198,11 +198,27 @@ changes ──┬── lint ──┐
 be read and run by hand, and `release.yml` reuses them - but none of them starts
 on an event; they are called from here.
 
-**A build is never started for a change that does not pass lint and the
-tests.** Build is the slow workflow (Rust cross-compiled, a Windows installer, a
-Linux one), and a formatting slip or a failing test would otherwise pay for all
-of it before anyone read the first red mark. Lint and test run side by side, so
-the wait is the longer of the two, not the sum.
+**A pull request is never built until it passes lint and the tests.** Build is
+the slow workflow (Rust cross-compiled, a Windows installer, a Linux one), and a
+formatting slip or a failing test would otherwise pay for all of it before
+anyone read the first red mark. Lint and test run side by side, so the wait is
+the longer of the two, not the sum.
+
+There are two exceptions, both about not paying for a build that cannot tell
+anything:
+
+- **A pull request that changes only Dart under `lib/` and `test/` is not
+  built.** No platform toolchain reads those files, and the analyzer and the
+  tests have already judged them. The `changes` job sets a `native` output: a
+  pull request builds when it touches `android/`, `windows/`, `linux/`,
+  `macos/`, `ios/`, `core/`, `rust_builder/`, `assets/`, `lib/src/rust/`,
+  `pubspec.yaml`, `pubspec.lock`, the `Makefile`, `flutter_rust_bridge.yaml` or
+  `.github/`. When the file list cannot be read, it builds.
+- **`main` is always built,** whatever lint and the tests said, so that a change
+  which slipped past the filter above is found one merge later and not at a
+  release tag. `ci` still fails if lint or a test did, so a red `main` is as
+  visible as before. The reason it is built even when red is the cache: see
+  [Speed](#speed).
 
 **A change that touches only documentation runs nothing.** The `changes` job
 reads which files changed (from the API, nothing is fetched); if every one is
@@ -259,7 +275,7 @@ out. Three jobs:
 - **android** - `make build-android`, narrowed to one ABI (`ANDROID_TARGET`):
   this asks whether it compiles, and the Rust cross-compile, once per ABI, is
   most of the time it takes. The release builds all three. The Gradle
-  distribution and dependencies are cached.
+  distribution and dependencies are cached (see [Speed](#speed)).
 - **windows** - `make installer`: the release build and the Inno Setup script.
 - **linux** - `make installer-linux`, then a check that nothing the program
   links against is missing, then `make test-installer-linux` against the real
@@ -274,9 +290,15 @@ can be tried without building it.
 
 The slow part is Rust and Gradle, so that is what is cached and what is not
 repeated. `ci.yml` stops a build that was never going to be wanted (above); the
-Rust cache is saved from `main` and from release tags only, and a pull request
-restores it and adds nothing, so PRs cannot evict the cache the next build on
-`main` needs; the toolchain pins and their cache live in one composite action
+Rust cache and the Gradle cache are saved from `main` (the Rust one from release
+tags too) and a pull request restores them and adds nothing, so PRs cannot
+evict the caches the next build on `main` needs. A cache belongs to the ref that
+saved it and a pull request can read only `main`'s, so a cache saved by a tag
+helps nothing else; the builds' caches exist only if a run on `main` got as far
+as building, which is why `main` builds after a red test and why the Rust cache
+is saved on failure too (`cache-on-failure`). The repository has 10 GB for all
+of it, and the Flutter SDK is the largest single entry (about 1.7 GB per OS).
+The toolchain pins and their cache live in one composite action
 (`.github/actions/setup`) rather than nine copies; the Linux system packages in
 another (`.github/actions/linux-deps`), where a test job installs only what
 `flutter test` needs; and the compile-check Android build is one ABI, not three.

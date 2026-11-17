@@ -8,11 +8,17 @@
 #                 ├── test ──┴── build ── ci
 #                 └── coverage ───────────┘
 #
-# **A build is never started for a change that does not pass lint and the
-# tests.** Build is the slow one - Rust cross-compiled, a Windows installer, a
-# Linux one - and a change that fails a formatter or a test would otherwise pay
-# for all of it before anyone read the first red mark. Lint and test run side by
-# side, so the wait for them is the longer of the two, not the sum.
+# **A pull request is never built until it passes lint and the tests.** Build is
+# the slow one - Rust cross-compiled, a Windows installer, a Linux one - and a
+# change that fails a formatter or a test would otherwise pay for all of it
+# before anyone read the first red mark. Lint and test run side by side, so the
+# wait for them is the longer of the two, not the sum.
+#
+# **Two exceptions, both about not paying for the build twice.** A pull request
+# that changes only Dart under lib/ and test/ is not built at all: no platform
+# toolchain reads those files, and the analyzer and the tests have already
+# judged them. And `main` is always built, even after a failed test, because the
+# build caches are saved only from there; see `build` and `changes` below.
 #
 # **Coverage runs beside them and gates nothing.** It is a measurement sent to
 # Codecov, not a verdict, so `build` does not wait for it; `ci` does, so a run
@@ -54,6 +60,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.which.outputs.code }}
+      native: ${{ steps.which.outputs.native }}
     steps:
       # Asked of the API rather than computed from a checkout: a pull request's
       # file list is one call, and nothing has to be fetched.
@@ -76,13 +83,37 @@ jobs:
           # skip the checks. Prose is Markdown, the licence, the issue forms and
           # Dependabot's own configuration.
           if [ -z "$files" ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"; echo "no file list: running everything"; exit 0
+            { echo "code=true"; echo "native=true"; } >> "$GITHUB_OUTPUT"
+            echo "no file list: running everything"; exit 0
           fi
           if printf '%s\n' "$files" | grep -Ev '(^docs/|\.md$|^LICENSE$|^\.github/ISSUE_TEMPLATE/|^\.github/dependabot\.yml$)' | grep -q .; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
+            code=true
           else
-            echo "code=false" >> "$GITHUB_OUTPUT"; echo "only documentation changed: nothing to run"
+            code=false; echo "only documentation changed: nothing to run"
           fi
+
+          # Whether anything a platform toolchain reads could have changed. The
+          # three builds are the slow part of this pipeline and answer one
+          # question - do Gradle, the NDK, the C++ runner and the installers
+          # still work - which a change confined to Dart under lib/ and test/
+          # cannot alter: `flutter analyze` and the tests already judged that
+          # code. So a pull request builds only when it touches something a
+          # build reads: the platform folders, the Rust core and its bridge, the
+          # dependency manifests and lockfiles, the Makefile, the assets the
+          # installers pack, or the pipeline itself. `main` and a manual run
+          # always build, so a change that slipped through is found one merge
+          # later, not at a release tag.
+          native=false
+          if [ "$code" = true ]; then
+            if [ "$EVENT" != pull_request ]; then
+              native=true
+            elif printf '%s\n' "$files" | grep -Eq '^(android|windows|linux|macos|ios|core|rust_builder|assets)/|^lib/src/rust/|^pubspec\.(yaml|lock)$|^Makefile$|^flutter_rust_bridge\.yaml$|^\.github/'; then
+              native=true
+            else
+              echo "Dart under lib/ and test/ only: the platform builds are skipped"
+            fi
+          fi
+          { echo "code=$code"; echo "native=$native"; } >> "$GITHUB_OUTPUT"
 
   lint:
     needs: changes
@@ -103,11 +134,27 @@ jobs:
     uses: ./.github/workflows/coverage.yml
     secrets: inherit
 
-  # Only after both. If either fails this is skipped, not run: the default for a
-  # job whose `needs` did not succeed, and the whole point.
+  # On a pull request, only after lint and the tests both pass: if either fails
+  # this is skipped, which is the whole point of the order. `!cancelled()` and
+  # the explicit results replace the default "skip when a need failed" so that
+  # `main` can differ.
+  #
+  # On `main` it runs whatever lint and the tests said. The caches the builds
+  # restore - Rust per target, Gradle - are saved only by a run on `main` that
+  # got as far as building, and a flaky integration test used to stop it, so a
+  # red `main` left every pull request after it compiling the Rust core from
+  # nothing. `ci` below still fails when lint or a test did, so a red `main` is
+  # as visible as before; it just no longer costs the next pull request its
+  # cache.
+  #
+  # And only when `native` says a build could tell something: see `changes`.
   build:
     needs: [changes, lint, test]
-    if: needs.changes.outputs.code == 'true'
+    if: >-
+      !cancelled()
+      && needs.changes.outputs.native == 'true'
+      && (github.event_name != 'pull_request'
+          || (needs.lint.result == 'success' && needs.test.result == 'success'))
     uses: ./.github/workflows/build.yml
 
   ci:

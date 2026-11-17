@@ -37,13 +37,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # `cache: gradle` keeps the Gradle distribution, its wrapper and the
-      # downloaded dependencies between runs - minutes of fetching otherwise.
+      # Not `cache: gradle`, which is what this used to be: that saves from
+      # every ref, and a pull request's save is a gigabyte and a half that no
+      # other run can read, so a few of them filled the repository's 10 GB and
+      # pushed out the caches the next build on `main` needed. The Rust cache is
+      # already saved from `main` and tags only (see the setup action); this
+      # follows the same rule. Restored by everyone, saved at the end of a
+      # successful build on `main`.
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
+
+      # The Gradle distribution, its wrapper and the downloaded dependencies:
+      # minutes of fetching otherwise. Keyed on the files that decide what
+      # Gradle will want, so a dependency bump starts a new cache and a code
+      # change does not; the prefix lets that new one start from the old.
+      - id: gradle
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
 
       # One ABI, not three: see `make build-android`. This asks whether it
       # compiles, and arm64 is the ABI the Rust cross-compile is the same code
@@ -65,6 +82,17 @@ jobs:
       # Debug, not release: this asks whether it compiles, and the release
       # build additionally signs.
       - run: make build-android ANDROID_TARGET=android-arm64
+
+      # After the build, and only when it passed: a cache saved from a build
+      # that died halfway is a cache of whatever it had got to. Skipped when the
+      # exact key was already there, since there is nothing new to write.
+      - if: github.ref == 'refs/heads/main' && steps.gradle.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ steps.gradle.outputs.cache-primary-key }}
 
   # The C++ runner, the Rust core for windows-msvc, and the per-user installer.
   windows:
