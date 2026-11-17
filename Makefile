@@ -92,7 +92,7 @@ TUI_FLAGS ?=
 CLI       := $(CARGO) run $(MANIFEST) -p ddirc-cli --
 
 .DEFAULT_GOAL := help
-.PHONY: help outdated fix fmt lint deny test coverage coverage-dart coverage-rust test-integration dev build build-release installer check-iscc \
+.PHONY: help outdated fix fmt lint lint-security deny test coverage coverage-dart coverage-rust test-integration dev build build-release installer check-iscc \
         build-android build-android-release keystore keystore-secrets \
         build-linux build-linux-release installer-linux test-installer-linux \
         build-macos build-ios codegen icons clean \
@@ -106,7 +106,8 @@ help:
 	@echo ""
 	@echo "  make fix      format + auto-fix Dart and Rust, then lint"
 	@echo "  make fmt      format only"
-	@echo "  make lint     analyze Dart, clippy Rust (warnings are errors)"
+	@echo "  make lint     analyze Dart, clippy Rust (warnings are errors), then lint-security"
+	@echo "  make lint-security  cargo-deny against the advisory copy 'make deny' last fetched (offline)"
 	@echo "  make deny     cargo-deny: advisories, licences, sources (needs network)"
 	@echo "  make test     run the Dart and Rust test suites (hermetic)"
 	@echo "  make coverage the same suites, measured: coverage/*.lcov (what CI sends to Codecov)"
@@ -168,11 +169,48 @@ fmt:
 # The Dart format check is not redundant with `analyze`, which says nothing
 # about formatting at all. Without it the Dart half has no formatting gate, and
 # the drift surfaces later as `make fix` rewriting files nobody edited.
+#
+# The security checks are in here too, in two places. The static ones are not
+# separate steps: the analyzer and clippy run with the lints that bear on safety
+# switched on (`analysis_options.yaml`, `[workspace.lints.clippy]` in
+# core/Cargo.toml), so a slice that can panic on a stranger's text, or an error
+# swallowed by an empty `catch`, fails here like any other warning. The one that
+# is a tool of its own is `lint-security`, last, so the quick failures come first.
 lint:
 	$(FLUTTER) analyze
 	$(DART) format --output=none --set-exit-if-changed $(DART_SRC)
 	$(CARGO) fmt $(MANIFEST) --all -- --check
 	$(CARGO) clippy $(MANIFEST) --workspace --all-targets -- -D warnings
+	@$(MAKE) --no-print-directory lint-security
+
+## The dependency tree against the advisory database, without the network.
+#
+# `lint` has to work offline, and `deny` below fetches, so this is the same check
+# against the copy `deny` last fetched: `--offline`, about ten seconds, no
+# traffic. It is a convenience and not the authority. The copy can be days old,
+# so a pass here is not a pass in CI, where `supply-chain` fetches fresh; what it
+# catches is the advisory that was already known when you last looked.
+#
+# Only `advisories` and `sources`, the two that are about safety. `deny` also
+# runs `bans` and `licenses`, and `bans` reports every crate present in two
+# versions - several hundred warnings for a tree this size - which is noise in a
+# lint run and not something anyone can act on from here. Those stay in `deny`,
+# and in CI.
+#
+# Skipped, loudly, where it cannot run: without cargo-deny installed, or before
+# `make deny` has ever fetched a database (cargo-deny's own failure then is a git
+# error about FETCH_HEAD, which says nothing a person can act on). Dart has no
+# counterpart: `dart pub` can list and outdate packages but not check them
+# against advisories, so there is nothing to run for pubspec.lock. cargo-audit
+# reads the same RustSec database and would only say the same thing twice.
+lint-security:
+	@if ! $(CARGO) deny --version >/dev/null 2>&1; then \
+		echo "lint-security: skipped - cargo-deny is not installed (cargo install cargo-deny --locked)"; \
+	elif ! ls -d "$${CARGO_HOME:-$$HOME/.cargo}"/advisory-dbs/advisory-db-* >/dev/null 2>&1; then \
+		echo "lint-security: skipped - no advisory database yet; run 'make deny' once, online, to fetch it"; \
+	else \
+		$(CARGO) deny $(MANIFEST) --offline check advisories sources; \
+	fi
 
 ## Everything that needs no network and no Docker.
 test:
@@ -185,8 +223,9 @@ test:
 # known vulnerability, a yanked release, a licence that cannot ship in a
 # GPL-3.0-or-later app, or a crate from outside crates.io. Policy and the few
 # reasoned exceptions are in core/deny.toml. It fetches the advisory database,
-# so it is not part of `lint`, which has to work offline; CI runs it beside it.
-# Needs `cargo install cargo-deny`.
+# so it is not part of `lint`, which has to work offline - `lint-security` above
+# is the offline version of it, and is what `lint` runs; CI runs this one beside
+# `lint`, with a fresh database. Needs `cargo install cargo-deny`.
 deny:
 	$(CARGO) deny --manifest-path $(RUST)/Cargo.toml check
 

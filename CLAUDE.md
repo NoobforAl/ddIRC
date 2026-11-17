@@ -39,7 +39,7 @@ root. CI calls the same targets, so a green `make` is a green pipeline.
 | To | Run |
 |---|---|
 | format, auto-fix, then lint — **run this last, before you finish** | `make fix` |
-| check only, change nothing (what CI runs) | `make lint` |
+| check only, change nothing (what CI runs; ends with an offline advisory check) | `make lint` |
 | run every hermetic test (Dart + Rust, no network, no Docker) | `make test` |
 | check dependencies: advisories, licences, sources (needs network) | `make deny` |
 | measure coverage (what CI sends to Codecov) | `make coverage` |
