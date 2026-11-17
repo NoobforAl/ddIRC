@@ -11,9 +11,18 @@
 #
 # Two things are checked in the finished APK:
 #   - the Kotlin classes the JNI bindings name are all there under their names;
-#   - the plugin's getAll still has the descriptor the Dart side asks for, which
-#     names kotlin.coroutines.Continuation. (If R8 renames Continuation the
-#     descriptor no longer matches and the app reads no preferences at all.)
+#   - the plugin's getAll has exactly the descriptor the Dart side asks for. That
+#     descriptor is read from the locked plugin's own bindings
+#     (lib/src/messages.g.jni.dart, found through .dart_tool/package_config.json)
+#     and not written down here, because the plugin changes it: 2.5.4 took a
+#     List, 2.5.5 took a byte array, and a guard that hard-coded the first failed
+#     a release whose APK was fine. It names kotlin.coroutines.Continuation, so
+#     if R8 renames that class the descriptor stops matching and the app reads
+#     no preferences at all.
+#
+# If the bindings cannot be found or read, this FAILS rather than falling back to
+# a weaker check: a guard that quietly passes is worse than none. Set
+# SHARED_PREFERENCES_JNI_BINDINGS to a bindings file to use that one instead.
 #
 # This is a floor, not a proof: it names what has broken before. The proof is a
 # release build on a phone that comes up with its saved networks and no
@@ -56,16 +65,53 @@ for class in \
   fi
 done
 
-if ! awk '
-    /Class descriptor/ { inside = ($0 ~ /sharedpreferences\/SharedPreferencesApiRegistrar;/) }
-    inside && /name +: .getAll./ { want = 1; next }
-    want && /type +:/ {
-      if ($0 ~ /Ljava\/util\/List;Lkotlin\/coroutines\/Continuation;\)/) found = 1
-      want = 0
-    }
-    END { exit !found }' "$work/dump.txt"; then
-  echo "FAIL: SharedPreferencesApiRegistrar.getAll no longer has the descriptor the Dart bindings look up" >&2
+# What the Dart side asks for: the descriptor in the locked plugin's bindings.
+root=$(cd "$(dirname "$0")/.." && pwd)
+bindings=${SHARED_PREFERENCES_JNI_BINDINGS:-}
+if [ -z "$bindings" ]; then
+  # No jq on a stock runner or in Git Bash, so sed. rootUri is a URI reference:
+  # file:///home/... on Linux, file:///C:/... on Windows, and for a package that
+  # is not hosted it may be relative, to the directory of package_config.json.
+  uri=$(sed -n '/"name": *"shared_preferences_android"/,/"rootUri"/{s/.*"rootUri": *"\([^"]*\)".*/\1/p}' \
+    "$root/.dart_tool/package_config.json" 2>/dev/null || true)
+  path=${uri#file://}
+  case "$path" in /[A-Za-z]:*) path=${path#/} ;; esac
+  # Every percent-escape, the UTF-8 ones included: a profile directory for a
+  # user called José is Jos%C3%A9 in the file, and %20 alone would leave it so.
+  path=$(printf '%b' "${path//%/\\x}")
+  case "$path" in
+    /* | [A-Za-z]:*) ;;                     # absolute
+    *) path="$root/.dart_tool/$path" ;;     # relative to the config file
+  esac
+  [ -n "$uri" ] && bindings="$path/lib/src/messages.g.jni.dart"
+fi
+if [ -z "$bindings" ] || [ ! -f "$bindings" ]; then
+  echo "FAIL: cannot find the shared_preferences_android bindings (looked for: ${bindings:-none}); run 'flutter pub get', or set SHARED_PREFERENCES_JNI_BINDINGS" >&2
   failed=1
+else
+  # `..._id_getAll = SharedPreferencesApiRegistrar._class.instanceMethodId(` then
+  # the name, then the descriptor: three lines. The async registrar is a
+  # different class name and is not matched.
+  want=$(grep -A2 '_id_getAll = SharedPreferencesApiRegistrar\._class\.instanceMethodId' "$bindings" \
+    | sed -n '3p' | sed -E "s/^ *r'(.*)',? *\$/\1/" || true)
+  # The method name is matched with its quotes, so `getAllRenamed` does not pass
+  # for `getAll`: a method with the right descriptor and the wrong name is a JNI
+  # lookup that fails, which is what this exists to catch.
+  cat > "$work/getall.awk" <<'AWK'
+/Class descriptor/ { inside = ($0 ~ /sharedpreferences\/SharedPreferencesApiRegistrar;/) }
+inside && /name +: / && index($0, "\047getAll\047") { want = 1; next }
+want && /type +:/ { sub(/^[^\047]*\047/, ""); sub(/\047.*$/, ""); print; want = 0 }
+AWK
+  have=$(awk -f "$work/getall.awk" "$work/dump.txt" || true)
+  if [ -z "$want" ]; then
+    echo "FAIL: could not read the getAll descriptor from $bindings; the bindings changed shape and this check has to be updated" >&2
+    failed=1
+  elif ! printf '%s\n' "$have" | grep -Fxq -- "$want"; then
+    echo "FAIL: SharedPreferencesApiRegistrar.getAll in the APK does not have the descriptor the Dart bindings look up" >&2
+    echo "  the bindings ask for: $want" >&2
+    echo "  the APK has:          ${have:-no getAll at all}" >&2
+    failed=1
+  fi
 fi
 
 if [ "$failed" -ne 0 ]; then
