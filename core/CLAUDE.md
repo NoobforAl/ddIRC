@@ -69,6 +69,21 @@ lint` runs clippy with `-D warnings`, so a warning is a failure.
 licences, sources). After `cargo update`, run it. Every ignored advisory carries its
 reason; add one only with a real reason.
 
+**Safety lints.** The clippy list includes a group for what a stranger's input can do
+to the process: `string_slice` (a byte-index slice panics inside a multi-byte
+character), `unwrap_in_result`, `panic_in_result_fn`, `path_buf_push_overwrite` and
+`exit`. Almost every byte this client parses was written by someone else, and here a
+panic ends the task that owns a connection. Where text or bytes from the wire need
+cutting, use `split_once`, `split_at_checked`, `get(..)` or a `let ... else`, and test it
+with multi-byte input (`"\u{e9}"`, `"\u{65e5}"`, an emoji), which is what an ASCII-only
+test never exercises. `unwrap_used`, `indexing_slicing`, `arithmetic_side_effects`,
+`expect_used` and the `cast_*` lints are *not* enabled - hundreds of hits - and their
+counts are in `core/Cargo.toml`; reduce them when you are in the code anyway.
+
+`make lint` ends with `make lint-security`: `cargo deny` for advisories and sources
+against the copy `make deny` last fetched, offline. It skips, saying so, without
+cargo-deny or before the first `make deny`; CI's `supply-chain` job is the authority.
+
 ## Testing
 
 `make test` runs the whole workspace, hermetically. Where tests live:

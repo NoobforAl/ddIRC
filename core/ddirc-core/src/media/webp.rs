@@ -37,10 +37,13 @@ pub(super) fn strip(bytes: &[u8]) -> Result<Stripped, StripError> {
     }
 
     while i < bytes.len() {
-        let Some(kind) = bytes.get(i..i + 4) else {
+        // Length-checked and converted in one step; see `png.rs`.
+        let Some(kind) = bytes
+            .get(i..i + 4)
+            .and_then(|k| <[u8; 4]>::try_from(k).ok())
+        else {
             return Err(StripError::malformed(KIND, "truncated chunk type"));
         };
-        let kind: [u8; 4] = kind.try_into().expect("checked to be four bytes");
 
         let Some(size) = bytes
             .get(i + 4..i + 8)

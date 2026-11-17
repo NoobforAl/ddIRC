@@ -242,12 +242,15 @@ fn strip_keyword<'a>(s: &'a str, keyword: &str) -> Option<&'a str> {
 /// the name ends and deciding whether it may be used, cannot be confused for
 /// each other.
 fn take_filename(s: &str) -> Option<(&str, &str)> {
+    // `split_once` and `split_at_checked` rather than slicing at the index
+    // `find` returned. The index is always on a character boundary, because
+    // what is searched for is ASCII, but this is the parser for text a stranger
+    // chose and that is worth not having to take on trust: these return `None`
+    // where a slice would panic.
     if let Some(rest) = s.strip_prefix('"') {
-        let end = rest.find('"')?;
-        Some((&rest[..end], &rest[end + 1..]))
+        rest.split_once('"')
     } else {
-        let end = s.find(' ')?;
-        Some((&s[..end], &s[end..]))
+        s.split_at_checked(s.find(' ')?)
     }
 }
 
@@ -473,6 +476,34 @@ mod tests {
         let offer = parse_send("DCC SEND \"holiday photo.jpg\" 1 2 3").unwrap();
         assert_eq!(offer.filename, "holiday photo.jpg");
         assert_eq!(offer.port, Some(2));
+    }
+
+    // Where a name ends is decided by searching for an ASCII quote or space,
+    // in text a stranger wrote. A name is free to be full of characters wider
+    // than a byte, and finding the end must not depend on there being none.
+    #[test]
+    fn the_end_of_a_filename_is_found_in_text_that_is_not_ascii() {
+        assert_eq!(
+            take_filename("\"r\u{e9}sum\u{e9} \u{65e5}\u{672c}.pdf\" 1 2"),
+            Some(("r\u{e9}sum\u{e9} \u{65e5}\u{672c}.pdf", " 1 2"))
+        );
+        assert_eq!(
+            take_filename("r\u{e9}sum\u{e9}.pdf 1 2"),
+            Some(("r\u{e9}sum\u{e9}.pdf", " 1 2"))
+        );
+        assert_eq!(take_filename("\u{1f600} 1"), Some(("\u{1f600}", " 1")));
+    }
+
+    #[test]
+    fn a_filename_that_never_ends_is_refused_and_one_that_does_is_split_exactly() {
+        assert_eq!(take_filename("\"never closed 1 2 3"), None);
+        assert_eq!(take_filename("nospaceatall"), None);
+        assert_eq!(take_filename(""), None);
+        assert_eq!(take_filename("a b"), Some(("a", " b")));
+        assert_eq!(take_filename("\"a b\" c"), Some(("a b", " c")));
+        // The remainder keeps what follows the closing quote, and nothing more.
+        assert_eq!(take_filename("\"a\""), Some(("a", "")));
+        assert_eq!(take_filename("\"\" c"), Some(("", " c")));
     }
 
     #[test]

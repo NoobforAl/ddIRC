@@ -64,8 +64,11 @@ pub fn mentions(nick: &str, text: &str) -> bool {
     }
     let haystack: String = text.chars().flat_map(char::to_lowercase).collect();
     haystack.match_indices(&needle).any(|(index, matched)| {
-        let before = haystack[..index].chars().next_back();
-        let after = haystack[index + matched.len()..].chars().next();
+        // `get`, not a slice: see `State::is_mention`, which this mirrors.
+        let before = haystack.get(..index).and_then(|h| h.chars().next_back());
+        let after = haystack
+            .get(index + matched.len()..)
+            .and_then(|t| t.chars().next());
         !before.is_some_and(is_word_char) && !after.is_some_and(is_word_char)
     })
 }
@@ -630,5 +633,19 @@ mod tests {
         assert!(!mentions("sam", "the same thing"));
         assert!(!mentions("sam", "samples"));
         assert!(!mentions("", "anything"));
+    }
+
+    // Offsets into text a stranger wrote: next to characters wider than one
+    // byte, a slice cut in the wrong place would panic instead of answering.
+    #[test]
+    fn a_mention_next_to_text_that_is_not_ascii() {
+        assert!(mentions("sam", "h\u{e9}llo sam, w\u{f6}rld"));
+        assert!(mentions("sam", "\u{1f600}sam\u{1f600}"));
+        assert!(mentions("sam", "sam\u{2014}look"));
+        assert!(!mentions("sam", "\u{e9}sam"));
+        assert!(!mentions("sam", "sam\u{e9}"));
+        assert!(!mentions("sam", "\u{65e5}\u{672c}sam"));
+        assert!(mentions("\u{e9}tienne", "hi \u{c9}TIENNE!"));
+        assert!(!mentions("\u{e9}tienne", "hi m\u{e9}tienne"));
     }
 }

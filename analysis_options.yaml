@@ -95,5 +95,20 @@ linter:
     - use_string_buffers
     - use_super_parameters
 
+    # Failing quietly. Dart has no security linter of its own - the analyzer is
+    # the only static check there is, and a Dart-side `pub audit` does not exist
+    # (`dart pub` can list and outdate packages, not advise on them) - so this is
+    # the part of it that bears on safety: an error swallowed is a failure that
+    # nobody is told about, and a library that is web-only has no business in an
+    # app that stores credentials. Each passes today, as a guard against the
+    # next change.
+    - empty_catches
+    - avoid_web_libraries_in_flutter
+    - avoid_returning_null_for_void
+    # Considered and left out, because they are not clean and would be a lint
+    # nobody reads: `avoid_catches_without_on_clauses` (101 in lib/),
+    # `discarded_futures` (35 in lib/; `unawaited_futures` above is the half of
+    # it that matters) and `avoid_slow_async_io` (5, and a speed rule).
+
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

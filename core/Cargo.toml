@@ -58,6 +58,30 @@ used_underscore_binding = "warn"
 invalid_upcast_comparisons = "warn"
 needless_raw_string_hashes = "warn"
 uninlined_format_args = "warn"
+# What a stranger's input can do to this process. Almost every byte this client
+# parses was written by someone else - a server, a peer offering a file, a photo
+# being stripped - and in Rust the way that goes wrong is not memory corruption
+# but a panic, which here ends the task that owns a connection. These are the
+# lints for the spots where a hostile string or byte sequence turns into one.
+#
+# Chosen the same way as the rest of the list: the tree passes each, after the
+# dozen places that did not were rewritten when they were added. Not turned on,
+# because they are hundreds of findings and would be a lint nobody reads:
+# `unwrap_used` (626 in non-test code when this was written), `indexing_slicing`
+# (338), `arithmetic_side_effects` (318), `expect_used` (84), and the `cast_*`
+# family (about 70). That is the backlog. Each is worth a look when the code
+# around it is being changed anyway; none is worth a drive-by.
+#
+# A slice by byte index panics when it lands inside a multi-byte character.
+string_slice = "warn"
+# An `expect` or `unwrap` inside a function that already returns a `Result`.
+unwrap_in_result = "warn"
+panic_in_result_fn = "warn"
+# `PathBuf::push` with an absolute path replaces the whole path: how a filename
+# a stranger chose becomes a file somewhere it was never meant to be.
+path_buf_push_overwrite = "warn"
+# Ends the process without running anything that would flush or clean up.
+exit = "warn"
 
 [workspace.dependencies]
 # `ctcp` is deliberately NOT enabled, and adding it would be a privacy
