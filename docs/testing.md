@@ -178,7 +178,7 @@ same package first (`run-as` needs a debuggable app; see `dev/README.md`): the
 file survives an update. Marking the release APK debuggable instead makes the
 Flutter engine abort at start.
 
-The layout tests (`test/xmpp_layout_test.dart`) render the XMPP dialogs on a
+The layout tests (`test/ui/xmpp_layout_test.dart`) render the XMPP dialogs on a
 320x568 phone, at text twice the normal size, right to left, with names ninety
 characters long and three hundred contacts, and fail on any overflow stripe or
 exception. They found a real one: the buttons on a contact request were wider

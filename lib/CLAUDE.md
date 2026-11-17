@@ -20,7 +20,10 @@ lib/
    ├─ theme.dart        colour tokens (`Tokens`)
    ├─ version.dart
    └─ rust/             GENERATED bindings to core/ddirc-bridge — never edit
-test/                   Flutter tests, one *_test.dart per feature (root of the repo, not here)
+test/                   Flutter tests, laid out like lib/src (root of the repo, not here)
+├─ model/ ui/ ui/settings/ text/   mirror lib/src/<same>/
+├─ tool/                           mirrors tool/
+└─ *_test.dart                     what lib/src/ itself holds: theme, version, structural checks
 tool/make_icons.dart    `make icons` — redraws launcher icons from ui/mark_spec.dart
 ```
 
@@ -60,16 +63,19 @@ tool/make_icons.dart    `make icons` — redraws launcher icons from ui/mark_spe
   nick); the tests named `xmpp_*_test.dart` show where that assumption bit before.
 - **Respect reduced motion and large text.** Animations go through `Motion` so they
   stop under reduced motion; layouts are tested at 2.0× text and right-to-left
-  (`xmpp_layout_test.dart`, `layout_test.dart`). A new screen should survive both.
+  (`ui/xmpp_layout_test.dart`, `ui/layout_test.dart`). A new screen should survive both.
 
 ## Testing
 
-`make test` runs everything here; add a test next to the behaviour in `test/`, named
-`<thing>_test.dart`.
+`make test` runs everything here. `test/` mirrors `lib/src/`: a test for
+`lib/src/ui/settings/foo.dart` goes in `test/ui/settings/`, named `<thing>_test.dart`.
+When one test spans a model and its widget (several `xmpp_*` and chat tests do), file it
+under the side whose behaviour it mainly pins; a test about `theme.dart`, the version or
+the shape of `lib/` as a whole stays at the root of `test/`.
 
 - **The Rust core is faked, not run.** Tests install a fake with
   `RustLib.initMock(api: _FakeCore())` (a class that `implements RustLibApi`) and
-  `RustLib.dispose` in teardown. Copy the pattern from `test/xmpp_contacts_test.dart`
+  `RustLib.dispose` in teardown. Copy the pattern from `test/ui/xmpp_contacts_test.dart`
   rather than inventing another. Real end-to-end behaviour belongs in the Rust
   integration suites.
 - Widget tests use `tester.pump` with explicit durations; a test that needs real time

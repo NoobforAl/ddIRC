@@ -18,7 +18,7 @@ So a password crosses in and never back out. The one you write into a file is
 the only copy sitting in the clear, and it is yours to delete.
 
 Reference implementation: [`lib/src/model/ircconfig.dart`](../lib/src/model/ircconfig.dart).
-Round-trip tests: [`test/ircconfig_test.dart`](../test/ircconfig_test.dart).
+Round-trip tests: [`test/model/ircconfig_test.dart`](../test/model/ircconfig_test.dart).
 
 ---
 

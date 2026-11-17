@@ -14,7 +14,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../tool/make_icons.dart' as icons;
+import '../../tool/make_icons.dart' as icons;
 
 void main() {
   test('assets/icon/ddirc.png is the current mark', () {
