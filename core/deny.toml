@@ -41,6 +41,25 @@ ignore = [
     # REMOVE THIS when an arti release accepts `rusqlite` 0.41 or later, and
     # bump `rusqlite` in `core/Cargo.toml` with it. SECURITY.md lists it too.
     { id = "RUSTSEC-2026-0459", reason = "bundled SQLite bug needing a crafted file beside a database; we open only our own; fix blocked by arti's rusqlite cap" },
+    # `chrono` is marked unmaintained, all versions, with no patched release: it
+    # is a notice about the project and not about a flaw anyone has found. We do
+    # not depend on it ourselves. It comes in through `xmpp-parsers` (its
+    # `date.rs` reads the date strings in XMPP stanzas with it, so it does see
+    # text a server chose) and through `irc` (the connection's own clock). That is
+    # the reason this is not simply dismissed: if a parsing bug is ever found in
+    # it, there will be nobody to fix it, and what it parses is wire input. The
+    # advisory names `jiff` and `time` as replacements, and neither can be
+    # swapped in from here, because the dates are read inside those two crates.
+    # REMOVE THIS when `xmpp-parsers` and `irc` stop depending on `chrono`, or
+    # when a maintained release of it exists.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no known flaw; reached via xmpp-parsers and irc; replace when they move" },
+    # `humantime` is on the list only because it wraps `chrono`, and carries the
+    # same notice. Pulled in only by arti's crates (`humantime-serde` in the
+    # configuration of `tor-circmgr`, `tor-dirmgr` and others, and `retry-error`),
+    # which is what it is for: reading and printing durations. What each of them
+    # feeds it has not been audited here. Moves with arti, like the other entries.
+    # REMOVE THIS when RUSTSEC-2026-0543 goes, or when arti drops `humantime`.
+    { id = "RUSTSEC-2026-0542", reason = "unmaintained only because it wraps chrono; durations in arti's own config; moves with arti" },
 ]
 
 [licenses]
