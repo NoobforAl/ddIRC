@@ -8,8 +8,8 @@ import '../../rust/api/client.dart' as core;
 import '../../rust/api/types.dart' as rust;
 import '../../text/visible.dart';
 import '../../theme.dart';
-import '../motion.dart';
-import '../touchable.dart';
+import '../design/motion.dart';
+import '../design/touchable.dart';
 import 'settings_chrome.dart';
 
 /// What a `.irc` file or a scanned QR code named, waiting to be saved.

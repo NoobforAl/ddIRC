@@ -26,14 +26,14 @@ import 'src/model/tor.dart';
 import 'src/model/workspace.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/theme.dart';
-import 'src/ui/app_lock_gate.dart';
-import 'src/ui/background.dart';
-import 'src/ui/boot_screen.dart';
-import 'src/ui/notification_router.dart';
-import 'src/ui/system_bars.dart';
-import 'src/ui/window_chrome.dart';
-import 'src/ui/workspace_screen.dart';
-import 'src/ui/agent_approval_sheet.dart';
+import 'src/ui/shell/app_lock_gate.dart';
+import 'src/ui/platform/background.dart';
+import 'src/ui/shell/boot_screen.dart';
+import 'src/ui/platform/notification_router.dart';
+import 'src/ui/shell/system_bars.dart';
+import 'src/ui/shell/window_chrome.dart';
+import 'src/ui/shell/workspace_screen.dart';
+import 'src/ui/shell/agent_approval_sheet.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();

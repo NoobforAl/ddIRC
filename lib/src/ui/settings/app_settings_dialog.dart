@@ -7,10 +7,10 @@ import '../../model/log.dart';
 import '../../model/proxy.dart';
 import '../../model/settings.dart';
 import '../../version.dart';
-import '../background.dart';
-import '../background_android.dart';
-import '../motion.dart';
-import '../notifier.dart'
+import '../platform/background.dart';
+import '../platform/background_android.dart';
+import '../design/motion.dart';
+import '../platform/notifier.dart'
     show
         NotificationBlock,
         notificationBlock,
@@ -60,13 +60,14 @@ String get _backgroundSwitchLabel =>
 /// other half sits at the top of it under its own heading, and the index row
 /// says which way it is set so that nobody has to open the page to find out.
 enum _Page {
-  appearance('Appearance', 'How the app looks and how much it says'),
+  appearance('Appearance', 'How it looks, and how much it says'),
   connection('Connection', 'How and where ddIRC connects'),
-  notifications(
-    'Notifications',
-    'Staying connected while you are elsewhere, and hearing about it',
-  ),
-  privacy('Privacy', 'What is written down, and what is always on');
+  // Short enough for the header on a phone. The header gives its subtitle one
+  // line and ellipsises the rest, and the longer wording ("...while you are
+  // elsewhere, and hearing about it") was cut at "hearin…" on a 720 px wide
+  // screen, which reads as a bug in a place that is supposed to be a label.
+  notifications('Notifications', 'Staying connected, and hearing about it'),
+  privacy('Privacy', 'What is kept, and what is always on');
 
   const _Page(this.label, this.subtitle);
 

@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../model/session.dart';
 import '../../rust/api/types.dart';
 import '../../theme.dart';
-import '../motion.dart';
-import '../touchable.dart';
+import '../design/motion.dart';
+import '../design/touchable.dart';
 import 'settings_chrome.dart';
 
 /// What the server has, so a channel can be chosen rather than typed.

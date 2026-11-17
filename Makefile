@@ -123,7 +123,7 @@ help:
 	@echo "  make test-installer-linux   install, upgrade and uninstall it in a temp home"
 	@echo "  make build-linux|build-macos|build-ios   the other hosts"
 	@echo "  make codegen  regenerate the Dart bindings from the Rust API"
-	@echo "  make icons    redraw the app icons from lib/src/ui/mark_spec.dart"
+	@echo "  make icons    redraw the app icons from lib/src/ui/design/mark_spec.dart"
 	@echo "  make outdated which Dart and Rust dependencies have newer versions"
 	@echo "  make clean    drop build output for both halves"
 	@echo ""
